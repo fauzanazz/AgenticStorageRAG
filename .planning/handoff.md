@@ -164,16 +164,41 @@ All 7 tasks complete. Commit: `4214563`
 - Backend: 228/228 passing, 90% overall coverage
 - Frontend: 3/3 passing, build verified
 
+### Phase 3: Build -- Wave 6 (COMPLETE)
+All 6 tasks complete. Commit: `7a96b11`
+
+**Backend ingestion:**
+- IngestionJob model with lifecycle tracking (pending -> scanning -> processing -> completed/failed/cancelled)
+- SourceConnector ABC interface for extensible source integrations
+- GoogleDriveConnector: OAuth2 refresh token auth, file listing, download
+  - Read-only (drive.readonly scope), owner-only, no user-facing OAuth
+  - Supports PDF, DOCX, Google Docs (exported as DOCX)
+- IngestionSwarm: parallel processing with bounded concurrency (5 workers)
+  - Authenticates -> scans -> filters already-ingested -> downloads -> processes -> builds KG
+  - Deduplication by Drive file ID in document metadata
+- IngestionService: job CRUD, trigger (prevents concurrent), cancel
+- Admin-only router with is_admin guard: trigger, list, get, cancel
+- Custom exceptions for all failure modes
+- 34 ingestion tests (all passing)
+
+**Frontend admin panel:**
+- useIngestion hook: fetchJobs, triggerIngestion, cancelJob
+- Admin ingestion page: trigger buttons, job list, progress bars, status badges, auto-refresh
+- Admin section added to sidebar navigation
+
+**Test results:**
+- Backend: 262/262 passing, 91% overall coverage
+- Frontend: 3/3 passing, build verified
+
 ## What's Next
 
-### Wave 6: Ingestion Domain (Google Drive)
+### Wave 7: Polish + Production Readiness
 Priority order:
-1. Task 6.1: Google OAuth2 flow (owner-only, read-only, drive.readonly scope)
-2. Task 6.2: Google Drive client (list files, download, read-only)
-3. Task 6.3: Drive ingestion service + agent swarm
-4. Task 6.4: Admin-only ingestion router (trigger/status)
-5. Task 6.5: Admin panel in frontend (status dashboard)
-6. Task 6.6: Tests
+1. Task 7.1: Error handling audit (all domains)
+2. Task 7.2: Integration tests (end-to-end flows)
+3. Task 7.3: Security audit (input validation, auth edge cases)
+4. Task 7.4: Performance review (N+1 queries, indexing)
+5. Task 7.5: Deploy pipeline (ECR, Vercel, VPS)
 
 ## Verify Current State
 ```bash
