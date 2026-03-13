@@ -31,10 +31,6 @@ All 9 tasks complete. Initial commit: `68aace8`
 - .env.example with all env vars documented
 - Domain README breadcrumbs for AI navigation
 
-**Test results:**
-- Backend: 3/3 passing (health endpoint), 93% coverage
-- Frontend: 1/1 passing (home page render)
-
 ### Phase 3: Build -- Wave 1 (COMPLETE)
 All 8 tasks complete. Commit: `a308331`
 
@@ -50,26 +46,58 @@ All 8 tasks complete. Commit: `a308331`
 - Alembic: async migration setup with env.py and script template
 - Lifespan: startup/shutdown for all external connections
 
+### Phase 3: Build -- Wave 2 (COMPLETE)
+All 8 tasks complete. Commit: `c24df58`
+
+**Backend auth:**
+- User model (SQLAlchemy) with UUID primary key, email unique index
+- Password hashing with bcrypt (direct library, Python 3.14 compatible)
+- JWT access + refresh tokens with configurable expiry (PyJWT)
+- Auth service (register, login, refresh, get_current_user)
+- Auth router: POST /auth/register, POST /auth/login, POST /auth/refresh, GET /auth/me
+- Auth dependency: get_current_user for protected routes
+- Custom exceptions: DuplicateEmail, InvalidCredentials, InvalidToken
+- Interface-based design: IAuthService ABC
+- 41 auth domain tests (all passing)
+
+**Frontend dashboard:**
+- AuthProvider context with localStorage token management
+- Login page with form validation and API error display
+- Register page with password confirmation
+- Dashboard layout with sidebar (protected route, redirects to /login)
+- App sidebar with nav items (Dashboard, Documents, KG, Chat, Settings)
+- Mobile header with sidebar trigger (mobile-first responsive)
+- Dashboard home page with quick actions grid + stats placeholders
+- Placeholder pages for Documents, Knowledge, Chat, Settings
+- Providers wrapper for client-side context
+- shadcn v4 render prop pattern (not asChild)
+
+**Contracts:**
+- OpenAPI spec updated with all 4 auth endpoints + request/response schemas
+
 **Test results:**
-- Backend: 58/58 passing, 88% overall coverage
-- Frontend: 1/1 passing
+- Backend: 99/99 passing, 93% overall coverage
+- Frontend: 3/3 passing, build verified
 
 ## What's Next
 
-### Wave 2: Auth Domain
+### Wave 3: Documents Domain
 Priority order:
-1. Task 2.1: User model (SQLAlchemy) + Alembic migration
-2. Task 2.2: Password hashing service (passlib + bcrypt)
-3. Task 2.3: JWT token service (create/verify access + refresh tokens)
-4. Task 2.4: Auth service (register, login, refresh, me)
-5. Task 2.5: Auth router (POST /register, POST /login, POST /refresh, GET /me)
-6. Task 2.6: Auth dependency (get_current_user for protected routes)
-7. Task 2.7: Frontend dashboard shell (sidebar, header, auth pages)
+1. Task 3.1: Document model (SQLAlchemy) + migration
+2. Task 3.2: DocumentProcessor interface (ABC)
+3. Task 3.3: PDFProcessor implementation
+4. Task 3.4: DOCXProcessor implementation
+5. Task 3.5: Document service (upload, list, get, delete)
+6. Task 3.6: Document router (REST endpoints)
+7. Task 3.7: Background processing (chunking, embedding via worker)
+8. Task 3.8: 7-day TTL expiry cleanup job
+9. Task 3.9: Frontend documents page (upload UI, file list, status)
+10. Task 3.10: Tests
 
 ## Verify Current State
 ```bash
 cd /Users/enjat/Github/dingdong-rag
 source backend/.venv/bin/activate && cd backend && python -m pytest -v
-cd ../frontend && npm run test -- --run
+cd ../frontend && npm run test -- --run && npm run build
 git log --oneline -5
 ```
