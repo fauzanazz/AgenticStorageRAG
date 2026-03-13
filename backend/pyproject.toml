@@ -26,6 +26,9 @@ dependencies = [
     "pypdf>=5.1.0",
     "python-docx>=1.1.0",
     "tiktoken>=0.8.0",
+    "google-auth>=2.36.0",
+    "google-auth-oauthlib>=1.2.0",
+    "google-api-python-client>=2.160.0",
 ]
 
 [project.optional-dependencies]

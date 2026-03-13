@@ -9,6 +9,7 @@ import {
   Network,
   Settings,
   LogOut,
+  Database,
 } from "lucide-react";
 import {
   Sidebar,
@@ -35,6 +36,10 @@ const NAV_ITEMS = [
 
 const SETTINGS_ITEMS = [
   { title: "Settings", href: "/settings", icon: Settings },
+] as const;
+
+const ADMIN_ITEMS = [
+  { title: "Ingestion", href: "/admin/ingestion", icon: Database },
 ] as const;
 
 export function AppSidebar() {
@@ -83,6 +88,25 @@ export function AppSidebar() {
           <SidebarGroupContent>
             <SidebarMenu>
               {SETTINGS_ITEMS.map((item) => (
+                <SidebarMenuItem key={item.href}>
+                  <SidebarMenuButton
+                    render={<Link href={item.href} />}
+                    isActive={pathname.startsWith(item.href)}
+                  >
+                    <item.icon className="size-4" />
+                    <span>{item.title}</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarGroup>
+          <SidebarGroupLabel>Admin</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {ADMIN_ITEMS.map((item) => (
                 <SidebarMenuItem key={item.href}>
                   <SidebarMenuButton
                     render={<Link href={item.href} />}
