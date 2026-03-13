@@ -1,0 +1,251 @@
+"""Tests for auth router (API endpoints)."""
+
+import uuid
+from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+from httpx import AsyncClient, ASGITransport
+from fastapi import FastAPI
+
+from app.dependencies import get_db
+from app.domain.auth.exceptions import (
+    EmailAlreadyExistsError,
+    InactiveUserError,
+    InvalidCredentialsError,
+    InvalidTokenError,
+)
+from app.domain.auth.router import router, _get_auth_service
+from app.domain.auth.schemas import AuthResponse, TokenResponse, UserResponse
+
+
+def _create_test_app(mock_service: AsyncMock | None = None) -> FastAPI:
+    """Create a minimal FastAPI app with the auth router and overridden deps."""
+    app = FastAPI()
+    app.include_router(router, prefix="/api/v1")
+
+    # Override the DB dependency to avoid needing a real database
+    async def mock_db():
+        yield AsyncMock()
+
+    app.dependency_overrides[get_db] = mock_db
+
+    # Override the auth service if provided
+    if mock_service is not None:
+        app.dependency_overrides[_get_auth_service] = lambda: mock_service
+
+    return app
+
+
+def _make_auth_response(
+    email: str = "test@example.com",
+    full_name: str = "Test User",
+) -> AuthResponse:
+    """Create a mock AuthResponse for testing."""
+    return AuthResponse(
+        user=UserResponse(
+            id=uuid.uuid4(),
+            email=email,
+            full_name=full_name,
+            is_active=True,
+            is_admin=False,
+            created_at=datetime.now(timezone.utc),
+        ),
+        tokens=TokenResponse(
+            access_token="mock_access",
+            refresh_token="mock_refresh",
+            expires_in=1800,
+        ),
+    )
+
+
+class TestRegisterEndpoint:
+    """Tests for POST /auth/register."""
+
+    @pytest.mark.asyncio
+    async def test_register_success(self) -> None:
+        """Should return 201 with auth response on success."""
+        mock_service = AsyncMock()
+        mock_service.register.return_value = _make_auth_response()
+
+        app = _create_test_app(mock_service)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.post(
+                "/api/v1/auth/register",
+                json={
+                    "email": "new@example.com",
+                    "password": "securepassword",
+                    "full_name": "New User",
+                },
+            )
+
+        assert response.status_code == 201
+        data = response.json()
+        assert "user" in data
+        assert "tokens" in data
+        assert data["tokens"]["access_token"] == "mock_access"
+
+    @pytest.mark.asyncio
+    async def test_register_duplicate_email_returns_409(self) -> None:
+        """Should return 409 for duplicate email."""
+        mock_service = AsyncMock()
+        mock_service.register.side_effect = EmailAlreadyExistsError("taken@example.com")
+
+        app = _create_test_app(mock_service)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.post(
+                "/api/v1/auth/register",
+                json={
+                    "email": "taken@example.com",
+                    "password": "password123",
+                    "full_name": "Dup User",
+                },
+            )
+
+        assert response.status_code == 409
+
+    @pytest.mark.asyncio
+    async def test_register_short_password_returns_422(self) -> None:
+        """Should return 422 for password shorter than 8 chars."""
+        app = _create_test_app(AsyncMock())
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.post(
+                "/api/v1/auth/register",
+                json={
+                    "email": "test@example.com",
+                    "password": "short",
+                    "full_name": "User",
+                },
+            )
+
+        assert response.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_register_invalid_email_returns_422(self) -> None:
+        """Should return 422 for invalid email format."""
+        app = _create_test_app(AsyncMock())
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.post(
+                "/api/v1/auth/register",
+                json={
+                    "email": "not-an-email",
+                    "password": "password123",
+                    "full_name": "User",
+                },
+            )
+
+        assert response.status_code == 422
+
+
+class TestLoginEndpoint:
+    """Tests for POST /auth/login."""
+
+    @pytest.mark.asyncio
+    async def test_login_success(self) -> None:
+        """Should return 200 with auth response on success."""
+        mock_service = AsyncMock()
+        mock_service.login.return_value = _make_auth_response()
+
+        app = _create_test_app(mock_service)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.post(
+                "/api/v1/auth/login",
+                json={"email": "test@example.com", "password": "password123"},
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["tokens"]["access_token"] == "mock_access"
+
+    @pytest.mark.asyncio
+    async def test_login_invalid_credentials_returns_401(self) -> None:
+        """Should return 401 for wrong email/password."""
+        mock_service = AsyncMock()
+        mock_service.login.side_effect = InvalidCredentialsError()
+
+        app = _create_test_app(mock_service)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.post(
+                "/api/v1/auth/login",
+                json={"email": "wrong@example.com", "password": "wrong"},
+            )
+
+        assert response.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_login_inactive_user_returns_403(self) -> None:
+        """Should return 403 for inactive user."""
+        mock_service = AsyncMock()
+        mock_service.login.side_effect = InactiveUserError()
+
+        app = _create_test_app(mock_service)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.post(
+                "/api/v1/auth/login",
+                json={"email": "inactive@example.com", "password": "pass"},
+            )
+
+        assert response.status_code == 403
+
+
+class TestRefreshEndpoint:
+    """Tests for POST /auth/refresh."""
+
+    @pytest.mark.asyncio
+    async def test_refresh_success(self) -> None:
+        """Should return 200 with new tokens."""
+        mock_service = AsyncMock()
+        mock_service.refresh_tokens.return_value = TokenResponse(
+            access_token="new_access",
+            refresh_token="new_refresh",
+            expires_in=1800,
+        )
+
+        app = _create_test_app(mock_service)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.post(
+                "/api/v1/auth/refresh",
+                json={"refresh_token": "valid_refresh"},
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["access_token"] == "new_access"
+
+    @pytest.mark.asyncio
+    async def test_refresh_invalid_token_returns_401(self) -> None:
+        """Should return 401 for invalid refresh token."""
+        mock_service = AsyncMock()
+        mock_service.refresh_tokens.side_effect = InvalidTokenError()
+
+        app = _create_test_app(mock_service)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.post(
+                "/api/v1/auth/refresh",
+                json={"refresh_token": "invalid_token"},
+            )
+
+        assert response.status_code == 401
+
+
+class TestMeEndpoint:
+    """Tests for GET /auth/me."""
+
+    @pytest.mark.asyncio
+    async def test_me_without_token_returns_401(self) -> None:
+        """Should return 401 when no Authorization header is provided."""
+        app = _create_test_app(AsyncMock())
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.get("/api/v1/auth/me")
+
+        assert response.status_code == 401

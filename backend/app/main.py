@@ -19,6 +19,7 @@ from app.infra.redis_client import redis_client
 from app.infra.storage import storage_client
 from app.infra.llm import llm_provider
 from app.infra.middleware import RequestLoggingMiddleware
+from app.domain.auth.router import router as auth_router
 
 logger = logging.getLogger(__name__)
 
@@ -121,8 +122,10 @@ def create_app() -> FastAPI:
             },
         }
 
-    # TODO: Include domain routers
-    # app.include_router(auth_router, prefix=settings.api_prefix)
+    # Domain routers
+    app.include_router(auth_router, prefix=settings.api_prefix)
+
+    # TODO: Include remaining domain routers
     # app.include_router(documents_router, prefix=settings.api_prefix)
     # app.include_router(knowledge_router, prefix=settings.api_prefix)
     # app.include_router(agents_router, prefix=settings.api_prefix)
