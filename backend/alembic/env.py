@@ -14,11 +14,11 @@ from app.config import get_settings
 from app.infra.database import Base
 
 # Import all domain models here so Alembic can detect them
-# TODO: Uncomment as domains are implemented
-# from app.domain.auth.models import *  # noqa: F401, F403
-# from app.domain.documents.models import *  # noqa: F401, F403
-# from app.domain.knowledge.models import *  # noqa: F401, F403
-# from app.domain.ingestion.models import *  # noqa: F401, F403
+from app.domain.auth.models import *  # noqa: F401, F403
+from app.domain.documents.models import *  # noqa: F401, F403
+from app.domain.knowledge.models import *  # noqa: F401, F403
+from app.domain.agents.models import *  # noqa: F401, F403
+from app.domain.ingestion.models import *  # noqa: F401, F403
 
 # Alembic Config object
 config = context.config
@@ -32,7 +32,7 @@ target_metadata = Base.metadata
 
 # Override sqlalchemy.url from app settings
 settings = get_settings()
-config.set_main_option("sqlalchemy.url", settings.database_url.replace("+asyncpg", ""))
+config.set_main_option("sqlalchemy.url", settings.database_url)
 
 
 def run_migrations_offline() -> None:
@@ -41,6 +41,9 @@ def run_migrations_offline() -> None:
     Generates SQL script without connecting to the database.
     """
     url = config.get_main_option("sqlalchemy.url")
+    # Offline mode uses sync driver -- strip asyncpg
+    if url:
+        url = url.replace("+asyncpg", "")
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -62,12 +65,15 @@ def do_run_migrations(connection):  # type: ignore[no-untyped-def]
 async def run_async_migrations() -> None:
     """Run migrations in 'online' mode with async engine."""
     configuration = config.get_section(config.config_ini_section, {})
-    configuration["sqlalchemy.url"] = settings.database_url.replace("+asyncpg", "")
+    configuration["sqlalchemy.url"] = settings.database_url
 
     connectable = async_engine_from_config(
         configuration,
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        # Supabase uses pgbouncer in transaction mode, which doesn't support
+        # prepared statements. Disable asyncpg's statement cache.
+        connect_args={"statement_cache_size": 0, "prepared_statement_cache_size": 0},
     )
 
     async with connectable.connect() as connection:
