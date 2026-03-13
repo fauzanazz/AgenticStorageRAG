@@ -94,3 +94,26 @@ async def get_current_user_id(
         )
 
     return uuid.UUID(payload["sub"])
+
+
+async def get_current_user(
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: AsyncSession = Depends(get_db),
+) -> "User":
+    """Get the full current user object from the database.
+
+    Usage:
+        @router.get("/protected")
+        async def protected(user: User = Depends(get_current_user)):
+            ...
+    """
+    from app.domain.auth.models import User
+
+    result = await db.get(User, user_id)
+    if not result:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return result
