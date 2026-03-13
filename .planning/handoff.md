@@ -190,20 +190,55 @@ All 6 tasks complete. Commit: `7a96b11`
 - Backend: 262/262 passing, 91% overall coverage
 - Frontend: 3/3 passing, build verified
 
+### Phase 3: Build -- Wave 7 (COMPLETE)
+All 6 tasks complete. Commit: `2364eff`
+
+**Error handling audit (7.1):**
+- Global exception handler in main.py
+- Graceful Redis enqueue failure in documents router
+- Pagination validation (ge=1, le=100) on all list endpoints
+- Defensive JSON parsing in agents router (/message endpoint)
+- logger.exception for full tracebacks, complete_with_retry for LLM calls
+- Logging added to auth service and all routers
+
+**Integration tests (7.2):**
+- Auth flow: email/password validation, protected endpoints, invalid tokens (6 tests)
+- Documents flow: upload validation, pagination bounds, 404 handling (4 tests)
+- Chat flow: conversation CRUD, validation, empty states (6 tests)
+- 16 integration tests total
+
+**Security audit (7.3):**
+- CORS tightened: configurable methods/headers (no more wildcards)
+- Production Dockerfile: non-root user (appuser), minimal deps, healthcheck
+
+**Performance review (7.4):**
+- Added missing indexes: conversations.user_id, messages.conversation_id
+- N+1 query fix: list_conversations uses subquery join for message counts (1 query instead of N+1)
+
+**Deploy pipeline (7.5):**
+- deploy.yml: ECR build/push, Trivy scan, VPS SSH deploy, Vercel frontend
+- Production Dockerfile: multi-stage build, non-root, healthcheck, access logging
+
+**Test results:**
+- Backend: 278/278 passing, 91% overall coverage
+- Frontend: 3/3 passing, build verified
+
 ## What's Next
 
-### Wave 7: Polish + Production Readiness
-Priority order:
-1. Task 7.1: Error handling audit (all domains)
-2. Task 7.2: Integration tests (end-to-end flows)
-3. Task 7.3: Security audit (input validation, auth edge cases)
-4. Task 7.4: Performance review (N+1 queries, indexing)
-5. Task 7.5: Deploy pipeline (ECR, Vercel, VPS)
+### All 8 Waves Complete
+
+The project is fully scaffolded and feature-complete for MVP. Next steps:
+1. Create a `.env` from `.env.example` with real credentials
+2. Run `docker compose up` to start all services
+3. Run `alembic upgrade head` to create database tables
+4. Test the full flow: register → upload → process → search → chat
+5. Trigger Google Drive ingestion via admin panel
+6. Deploy: push to GitHub → CI/CD → ECR/Vercel
 
 ## Verify Current State
 ```bash
 cd /Users/enjat/Github/dingdong-rag
 source backend/.venv/bin/activate && cd backend && python -m pytest -v
 cd ../frontend && npm run test -- --run && npm run build
-git log --oneline -5
+git log --oneline -10
 ```
