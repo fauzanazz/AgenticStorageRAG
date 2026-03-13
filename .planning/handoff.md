@@ -35,31 +35,41 @@ All 9 tasks complete. Initial commit: `68aace8`
 - Backend: 3/3 passing (health endpoint), 93% coverage
 - Frontend: 1/1 passing (home page render)
 
+### Phase 3: Build -- Wave 1 (COMPLETE)
+All 8 tasks complete. Commit: `a308331`
+
+**What was built:**
+- Database: async SQLAlchemy engine + session factory for Supabase PostgreSQL
+- Neo4j: async client wrapper with connection pooling, health checks, typed queries (separate `dingdong_rag` DB)
+- Redis: async client with cache ops (get/set/json) and queue ops (enqueue/dequeue)
+- Storage: Supabase Storage client with upload/download/delete, 7-day TTL calc
+- LLM: LiteLLM provider with primary (Claude) + fallback (OpenAI) + retry logic
+- Worker: background job processor with handler registry, graceful shutdown
+- Middleware: request logging with timing
+- DI: FastAPI dependency injection wiring for all infra clients
+- Alembic: async migration setup with env.py and script template
+- Lifespan: startup/shutdown for all external connections
+
+**Test results:**
+- Backend: 58/58 passing, 88% overall coverage
+- Frontend: 1/1 passing
+
 ## What's Next
 
-### Wave 1: Infrastructure Layer
+### Wave 2: Auth Domain
 Priority order:
-1. Task 1.1: Supabase database setup + SQLAlchemy async engine
-2. Task 1.2: Alembic migrations setup
-3. Task 1.3: Neo4j client wrapper (separate `dingdong_rag` database)
-4. Task 1.4: Redis client
-5. Task 1.5: Supabase Storage client (7-day TTL)
-6. Task 1.6: LiteLLM provider setup
-7. Task 1.7: Background worker (Redis queue) -- depends on 1.4
-8. Task 1.8: DI container wiring -- depends on all above
-
-## Key Decisions
-- Python 3.14.3 on this machine (pyproject.toml set to >=3.12)
-- Modular Monolith: single codebase, two processes (API + worker)
-- Google Drive: OAuth2 read-only, owner-only, admin-triggered ingestion
-- Neo4j: MUST use separate `dingdong_rag` database (not contaminate research-agentic data)
-- Supabase: Postgres + pgvector + Storage (replaces standalone PG + S3)
-- User uploads expire after 7 days (Supabase Storage TTL + background cleanup)
+1. Task 2.1: User model (SQLAlchemy) + Alembic migration
+2. Task 2.2: Password hashing service (passlib + bcrypt)
+3. Task 2.3: JWT token service (create/verify access + refresh tokens)
+4. Task 2.4: Auth service (register, login, refresh, me)
+5. Task 2.5: Auth router (POST /register, POST /login, POST /refresh, GET /me)
+6. Task 2.6: Auth dependency (get_current_user for protected routes)
+7. Task 2.7: Frontend dashboard shell (sidebar, header, auth pages)
 
 ## Verify Current State
 ```bash
 cd /Users/enjat/Github/dingdong-rag
-source backend/.venv/bin/activate && cd backend && python -m pytest app/test_health.py -v
+source backend/.venv/bin/activate && cd backend && python -m pytest -v
 cd ../frontend && npm run test -- --run
-git log --oneline -3
+git log --oneline -5
 ```
