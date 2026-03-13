@@ -1,0 +1,93 @@
+openapi: "3.1.0"
+info:
+  title: DingDong RAG API
+  version: "0.1.0"
+  description: |
+    Agentic Knowledge Graph RAG system API.
+    This is the contract that the backend implements and the frontend consumes.
+
+servers:
+  - url: http://localhost:8000/api/v1
+    description: Local development
+  - url: https://api.dingdong-rag.com/api/v1
+    description: Production
+
+paths:
+  /health:
+    get:
+      operationId: healthCheck
+      summary: Health check
+      description: Returns the health status of the API and its dependencies.
+      tags:
+        - System
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  # --- Auth endpoints (Wave 2) ---
+  # /auth/register:
+  # /auth/login:
+  # /auth/refresh:
+  # /auth/me:
+
+  # --- Document endpoints (Wave 3) ---
+  # /documents:
+  # /documents/{id}:
+
+  # --- Knowledge endpoints (Wave 4) ---
+  # /knowledge/query:
+  # /knowledge/graph/stats:
+
+  # --- Agent endpoints (Wave 5) ---
+  # /chat:
+  # /chat/ws:
+
+  # --- Ingestion endpoints (Wave 6, admin-only) ---
+  # /admin/ingestion/trigger:
+  # /admin/ingestion/status:
+
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      required:
+        - status
+        - version
+        - environment
+      properties:
+        status:
+          type: string
+          example: healthy
+        version:
+          type: string
+          example: "0.1.0"
+        environment:
+          type: string
+          example: development
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: System
+    description: Health checks and system status
+  - name: Auth
+    description: Authentication and authorization
+  - name: Documents
+    description: File upload and management
+  - name: Knowledge
+    description: Knowledge Graph and retrieval
+  - name: Chat
+    description: Agentic RAG conversation
+  - name: Admin
+    description: Admin-only operations (ingestion)
