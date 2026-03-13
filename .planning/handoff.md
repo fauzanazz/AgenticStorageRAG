@@ -107,18 +107,48 @@ All 10 tasks complete. Commit: `561f1b2`
 - Backend: 141/141 passing, 90% overall coverage
 - Frontend: 3/3 passing, build verified
 
+### Phase 3: Build -- Wave 4 (COMPLETE)
+All 8 tasks complete. Commit: `20b8f35`
+
+**Backend knowledge:**
+- DocumentEmbedding model: stores vector embeddings for document chunks (pgvector ARRAY(Float))
+- KnowledgeEntity + KnowledgeRelationship models: PostgreSQL shadow records for Neo4j graph data
+- IGraphService, IVectorService, IHybridRetriever, IKGBuilder interfaces (ABCs)
+- GraphService: entity/relationship CRUD with dual-write pattern (Neo4j + PostgreSQL)
+- VectorService: embedding generation via LiteLLM (text-embedding-3-small) + pgvector cosine similarity
+- KGBuilder: LLM-powered extraction with JSON parsing, deduplication by name:type
+- HybridRetriever: configurable vector/graph weight blending, graceful degradation on failures
+- Knowledge router: POST /knowledge/entities, GET /knowledge/entities/{id}, POST /knowledge/relationships
+- Search endpoints: POST /knowledge/search/vector, POST /knowledge/search/hybrid
+- Visualization endpoint: GET /knowledge/graph (filterable by document_id, entity_types, limit)
+- Stats endpoint: GET /knowledge/stats
+- get_current_user dependency added (returns full User object from DB)
+- Custom exceptions: EntityNotFound, EmbeddingError, GraphBuildError, GraphQueryError, DuplicateEntity
+- Neo4j label sanitization: prevents injection via entity types
+- 46 knowledge tests (all passing)
+
+**Frontend knowledge:**
+- Knowledge types: entities, relationships, graph visualization, stats, search results
+- useKnowledge hook: fetchGraph, fetchStats, hybrid search with apiClient methods
+- GraphCanvas component: force-directed canvas visualization with entity type colors (Person=blue, Org=green, Concept=purple, Tech=amber, Event=red, Location=cyan)
+- StatsCard component: entity/relationship/embedding counts with type breakdown badges
+- Knowledge page: graph view tab (canvas) + search tab (result cards with source badges and scores)
+
+**Test results:**
+- Backend: 187/187 passing, 90% overall coverage
+- Frontend: 3/3 passing, build verified
+
 ## What's Next
 
-### Wave 4: Knowledge Domain
+### Wave 5: Agents Domain
 Priority order:
-1. Task 4.1: KG models (nodes, edges) + vector embedding model
-2. Task 4.2: KGBuilder interface (ABC)
-3. Task 4.3: Neo4j graph service (entity/relationship extraction + storage)
-4. Task 4.4: pgvector service (chunk embedding + similarity search)
-5. Task 4.5: Hybrid retriever (combines graph + vector results)
-6. Task 4.6: Knowledge router (query, graph stats)
-7. Task 4.7: Frontend knowledge graph visualization
-8. Task 4.8: Tests
+1. Task 5.1: Agent models + schemas + exceptions
+2. Task 5.2: Agent tools (graph_search, vector_search, document_lookup)
+3. Task 5.3: RAG agent with autonomous tool selection (LangChain)
+4. Task 5.4: Streaming chat with SSE
+5. Task 5.5: Chat router (conversation management, message history)
+6. Task 5.6: Frontend chat page (streaming messages, citations)
+7. Task 5.7: Tests
 
 ## Verify Current State
 ```bash
