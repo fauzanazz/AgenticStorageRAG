@@ -74,6 +74,57 @@ class ApiClient {
     return this.request<T>(path, { method: "DELETE" });
   }
 
+  /** Stream a POST request as Server-Sent Events */
+  async stream(
+    path: string,
+    body?: unknown,
+    onChunk?: (data: string) => void
+  ): Promise<void> {
+    const token = this.getToken();
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+
+    const response = await fetch(`${this.baseUrl}${path}`, {
+      method: "POST",
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({
+        detail: response.statusText,
+      }));
+      throw new ApiError(response.status, error.detail || "Unknown error");
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) return;
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        if (line.startsWith("data: ")) {
+          const data = line.slice(6);
+          if (data === "[DONE]") return;
+          onChunk?.(data);
+        }
+      }
+    }
+  }
+
   /** Upload a file with multipart/form-data */
   async upload<T>(path: string, formData: FormData): Promise<T> {
     const token = this.getToken();

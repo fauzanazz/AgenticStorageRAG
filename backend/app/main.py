@@ -22,6 +22,7 @@ from app.infra.middleware import RequestLoggingMiddleware
 from app.domain.auth.router import router as auth_router
 from app.domain.documents.router import router as documents_router
 from app.domain.knowledge.router import router as knowledge_router
+from app.domain.agents.router import router as agents_router
 
 logger = logging.getLogger(__name__)
 
@@ -128,9 +129,9 @@ def create_app() -> FastAPI:
     app.include_router(auth_router, prefix=settings.api_prefix)
     app.include_router(documents_router, prefix=settings.api_prefix)
     app.include_router(knowledge_router, prefix=settings.api_prefix)
+    app.include_router(agents_router, prefix=settings.api_prefix)
 
     # TODO: Include remaining domain routers
-    # app.include_router(agents_router, prefix=settings.api_prefix)
     # app.include_router(ingestion_router, prefix=settings.api_prefix)
 
     return app
