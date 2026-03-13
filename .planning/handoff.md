@@ -79,20 +79,46 @@ All 8 tasks complete. Commit: `c24df58`
 - Backend: 99/99 passing, 93% overall coverage
 - Frontend: 3/3 passing, build verified
 
+### Phase 3: Build -- Wave 3 (COMPLETE)
+All 10 tasks complete. Commit: `561f1b2`
+
+**Backend documents:**
+- Document + DocumentChunk models with full lifecycle status (uploading → processing → ready → failed → expired)
+- DocumentSource enum: UPLOAD vs GOOGLE_DRIVE (base KG)
+- AbstractDocumentProcessor interface (ABC) for extensible file format support
+- PdfProcessor: page-by-page extraction with pypdf, page-level citations
+- DocxProcessor: paragraph + table extraction with heading structure preservation
+- BaseProcessor: shared text chunking with paragraph boundaries + overlap
+- Processor registry: auto-resolves file type to processor (add new format = 1 file + 1 registry entry)
+- DocumentService: upload, process_document, list, get, delete, cleanup_expired
+- Document router: POST /documents, GET /documents, GET /documents/{id}, DELETE /documents/{id}
+- Background jobs: process_document + cleanup_expired handlers (registered with worker)
+- 7-day TTL lifecycle with storage cleanup
+- Custom exceptions: NotFound, UnsupportedType, TooLarge, ProcessingError, Expired
+- 42 documents tests (all passing)
+
+**Frontend documents:**
+- useDocuments hook: list, upload, delete with state management
+- FileUpload component: drag-and-drop + click, file type validation, size limit (50 MB)
+- DocumentList component: status badges, file info, chunk count, delete action
+- Documents page: upload area + file list with real-time status updates
+
+**Test results:**
+- Backend: 141/141 passing, 90% overall coverage
+- Frontend: 3/3 passing, build verified
+
 ## What's Next
 
-### Wave 3: Documents Domain
+### Wave 4: Knowledge Domain
 Priority order:
-1. Task 3.1: Document model (SQLAlchemy) + migration
-2. Task 3.2: DocumentProcessor interface (ABC)
-3. Task 3.3: PDFProcessor implementation
-4. Task 3.4: DOCXProcessor implementation
-5. Task 3.5: Document service (upload, list, get, delete)
-6. Task 3.6: Document router (REST endpoints)
-7. Task 3.7: Background processing (chunking, embedding via worker)
-8. Task 3.8: 7-day TTL expiry cleanup job
-9. Task 3.9: Frontend documents page (upload UI, file list, status)
-10. Task 3.10: Tests
+1. Task 4.1: KG models (nodes, edges) + vector embedding model
+2. Task 4.2: KGBuilder interface (ABC)
+3. Task 4.3: Neo4j graph service (entity/relationship extraction + storage)
+4. Task 4.4: pgvector service (chunk embedding + similarity search)
+5. Task 4.5: Hybrid retriever (combines graph + vector results)
+6. Task 4.6: Knowledge router (query, graph stats)
+7. Task 4.7: Frontend knowledge graph visualization
+8. Task 4.8: Tests
 
 ## Verify Current State
 ```bash
