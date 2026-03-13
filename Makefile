@@ -1,7 +1,7 @@
 # DingDong RAG - Makefile
 # Run `make help` to see all available commands.
 
-.PHONY: help dev dev-supabase dev-backend dev-frontend test test-backend test-frontend lint lint-backend lint-frontend build migrate migrate-local migration clean down logs ps
+.PHONY: help dev dev-supabase dev-backend dev-frontend test test-backend test-frontend lint lint-backend lint-frontend build migrate migrate-local migration seed clean down logs ps
 
 # Default
 help: ## Show this help message
@@ -56,6 +56,9 @@ migrate-local: ## Run migrations against local Docker Postgres
 
 migration: ## Create a new migration (usage: make migration msg="add users table")
 	cd backend && alembic revision --autogenerate -m "$(msg)"
+
+seed: ## Seed dev accounts (admin@dingdong.dev / admin123, user@dingdong.dev / user123)
+	cd backend && python -m app.scripts.seed
 
 # --- Build ---
 build: ## Build all Docker images
