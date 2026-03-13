@@ -138,17 +138,42 @@ All 8 tasks complete. Commit: `20b8f35`
 - Backend: 187/187 passing, 90% overall coverage
 - Frontend: 3/3 passing, build verified
 
+### Phase 3: Build -- Wave 5 (COMPLETE)
+All 7 tasks complete. Commit: `4214563`
+
+**Backend agents:**
+- Conversation + ChatMessage models (SQLAlchemy) with UUID PKs
+- RAG agent with autonomous tool selection (graph/vector/hybrid search)
+- Multi-turn reasoning loop: analyze query -> select tools -> execute -> synthesize
+- SSE streaming: token-by-token, citations, tool calls, errors, done events
+- Chat service: conversation CRUD, message history, access control
+- Chat router: POST /chat/send (streaming), conversation management endpoints
+- Agent tools: GraphSearchTool, VectorSearchTool, HybridSearchTool (all implement IAgentTool ABC)
+- Custom exceptions: ConversationNotFound, AgentExecutionError, ToolExecutionError
+- 41 agent tests (all passing)
+
+**Frontend chat:**
+- useChat hook: conversation management, SSE streaming, error handling, abort support
+- ChatInput component: auto-resize textarea, Enter to send, Shift+Enter newline, stop button
+- MessageBubble component: user/assistant bubble styling, citation badges, timestamps
+- ConversationList component: sidebar with new/select/delete conversations
+- Chat page: split layout (sidebar + chat), mobile overlay sidebar, empty state with suggestions
+- SSE stream parser added to api-client (data: [DONE] termination)
+
+**Test results:**
+- Backend: 228/228 passing, 90% overall coverage
+- Frontend: 3/3 passing, build verified
+
 ## What's Next
 
-### Wave 5: Agents Domain
+### Wave 6: Ingestion Domain (Google Drive)
 Priority order:
-1. Task 5.1: Agent models + schemas + exceptions
-2. Task 5.2: Agent tools (graph_search, vector_search, document_lookup)
-3. Task 5.3: RAG agent with autonomous tool selection (LangChain)
-4. Task 5.4: Streaming chat with SSE
-5. Task 5.5: Chat router (conversation management, message history)
-6. Task 5.6: Frontend chat page (streaming messages, citations)
-7. Task 5.7: Tests
+1. Task 6.1: Google OAuth2 flow (owner-only, read-only, drive.readonly scope)
+2. Task 6.2: Google Drive client (list files, download, read-only)
+3. Task 6.3: Drive ingestion service + agent swarm
+4. Task 6.4: Admin-only ingestion router (trigger/status)
+5. Task 6.5: Admin panel in frontend (status dashboard)
+6. Task 6.6: Tests
 
 ## Verify Current State
 ```bash
