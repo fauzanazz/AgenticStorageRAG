@@ -171,7 +171,7 @@ class RAGAgent(IRAGAgent):
             )
 
         except Exception as e:
-            logger.error("Agent execution failed: %s", e)
+            logger.exception("Agent execution failed: %s", e)
             yield ChatStreamEvent(
                 event="error",
                 data=json.dumps({"error": str(e)}),
@@ -324,7 +324,7 @@ class RAGAgent(IRAGAgent):
             },
         ]
 
-        response = await self._llm.complete(
+        response = await self._llm.complete_with_retry(
             messages=response_messages,
             temperature=0.3,
             max_tokens=2000,

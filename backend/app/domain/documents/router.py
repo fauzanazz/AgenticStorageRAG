@@ -5,9 +5,10 @@ REST endpoints for document upload, listing, retrieval, and deletion.
 
 from __future__ import annotations
 
+import logging
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user_id, get_db, get_redis, get_storage
@@ -26,6 +27,7 @@ from app.infra.redis_client import RedisClient
 from app.infra.storage import StorageClient
 from app.infra.worker import QUEUE_DOCUMENTS
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/documents", tags=["Documents"])
 
 
@@ -80,15 +82,19 @@ async def upload_document(
             detail=str(e),
         ) from e
 
-    # Queue background processing job
-    await redis.enqueue(
-        QUEUE_DOCUMENTS,
-        {
-            "type": "process_document",
-            "id": str(result.id),
-            "document_id": str(result.id),
-        },
-    )
+    # Queue background processing job -- fail gracefully
+    try:
+        await redis.enqueue(
+            QUEUE_DOCUMENTS,
+            {
+                "type": "process_document",
+                "id": str(result.id),
+                "document_id": str(result.id),
+            },
+        )
+    except Exception:
+        logger.exception("Failed to enqueue document processing: %s", result.id)
+        # Document is uploaded but not queued -- admin can retry manually
 
     return result
 
@@ -99,8 +105,8 @@ async def upload_document(
     summary="List documents",
 )
 async def list_documents(
-    page: int = 1,
-    page_size: int = 20,
+    page: int = Query(1, ge=1, description="Page number (1-based)"),
+    page_size: int = Query(20, ge=1, le=100, description="Items per page (max 100)"),
     user_id: uuid.UUID = Depends(get_current_user_id),
     service: DocumentService = Depends(_get_document_service),
 ) -> DocumentListResponse:

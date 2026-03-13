@@ -7,6 +7,7 @@ the injected SQLAlchemy session.
 
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Any
 
@@ -31,6 +32,8 @@ from app.domain.auth.schemas import (
     UserResponse,
 )
 from app.domain.auth.token import TokenService
+
+logger = logging.getLogger(__name__)
 
 
 class AuthService(AbstractAuthService):
@@ -79,6 +82,8 @@ class AuthService(AbstractAuthService):
         # Generate tokens
         tokens = self._create_token_response(user.id)
 
+        logger.info("User registered: %s (%s)", user.id, data.email)
+
         return AuthResponse(
             user=UserResponse.model_validate(user),
             tokens=tokens,
@@ -108,6 +113,8 @@ class AuthService(AbstractAuthService):
             raise InactiveUserError()
 
         tokens = self._create_token_response(user.id)
+
+        logger.info("User logged in: %s (%s)", user.id, data.email)
 
         return AuthResponse(
             user=UserResponse.model_validate(user),

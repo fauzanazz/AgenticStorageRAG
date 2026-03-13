@@ -10,7 +10,7 @@ import json
 import logging
 import uuid
 
-from sqlalchemy import select, func as sa_func, desc
+from sqlalchemy import select, func as sa_func, desc, literal_column
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -83,34 +83,47 @@ class ChatService(IChatService):
     async def list_conversations(
         self, user_id: uuid.UUID, limit: int = 50
     ) -> list[ConversationResponse]:
-        """List user's conversations, newest first."""
+        """List user's conversations, newest first.
+
+        Uses a single query with subquery-based message count
+        to avoid N+1 queries.
+        """
+        # Subquery for message counts
+        msg_count_subq = (
+            select(
+                Message.conversation_id,
+                sa_func.count(Message.id).label("msg_count"),
+            )
+            .group_by(Message.conversation_id)
+            .subquery()
+        )
+
         stmt = (
-            select(Conversation)
+            select(
+                Conversation,
+                sa_func.coalesce(msg_count_subq.c.msg_count, 0).label("message_count"),
+            )
+            .outerjoin(
+                msg_count_subq,
+                Conversation.id == msg_count_subq.c.conversation_id,
+            )
             .where(Conversation.user_id == user_id)
             .order_by(desc(Conversation.updated_at))
             .limit(limit)
         )
         result = await self._db.execute(stmt)
-        conversations = result.scalars().all()
+        rows = result.all()
 
-        responses = []
-        for conv in conversations:
-            count_stmt = select(sa_func.count(Message.id)).where(
-                Message.conversation_id == conv.id
+        return [
+            ConversationResponse(
+                id=conv.id,
+                title=conv.title,
+                created_at=conv.created_at,
+                updated_at=conv.updated_at,
+                message_count=msg_count,
             )
-            msg_count = (await self._db.execute(count_stmt)).scalar() or 0
-
-            responses.append(
-                ConversationResponse(
-                    id=conv.id,
-                    title=conv.title,
-                    created_at=conv.created_at,
-                    updated_at=conv.updated_at,
-                    message_count=msg_count,
-                )
-            )
-
-        return responses
+            for conv, msg_count in rows
+        ]
 
     async def delete_conversation(
         self, conversation_id: uuid.UUID, user_id: uuid.UUID

@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     # --- API ---
     api_prefix: str = "/api/v1"
     allowed_origins: list[str] = ["http://localhost:3000"]
+    cors_allow_credentials: bool = True
+    cors_allow_methods: list[str] = ["GET", "POST", "PUT", "DELETE", "PATCH"]
+    cors_allow_headers: list[str] = ["Authorization", "Content-Type"]
 
     # --- Auth ---
     jwt_secret_key: str = "change-me-in-production"

@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user, get_db, get_storage
@@ -89,8 +89,8 @@ async def trigger_ingestion(
     summary="List ingestion jobs",
 )
 async def list_jobs(
-    page: int = 1,
-    page_size: int = 20,
+    page: int = Query(1, ge=1, description="Page number (1-based)"),
+    page_size: int = Query(20, ge=1, le=100, description="Items per page (max 100)"),
     _user: "User" = Depends(_require_admin),
     service: IngestionService = Depends(_get_service),
 ) -> IngestionJobListResponse:

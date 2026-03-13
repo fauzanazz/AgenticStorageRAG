@@ -7,7 +7,9 @@ Uses Server-Sent Events (SSE) for streaming agent responses.
 from __future__ import annotations
 
 import json
+import logging
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -39,6 +41,7 @@ from app.domain.knowledge.vector_service import VectorService
 from app.infra.llm import llm_provider
 from app.infra.neo4j_client import neo4j_client
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 
@@ -128,45 +131,56 @@ async def chat_message(
     citations = []
     conversation_id = request.conversation_id
 
-    async for event in agent.chat(request, user.id):
-        if event.event == "token":
-            full_content += event.data
-        elif event.event == "citation":
-            citations.append(json.loads(event.data))
-        elif event.event == "conversation_created":
-            data = json.loads(event.data)
-            conversation_id = uuid.UUID(data["conversation_id"])
-        elif event.event == "error":
-            error_data = json.loads(event.data)
-            raise HTTPException(status_code=500, detail=error_data.get("error", "Agent error"))
+    try:
+        async for event in agent.chat(request, user.id):
+            if event.event == "token":
+                full_content += event.data
+            elif event.event == "citation":
+                try:
+                    citations.append(json.loads(event.data))
+                except json.JSONDecodeError:
+                    logger.warning("Failed to parse citation: %s", event.data)
+            elif event.event == "conversation_created":
+                try:
+                    data = json.loads(event.data)
+                    conversation_id = uuid.UUID(data["conversation_id"])
+                except (json.JSONDecodeError, KeyError, ValueError):
+                    logger.warning("Failed to parse conversation_created event")
+            elif event.event == "error":
+                try:
+                    error_data = json.loads(event.data)
+                    raise HTTPException(status_code=500, detail=error_data.get("error", "Agent error"))
+                except json.JSONDecodeError:
+                    raise HTTPException(status_code=500, detail="Agent error")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Non-streaming chat failed")
+        raise HTTPException(status_code=500, detail="Agent execution failed") from e
 
     if not conversation_id:
         raise HTTPException(status_code=500, detail="No conversation created")
 
-    # Get the last assistant message
-    messages = await chat_service.get_messages(
-        conversation_id, user.id, limit=1
-    )
+    # Get the last assistant message from the conversation
+    try:
+        stmt_messages = await chat_service.get_messages(
+            conversation_id, user.id, limit=100
+        )
+        assistant_messages = [m for m in stmt_messages if m.role == "assistant"]
+        if assistant_messages:
+            return assistant_messages[-1]
+    except (ConversationNotFoundError, ConversationAccessDenied):
+        pass
 
-    # Return the last message (the assistant response we just generated)
-    stmt_messages = await chat_service.get_messages(
-        conversation_id, user.id, limit=100
-    )
-    assistant_messages = [m for m in stmt_messages if m.role == "assistant"]
-    if assistant_messages:
-        return assistant_messages[-1]
-
-    # Fallback: construct response
+    # Fallback: construct response from collected data
     return MessageResponse(
         id=uuid.uuid4(),
         conversation_id=conversation_id,
         role="assistant",
-        content=full_content,
+        content=full_content or "I couldn't generate a response.",
         citations=[],
         token_count=len(full_content) // 4,
-        created_at=__import__("datetime").datetime.now(
-            __import__("datetime").timezone.utc
-        ),
+        created_at=datetime.now(timezone.utc),
     )
 
 

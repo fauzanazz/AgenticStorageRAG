@@ -5,6 +5,7 @@ Endpoints for knowledge graph operations, search, and visualization.
 
 from __future__ import annotations
 
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -35,6 +36,7 @@ from app.domain.knowledge.schemas import (
 from app.domain.knowledge.vector_service import VectorService
 from app.infra.neo4j_client import neo4j_client
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
 

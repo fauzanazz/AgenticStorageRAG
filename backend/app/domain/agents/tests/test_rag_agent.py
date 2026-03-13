@@ -135,7 +135,8 @@ class TestRAGAgentChat:
         synthesis_response.choices = [MagicMock()]
         synthesis_response.choices[0].message.content = "AI stands for Artificial Intelligence."
 
-        mock_llm.complete.side_effect = [planning_response, synthesis_response]
+        mock_llm.complete.side_effect = [planning_response]
+        mock_llm.complete_with_retry.return_value = synthesis_response
 
         request = ChatRequest(message="What is AI?")
         events = []
@@ -159,7 +160,8 @@ class TestRAGAgentChat:
         synthesis_response.choices = [MagicMock()]
         synthesis_response.choices[0].message.content = "Answer."
 
-        mock_llm.complete.side_effect = [planning_response, synthesis_response]
+        mock_llm.complete.side_effect = [planning_response]
+        mock_llm.complete_with_retry.return_value = synthesis_response
 
         request = ChatRequest(
             message="test",
@@ -186,7 +188,8 @@ class TestRAGAgentChat:
         synthesis_response.choices = [MagicMock()]
         synthesis_response.choices[0].message.content = "The answer is simple."
 
-        mock_llm.complete.side_effect = [planning_response, synthesis_response]
+        mock_llm.complete.side_effect = [planning_response]
+        mock_llm.complete_with_retry.return_value = synthesis_response
 
         request = ChatRequest(message="test", conversation_id=uuid.uuid4())
         token_events = []
@@ -227,7 +230,8 @@ class TestRAGAgentChat:
         synthesis_response.choices = [MagicMock()]
         synthesis_response.choices[0].message.content = "Based on the search results..."
 
-        mock_llm.complete.side_effect = [planning_response, synthesis_response]
+        mock_llm.complete.side_effect = [planning_response]
+        mock_llm.complete_with_retry.return_value = synthesis_response
 
         request = ChatRequest(message="test", conversation_id=uuid.uuid4())
         events = []

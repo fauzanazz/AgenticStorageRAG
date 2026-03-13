@@ -37,6 +37,7 @@ class Conversation(Base):
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
+        index=True,
     )
     title: Mapped[str] = mapped_column(
         String(255), nullable=False, default="New conversation"
@@ -68,6 +69,7 @@ class Message(Base):
         UUID(as_uuid=True),
         ForeignKey("conversations.id", ondelete="CASCADE"),
         nullable=False,
+        index=True,
     )
     role: Mapped[str] = mapped_column(
         String(20), nullable=False
