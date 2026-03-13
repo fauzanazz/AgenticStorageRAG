@@ -7,15 +7,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
+# Copy full source first (needed for editable install with hatchling)
 COPY pyproject.toml ./
+COPY app/ ./app/
+
+# Install Python dependencies
 RUN pip install --no-cache-dir -e ".[dev]"
 
-# Copy application code
+# Copy remaining files (alembic, scripts, etc.)
 COPY . .
 
 # --- Development target ---
 FROM base AS development
+EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 
 # --- Production target ---
@@ -31,10 +35,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install only production dependencies
+# Copy full source (needed for editable install)
 COPY pyproject.toml ./
+COPY app/ ./app/
+
+# Install only production dependencies
 RUN pip install --no-cache-dir -e .
 
+# Copy remaining files
 COPY . .
 
 # Own files as non-root user

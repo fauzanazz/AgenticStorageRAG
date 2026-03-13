@@ -1,21 +1,33 @@
 # DingDong RAG - Makefile
 # Run `make help` to see all available commands.
 
-.PHONY: help dev dev-backend dev-frontend test test-backend test-frontend lint lint-backend lint-frontend build migrate migration clean
+.PHONY: help dev dev-supabase dev-backend dev-frontend test test-backend test-frontend lint lint-backend lint-frontend build migrate migrate-local migration clean down logs ps
 
 # Default
 help: ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 # --- Development ---
-dev: ## Start all services (Docker Compose)
-	docker compose up --build
+dev: ## Start full local stack (Postgres + Neo4j + Redis + backend + worker + frontend)
+	docker compose --profile local up --build
 
-dev-backend: ## Start backend with hot-reload
+dev-supabase: ## Start with Supabase DB (Neo4j + Redis + backend + worker + frontend, DB from .env)
+	docker compose --profile supabase up --build
+
+dev-backend: ## Start backend with hot-reload (no Docker)
 	cd backend && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
-dev-frontend: ## Start frontend dev server
+dev-frontend: ## Start frontend dev server (no Docker)
 	cd frontend && npm run dev
+
+down: ## Stop all running services
+	docker compose --profile local --profile supabase down
+
+logs: ## Tail logs from all running services
+	docker compose --profile local --profile supabase logs -f --tail=50
+
+ps: ## Show running service status
+	docker compose --profile local --profile supabase ps
 
 # --- Testing ---
 test: test-backend test-frontend ## Run all tests
@@ -36,15 +48,18 @@ lint-frontend: ## Lint frontend
 	cd frontend && npm run lint
 
 # --- Database ---
-migrate: ## Run database migrations
+migrate: ## Run migrations against Supabase (uses DATABASE_URL from .env)
 	cd backend && alembic upgrade head
+
+migrate-local: ## Run migrations against local Docker Postgres
+	cd backend && DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/dingdong_rag alembic upgrade head
 
 migration: ## Create a new migration (usage: make migration msg="add users table")
 	cd backend && alembic revision --autogenerate -m "$(msg)"
 
 # --- Build ---
 build: ## Build all Docker images
-	docker compose build
+	docker compose --profile local build
 
 build-backend: ## Build backend Docker image
 	docker build -t dingdong-rag-backend ./backend

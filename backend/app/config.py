@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     neo4j_uri: str = "bolt://localhost:7687"
     neo4j_user: str = "neo4j"
     neo4j_password: str = "password"
-    neo4j_database: str = "dingdong_rag"  # Separate from other projects
+    neo4j_database: str = "dingdongrag"  # Separate from other projects (no underscores in Neo4j DB names)
 
     # --- Redis ---
     redis_url: str = "redis://localhost:6379/0"
