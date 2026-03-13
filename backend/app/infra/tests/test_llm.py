@@ -127,6 +127,95 @@ class TestLLMProviderComplete:
             await provider.complete(messages=messages)
 
 
+class TestLLMProviderCompleteWithRetry:
+    """Tests for complete_with_retry."""
+
+    @pytest.mark.asyncio
+    @patch("app.infra.llm.get_settings")
+    @patch("app.infra.llm.acompletion")
+    async def test_retry_succeeds_on_second_attempt(
+        self,
+        mock_acompletion: AsyncMock,
+        mock_get_settings: MagicMock,
+    ) -> None:
+        """complete_with_retry() should succeed after transient failure."""
+        mock_settings = MagicMock()
+        mock_settings.default_model = "anthropic/claude-sonnet-4-20250514"
+        mock_settings.fallback_model = "openai/gpt-4o"
+        mock_get_settings.return_value = mock_settings
+
+        mock_response = MagicMock()
+        # First call: primary fails, fallback fails. Second call: primary succeeds.
+        mock_acompletion.side_effect = [
+            Exception("Transient error"),
+            Exception("Fallback also failed"),
+            mock_response,
+        ]
+
+        provider = LLMProvider()
+        provider._initialized = True
+
+        result = await provider.complete_with_retry(
+            messages=[{"role": "user", "content": "Hello"}],
+            max_retries=2,
+        )
+
+        assert result is mock_response
+
+    @pytest.mark.asyncio
+    @patch("app.infra.llm.get_settings")
+    @patch("app.infra.llm.acompletion")
+    async def test_retry_exhausted_raises(
+        self,
+        mock_acompletion: AsyncMock,
+        mock_get_settings: MagicMock,
+    ) -> None:
+        """complete_with_retry() should raise after exhausting retries."""
+        mock_settings = MagicMock()
+        mock_settings.default_model = "anthropic/claude-sonnet-4-20250514"
+        mock_settings.fallback_model = "openai/gpt-4o"
+        mock_get_settings.return_value = mock_settings
+
+        mock_acompletion.side_effect = Exception("Persistent failure")
+
+        provider = LLMProvider()
+        provider._initialized = True
+
+        with pytest.raises(Exception, match="Persistent failure"):
+            await provider.complete_with_retry(
+                messages=[{"role": "user", "content": "Hello"}],
+                max_retries=1,
+            )
+
+    @pytest.mark.asyncio
+    @patch("app.infra.llm.get_settings")
+    @patch("app.infra.llm.acompletion")
+    async def test_retry_zero_retries_calls_once(
+        self,
+        mock_acompletion: AsyncMock,
+        mock_get_settings: MagicMock,
+    ) -> None:
+        """complete_with_retry(max_retries=0) should call complete exactly once."""
+        mock_settings = MagicMock()
+        mock_settings.default_model = "anthropic/claude-sonnet-4-20250514"
+        mock_settings.fallback_model = "openai/gpt-4o"
+        mock_get_settings.return_value = mock_settings
+
+        mock_response = MagicMock()
+        mock_acompletion.return_value = mock_response
+
+        provider = LLMProvider()
+        provider._initialized = True
+
+        result = await provider.complete_with_retry(
+            messages=[{"role": "user", "content": "Hello"}],
+            max_retries=0,
+        )
+
+        assert result is mock_response
+        mock_acompletion.assert_called_once()
+
+
 class TestLLMProviderHealthCheck:
     """Tests for health check."""
 

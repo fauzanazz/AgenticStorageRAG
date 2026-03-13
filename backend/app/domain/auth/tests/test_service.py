@@ -34,8 +34,8 @@ def _make_mock_user(
     user.is_active = is_active
     user.is_admin = is_admin
     user.org_id = None
-    user.created_at = MagicMock()
-    user.updated_at = MagicMock()
+    user.created_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    user.updated_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
     return user
 
 
@@ -182,6 +182,39 @@ class TestAuthServiceLogin:
             await service.login(data)
 
     @pytest.mark.asyncio
+    async def test_login_success_asserts_user_fields(self) -> None:
+        """login() response should contain correct user profile fields."""
+        user = _make_mock_user(email="profile@example.com", full_name="Profile User")
+
+        mock_db = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = user
+        mock_db.execute.return_value = mock_result
+
+        mock_hasher = MagicMock()
+        mock_hasher.verify.return_value = True
+
+        mock_tokens = MagicMock()
+        mock_tokens.create_access_token.return_value = "access_token"
+        mock_tokens.create_refresh_token.return_value = "refresh_token"
+        mock_tokens.access_expire_seconds = 1800
+
+        service = AuthService(
+            db=mock_db,
+            password_hasher=mock_hasher,
+            token_service=mock_tokens,
+        )
+
+        data = LoginRequest(email="profile@example.com", password="correct")
+        result = await service.login(data)
+
+        assert result.user.email == "profile@example.com"
+        assert result.user.full_name == "Profile User"
+        assert result.user.is_active is True
+        assert result.user.is_admin is False
+        assert result.user.id == user.id
+
+    @pytest.mark.asyncio
     async def test_login_inactive_user_raises(self) -> None:
         """login() should raise InactiveUserError for deactivated users."""
         user = _make_mock_user(is_active=False)
@@ -264,6 +297,29 @@ class TestAuthServiceRefresh:
         service = AuthService(db=mock_db, token_service=mock_tokens)
 
         with pytest.raises(UserNotFoundError):
+            await service.refresh_tokens("valid_refresh_token")
+
+
+    @pytest.mark.asyncio
+    async def test_refresh_inactive_user_raises(self) -> None:
+        """refresh_tokens() should raise InactiveUserError for deactivated user."""
+        user = _make_mock_user(is_active=False)
+        user_id = user.id
+
+        mock_db = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = user
+        mock_db.execute.return_value = mock_result
+
+        mock_tokens = MagicMock()
+        mock_tokens.verify_token.return_value = {
+            "sub": str(user_id),
+            "type": "refresh",
+        }
+
+        service = AuthService(db=mock_db, token_service=mock_tokens)
+
+        with pytest.raises(InactiveUserError):
             await service.refresh_tokens("valid_refresh_token")
 
 

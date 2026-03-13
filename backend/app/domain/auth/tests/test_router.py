@@ -85,6 +85,11 @@ class TestRegisterEndpoint:
         assert "user" in data
         assert "tokens" in data
         assert data["tokens"]["access_token"] == "mock_access"
+        assert data["tokens"]["refresh_token"] == "mock_refresh"
+        assert data["tokens"]["expires_in"] == 1800
+        assert data["user"]["email"] == "test@example.com"
+        assert data["user"]["full_name"] == "Test User"
+        assert data["user"]["is_active"] is True
 
     @pytest.mark.asyncio
     async def test_register_duplicate_email_returns_409(self) -> None:
@@ -105,6 +110,9 @@ class TestRegisterEndpoint:
             )
 
         assert response.status_code == 409
+        data = response.json()
+        assert "detail" in data
+        assert "taken@example.com" in data["detail"]
 
     @pytest.mark.asyncio
     async def test_register_short_password_returns_422(self) -> None:
@@ -122,6 +130,8 @@ class TestRegisterEndpoint:
             )
 
         assert response.status_code == 422
+        data = response.json()
+        assert "detail" in data  # FastAPI validation error detail
 
     @pytest.mark.asyncio
     async def test_register_invalid_email_returns_422(self) -> None:
@@ -161,6 +171,9 @@ class TestLoginEndpoint:
         assert response.status_code == 200
         data = response.json()
         assert data["tokens"]["access_token"] == "mock_access"
+        assert data["tokens"]["refresh_token"] == "mock_refresh"
+        assert "user" in data
+        assert data["user"]["email"] == "test@example.com"
 
     @pytest.mark.asyncio
     async def test_login_invalid_credentials_returns_401(self) -> None:
@@ -177,6 +190,8 @@ class TestLoginEndpoint:
             )
 
         assert response.status_code == 401
+        data = response.json()
+        assert "detail" in data
 
     @pytest.mark.asyncio
     async def test_login_inactive_user_returns_403(self) -> None:
@@ -193,6 +208,8 @@ class TestLoginEndpoint:
             )
 
         assert response.status_code == 403
+        data = response.json()
+        assert "detail" in data
 
 
 class TestRefreshEndpoint:
@@ -219,6 +236,8 @@ class TestRefreshEndpoint:
         assert response.status_code == 200
         data = response.json()
         assert data["access_token"] == "new_access"
+        assert data["refresh_token"] == "new_refresh"
+        assert data["expires_in"] == 1800
 
     @pytest.mark.asyncio
     async def test_refresh_invalid_token_returns_401(self) -> None:
@@ -235,6 +254,8 @@ class TestRefreshEndpoint:
             )
 
         assert response.status_code == 401
+        data = response.json()
+        assert "detail" in data
 
 
 class TestMeEndpoint:

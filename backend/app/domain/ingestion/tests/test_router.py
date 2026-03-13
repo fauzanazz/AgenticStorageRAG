@@ -60,6 +60,8 @@ class TestAdminAccess:
         client = TestClient(app)
         response = client.get("/api/v1/admin/ingestion/jobs")
         assert response.status_code == 403
+        data = response.json()
+        assert "detail" in data
 
     def test_admin_allowed(self, client: TestClient) -> None:
         """Admin users should be allowed to access ingestion endpoints."""
@@ -99,3 +101,5 @@ class TestGetJob:
             mock_get.side_effect = IngestionJobNotFoundError("abc")
             response = client.get(f"/api/v1/admin/ingestion/jobs/{uuid.uuid4()}")
             assert response.status_code == 404
+            data = response.json()
+            assert "detail" in data

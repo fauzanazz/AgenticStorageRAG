@@ -68,7 +68,7 @@ class TestNeo4jClientClose:
 
         await client.close()
 
-        client._driver is None  # noqa: B015
+        assert client._driver is None
 
     @pytest.mark.asyncio
     async def test_close_noop_when_not_connected(self) -> None:

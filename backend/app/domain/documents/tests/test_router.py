@@ -54,6 +54,8 @@ class TestDocumentUploadEndpoint:
     def test_upload_no_file(self, client: TestClient) -> None:
         response = client.post("/api/v1/documents")
         assert response.status_code == 422
+        data = response.json()
+        assert "detail" in data
 
     def test_upload_unsupported_type(self, client: TestClient) -> None:
         import io
@@ -62,6 +64,8 @@ class TestDocumentUploadEndpoint:
             files={"file": ("test.txt", io.BytesIO(b"hello"), "text/plain")},
         )
         assert response.status_code == 415
+        data = response.json()
+        assert "detail" in data
 
 
 class TestDocumentListEndpoint:
@@ -92,6 +96,8 @@ class TestDocumentGetEndpoint:
 
         response = client.get(f"/api/v1/documents/{uuid.uuid4()}")
         assert response.status_code == 404
+        data = response.json()
+        assert "detail" in data
 
 
 class TestDocumentDeleteEndpoint:
@@ -104,3 +110,5 @@ class TestDocumentDeleteEndpoint:
 
         response = client.delete(f"/api/v1/documents/{uuid.uuid4()}")
         assert response.status_code == 404
+        data = response.json()
+        assert "detail" in data

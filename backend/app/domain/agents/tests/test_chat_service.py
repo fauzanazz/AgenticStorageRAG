@@ -126,10 +126,45 @@ class TestListConversations:
         scalars_mock.all.return_value = []
         result_mock = MagicMock()
         result_mock.scalars.return_value = scalars_mock
+        # list_conversations uses result.all() not result.scalars().all()
+        result_mock.all.return_value = []
         mock_db.execute.return_value = result_mock
 
         result = await service.list_conversations(uuid.uuid4())
         assert result == []
+
+    @pytest.mark.asyncio
+    async def test_list_with_conversations(
+        self, service: ChatService, mock_db: AsyncMock, now: datetime
+    ) -> None:
+        """list_conversations() should return conversations with message counts."""
+        user_id = uuid.uuid4()
+        conv1 = MagicMock(spec=Conversation)
+        conv1.id = uuid.uuid4()
+        conv1.user_id = user_id
+        conv1.title = "First conversation"
+        conv1.created_at = now
+        conv1.updated_at = now
+
+        conv2 = MagicMock(spec=Conversation)
+        conv2.id = uuid.uuid4()
+        conv2.user_id = user_id
+        conv2.title = "Second conversation"
+        conv2.created_at = now
+        conv2.updated_at = now
+
+        # list_conversations uses result.all() which returns (conv, msg_count) tuples
+        result_mock = MagicMock()
+        result_mock.all.return_value = [(conv1, 3), (conv2, 0)]
+        mock_db.execute.return_value = result_mock
+
+        result = await service.list_conversations(user_id)
+
+        assert len(result) == 2
+        assert result[0].title == "First conversation"
+        assert result[0].message_count == 3
+        assert result[1].title == "Second conversation"
+        assert result[1].message_count == 0
 
 
 class TestDeleteConversation:
@@ -242,3 +277,39 @@ class TestGetMessages:
 
         with pytest.raises(ConversationAccessDenied):
             await service.get_messages(uuid.uuid4(), uuid.uuid4())
+
+    @pytest.mark.asyncio
+    async def test_success(
+        self, service: ChatService, mock_db: AsyncMock, now: datetime
+    ) -> None:
+        """get_messages() should return deserialized messages with citations."""
+        user_id = uuid.uuid4()
+        conv_id = uuid.uuid4()
+
+        conv = MagicMock(spec=Conversation)
+        conv.user_id = user_id
+        mock_db.get.return_value = conv
+
+        msg = MagicMock(spec=Message)
+        msg.id = uuid.uuid4()
+        msg.conversation_id = conv_id
+        msg.role = "assistant"
+        msg.content = "Answer with citation"
+        msg.citations_json = '[{"content_snippet":"test","source_type":"vector","relevance_score":0.9}]'
+        msg.tool_calls_json = None
+        msg.token_count = 10
+        msg.created_at = now
+
+        scalars_mock = MagicMock()
+        scalars_mock.all.return_value = [msg]
+        result_mock = MagicMock()
+        result_mock.scalars.return_value = scalars_mock
+        mock_db.execute.return_value = result_mock
+
+        result = await service.get_messages(conv_id, user_id)
+
+        assert len(result) == 1
+        assert result[0].role == "assistant"
+        assert result[0].content == "Answer with citation"
+        assert len(result[0].citations) == 1
+        assert result[0].citations[0].source_type == "vector"
