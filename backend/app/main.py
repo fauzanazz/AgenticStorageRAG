@@ -4,13 +4,23 @@ Creates and configures the FastAPI application instance.
 Use create_app() to get a fully configured application.
 """
 
+import logging
 from contextlib import asynccontextmanager
 from collections.abc import AsyncGenerator
+from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
+from app.infra.database import init_db, close_db
+from app.infra.neo4j_client import neo4j_client
+from app.infra.redis_client import redis_client
+from app.infra.storage import storage_client
+from app.infra.llm import llm_provider
+from app.infra.middleware import RequestLoggingMiddleware
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -18,17 +28,39 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan manager.
 
     Handles startup and shutdown events for external connections
-    (database, Neo4j, Redis, etc.).
+    (database, Neo4j, Redis, Storage, LLM).
     """
     settings = get_settings()
-    # TODO: Initialize database engine
-    # TODO: Initialize Neo4j driver
-    # TODO: Initialize Redis client
-    # TODO: Initialize background worker
+    logger.info("Starting %s v%s (%s)", settings.app_name, settings.app_version, settings.environment)
+
+    # Initialize infrastructure (order matters for dependencies)
+    init_db()
+    logger.info("Database engine initialized")
+
+    try:
+        await neo4j_client.connect()
+    except Exception as e:
+        logger.warning("Neo4j connection failed (non-fatal): %s", e)
+
+    try:
+        await redis_client.connect()
+    except Exception as e:
+        logger.warning("Redis connection failed (non-fatal): %s", e)
+
+    try:
+        storage_client.connect()
+    except Exception as e:
+        logger.warning("Supabase Storage connection failed (non-fatal): %s", e)
+
+    llm_provider.initialize()
+
     yield
-    # TODO: Close database engine
-    # TODO: Close Neo4j driver
-    # TODO: Close Redis client
+
+    # Shutdown infrastructure
+    await close_db()
+    await neo4j_client.close()
+    await redis_client.close()
+    logger.info("Application shutdown complete")
 
 
 def create_app() -> FastAPI:
@@ -45,7 +77,8 @@ def create_app() -> FastAPI:
         openapi_url=f"{settings.api_prefix}/openapi.json",
     )
 
-    # CORS middleware
+    # Middleware (order: last added = first executed)
+    app.add_middleware(RequestLoggingMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.allowed_origins,
@@ -54,14 +87,38 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Health check endpoint
+    # Health check endpoint with full service status
     @app.get(f"{settings.api_prefix}/health")
-    async def health_check() -> dict[str, str]:
+    async def health_check() -> dict[str, Any]:
         """Health check endpoint for monitoring and load balancers."""
         return {
             "status": "healthy",
             "version": settings.app_version,
             "environment": settings.environment,
+        }
+
+    @app.get(f"{settings.api_prefix}/health/detailed")
+    async def detailed_health_check() -> dict[str, Any]:
+        """Detailed health check with all service statuses."""
+        neo4j_status = await neo4j_client.health_check()
+        redis_status = await redis_client.health_check()
+        llm_status = llm_provider.health_check()
+
+        all_healthy = (
+            neo4j_status.get("status") == "healthy"
+            and redis_status.get("status") == "healthy"
+        )
+
+        return {
+            "status": "healthy" if all_healthy else "degraded",
+            "version": settings.app_version,
+            "environment": settings.environment,
+            "services": {
+                "database": {"status": "configured"},
+                "neo4j": neo4j_status,
+                "redis": redis_status,
+                "llm": llm_status,
+            },
         }
 
     # TODO: Include domain routers
