@@ -26,6 +26,12 @@ interface AuthTokens {
   token_type: string;
 }
 
+/** Mirrors backend AuthResponse schema */
+interface AuthResponse {
+  user: User;
+  tokens: AuthTokens;
+}
+
 interface AuthState {
   user: User | null;
   isLoading: boolean;
@@ -75,29 +81,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(
     async (email: string, password: string) => {
-      const tokens = await apiClient.post<AuthTokens>("/auth/login", {
+      const response = await apiClient.post<AuthResponse>("/auth/login", {
         email,
         password,
       });
-      setTokens(tokens);
-      const user = await fetchUser();
-      setState({ user, isLoading: false, isAuthenticated: !!user });
+      setTokens(response.tokens);
+      setState({
+        user: response.user,
+        isLoading: false,
+        isAuthenticated: true,
+      });
     },
-    [setTokens, fetchUser]
+    [setTokens]
   );
 
   const register = useCallback(
     async (email: string, password: string, fullName: string) => {
-      const tokens = await apiClient.post<AuthTokens>("/auth/register", {
+      const response = await apiClient.post<AuthResponse>("/auth/register", {
         email,
         password,
         full_name: fullName,
       });
-      setTokens(tokens);
-      const user = await fetchUser();
-      setState({ user, isLoading: false, isAuthenticated: !!user });
+      setTokens(response.tokens);
+      setState({
+        user: response.user,
+        isLoading: false,
+        isAuthenticated: true,
+      });
     },
-    [setTokens, fetchUser]
+    [setTokens]
   );
 
   const logout = useCallback(() => {
