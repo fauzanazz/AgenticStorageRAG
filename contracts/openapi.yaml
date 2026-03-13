@@ -48,7 +48,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/TokenResponse"
+                $ref: "#/components/schemas/AuthResponse"
         "409":
           description: Email already registered
 
@@ -71,7 +71,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/TokenResponse"
+                $ref: "#/components/schemas/AuthResponse"
         "401":
           description: Invalid credentials
 
@@ -208,6 +208,7 @@ components:
         - email
         - full_name
         - is_active
+        - is_admin
         - created_at
       properties:
         id:
@@ -220,9 +221,23 @@ components:
           type: string
         is_active:
           type: boolean
+        is_admin:
+          type: boolean
         created_at:
           type: string
           format: date-time
+
+    AuthResponse:
+      type: object
+      description: Combined response returned by /auth/login and /auth/register
+      required:
+        - user
+        - tokens
+      properties:
+        user:
+          $ref: "#/components/schemas/UserResponse"
+        tokens:
+          $ref: "#/components/schemas/TokenResponse"
 
   securitySchemes:
     BearerAuth:
