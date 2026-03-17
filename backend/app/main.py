@@ -26,6 +26,8 @@ from app.domain.documents.router import router as documents_router
 from app.domain.knowledge.router import router as knowledge_router
 from app.domain.agents.router import router as agents_router
 from app.domain.ingestion.router import router as ingestion_router
+from app.domain.settings.router import router as settings_router
+from app.domain.settings.models import UserModelSettings  # noqa: F401 — needed for Alembic
 
 logger = logging.getLogger(__name__)
 
@@ -201,6 +203,7 @@ def create_app() -> FastAPI:
     app.include_router(knowledge_router, prefix=settings.api_prefix)
     app.include_router(agents_router, prefix=settings.api_prefix)
     app.include_router(ingestion_router, prefix=settings.api_prefix)
+    app.include_router(settings_router, prefix=settings.api_prefix)
 
     return app
 

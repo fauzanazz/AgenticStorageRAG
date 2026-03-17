@@ -21,6 +21,7 @@ from app.infra.neo4j_client import Neo4jClient, neo4j_client
 from app.infra.redis_client import RedisClient, redis_client
 from app.infra.storage import StorageClient, storage_client
 from app.infra.llm import LLMProvider, llm_provider
+from app.domain.settings.models import UserModelSettings
 
 # OAuth2 scheme for token extraction from Authorization header
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
@@ -117,3 +118,18 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
     return result
+
+
+async def get_user_model_settings(
+    user_id: uuid.UUID = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+) -> UserModelSettings | None:
+    """Load the current user's raw model settings row (with encrypted keys).
+
+    Returns None if the user has no settings configured yet.
+    Falls back gracefully — services must handle None and use server defaults.
+    """
+    from app.domain.settings.service import SettingsService
+
+    service = SettingsService(db=db)
+    return await service.get_raw_settings(user_id)
