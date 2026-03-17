@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies import get_current_user, get_db
+from app.dependencies import get_current_user, get_db, get_user_model_settings
 from app.domain.agents.chat_service import ChatService
 from app.domain.agents.exceptions import (
     AgentBaseError,
@@ -38,6 +38,7 @@ from app.domain.auth.models import User
 from app.domain.knowledge.graph_service import GraphService
 from app.domain.knowledge.hybrid_retriever import HybridRetriever
 from app.domain.knowledge.vector_service import VectorService
+from app.domain.settings.models import UserModelSettings
 from app.infra.llm import llm_provider
 from app.infra.neo4j_client import neo4j_client
 
@@ -48,10 +49,30 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 # ── Dependency helpers ──────────────────────────────────────────────────
 
 
-def _build_agent(db: AsyncSession) -> RAGAgent:
-    """Build the RAG agent with all tools wired up."""
+def _build_agent(
+    db: AsyncSession,
+    user_settings: UserModelSettings | None = None,
+) -> RAGAgent:
+    """Build the RAG agent with all tools wired up.
+
+    When ``user_settings`` is provided the agent uses the user's own models
+    and API keys via a scoped LLM provider.  Falls back to server defaults
+    when ``user_settings`` is None.
+    """
+    # Resolve the LLM to use for this request
+    effective_llm = (
+        llm_provider.with_user_settings(user_settings)
+        if user_settings is not None
+        else llm_provider
+    )
+
+    # Resolve the embedding model for VectorService
+    embedding_model = (
+        user_settings.embedding_model if user_settings is not None else None
+    )
+
     graph_service = GraphService(db=db, neo4j=neo4j_client)
-    vector_service = VectorService(db=db)
+    vector_service = VectorService(db=db, embedding_model=embedding_model)
     hybrid_retriever = HybridRetriever(
         vector_service=vector_service,
         graph_service=graph_service,
@@ -64,7 +85,7 @@ def _build_agent(db: AsyncSession) -> RAGAgent:
     ]
 
     chat_service = ChatService(db=db)
-    return RAGAgent(llm=llm_provider, chat_service=chat_service, tools=tools)
+    return RAGAgent(llm=effective_llm, chat_service=chat_service, tools=tools)
 
 
 def _get_chat_service(db: AsyncSession = Depends(get_db)) -> ChatService:
@@ -79,6 +100,7 @@ async def chat_stream(
     request: ChatRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    user_settings: UserModelSettings | None = Depends(get_user_model_settings),
 ) -> StreamingResponse:
     """Stream a chat response using Server-Sent Events.
 
@@ -93,7 +115,7 @@ async def chat_stream(
     - `done`: Final event with metadata
     - `error`: Error event
     """
-    agent = _build_agent(db)
+    agent = _build_agent(db, user_settings=user_settings)
 
     async def event_generator():
         async for event in agent.chat(request, user.id):
@@ -118,12 +140,13 @@ async def chat_message(
     request: ChatRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    user_settings: UserModelSettings | None = Depends(get_user_model_settings),
 ) -> MessageResponse:
     """Send a message and get a complete (non-streaming) response.
 
     Useful for programmatic clients that don't support SSE.
     """
-    agent = _build_agent(db)
+    agent = _build_agent(db, user_settings=user_settings)
     chat_service = ChatService(db=db)
 
     # Collect all events

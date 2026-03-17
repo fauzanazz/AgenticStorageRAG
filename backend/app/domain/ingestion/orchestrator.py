@@ -43,6 +43,7 @@ from app.domain.ingestion.orchestrator_tools import (
     ScanFolderTool,
     UpdateProgressTool,
 )
+from app.infra.llm import LLMProvider
 from app.infra.storage import StorageClient
 
 logger = logging.getLogger(__name__)
@@ -103,12 +104,14 @@ class IngestionOrchestrator:
         storage: StorageClient,
         connector: SourceConnector,
         llm: LLMProvider,
+        user_settings: "Any | None" = None,
     ) -> None:
         from app.config import get_settings
         self._db = db
         self._storage = storage
         self._connector = connector
-        self._llm = llm
+        # Use a scoped provider (user's model + API key) when settings are present
+        self._llm = llm.with_user_settings(user_settings) if user_settings is not None else llm
         self._settings = get_settings()
 
     async def _update_job_status(
