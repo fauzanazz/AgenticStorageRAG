@@ -27,6 +27,7 @@ class TestLLMProviderInit:
         mock_settings.anthropic_api_key = "sk-ant-test"
         mock_settings.openai_api_key = "sk-oai-test"
         mock_settings.dashscope_api_key = "sk-ds-test"
+        mock_settings.gemini_api_key = None
         mock_settings.debug = False
         mock_settings.default_model = "dashscope/qwen3-max"
         mock_settings.fallback_model = "anthropic/claude-sonnet-4-20250514"
