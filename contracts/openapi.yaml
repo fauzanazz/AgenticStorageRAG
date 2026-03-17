@@ -636,6 +636,63 @@ paths:
         "404":
           description: Job not found
 
+  # ── Settings ──────────────────────────────────────────────────────────
+  /settings/models/catalog:
+    get:
+      operationId: getModelCatalog
+      summary: Get curated model catalog
+      description: Returns the list of supported models per use-case, grouped by provider. No authentication required.
+      tags: [Settings]
+      security: []
+      responses:
+        "200":
+          description: Model catalog
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelCatalogResponse"
+
+  /settings/models:
+    get:
+      operationId: getModelSettings
+      summary: Get current user's model settings
+      description: Returns the user's selected models and API key presence flags (keys never returned in plaintext).
+      tags: [Settings]
+      responses:
+        "200":
+          description: Model settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelSettingsResponse"
+        "401":
+          description: Not authenticated
+    put:
+      operationId: updateModelSettings
+      summary: Update current user's model settings
+      description: |
+        Upserts model selections and API keys for the authenticated user.
+        API key handling:
+        - Empty string `""` — leave the existing key unchanged
+        - `null` — clear (delete) the stored key
+        - Any other string — encrypt and store as new key
+      tags: [Settings]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateModelSettingsRequest"
+      responses:
+        "200":
+          description: Updated model settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelSettingsResponse"
+        "401":
+          description: Not authenticated
+
 components:
   schemas:
     # ── System ────────────────────────────────────────────────────────
@@ -1290,6 +1347,90 @@ components:
         total:
           type: integer
 
+    # ── Settings ──────────────────────────────────────────────────────
+    ApiKeyStatus:
+      type: object
+      required: [has_key]
+      properties:
+        has_key:
+          type: boolean
+          description: True if an API key is stored for this provider.
+
+    ModelSettingsResponse:
+      type: object
+      required: [chat_model, ingestion_model, embedding_model, anthropic_api_key, openai_api_key, dashscope_api_key]
+      properties:
+        chat_model:
+          type: string
+          example: dashscope/qwen3-max
+        ingestion_model:
+          type: string
+          example: dashscope/qwen3-max
+        embedding_model:
+          type: string
+          example: openai/text-embedding-3-small
+        anthropic_api_key:
+          $ref: "#/components/schemas/ApiKeyStatus"
+        openai_api_key:
+          $ref: "#/components/schemas/ApiKeyStatus"
+        dashscope_api_key:
+          $ref: "#/components/schemas/ApiKeyStatus"
+
+    UpdateModelSettingsRequest:
+      type: object
+      properties:
+        chat_model:
+          type: string
+          nullable: true
+        ingestion_model:
+          type: string
+          nullable: true
+        embedding_model:
+          type: string
+          nullable: true
+        anthropic_api_key:
+          type: string
+          nullable: true
+          description: |
+            "" = leave unchanged, null = clear the stored key, any other value = new key to store
+        openai_api_key:
+          type: string
+          nullable: true
+          description: |
+            "" = leave unchanged, null = clear the stored key, any other value = new key to store
+        dashscope_api_key:
+          type: string
+          nullable: true
+          description: |
+            "" = leave unchanged, null = clear the stored key, any other value = new key to store
+
+    ModelOption:
+      type: object
+      required: [provider, model_id, label]
+      properties:
+        provider:
+          type: string
+          example: Anthropic
+        model_id:
+          type: string
+          example: anthropic/claude-sonnet-4-20250514
+        label:
+          type: string
+          example: Claude Sonnet 4
+
+    ModelCatalogResponse:
+      type: object
+      required: [chat_models, embedding_models]
+      properties:
+        chat_models:
+          type: array
+          items:
+            $ref: "#/components/schemas/ModelOption"
+        embedding_models:
+          type: array
+          items:
+            $ref: "#/components/schemas/ModelOption"
+
   securitySchemes:
     BearerAuth:
       type: http
@@ -1312,3 +1453,5 @@ tags:
     description: Agentic RAG conversation
   - name: Admin
     description: Admin-only operations (ingestion)
+  - name: Settings
+    description: Per-user model and API key configuration
