@@ -1,7 +1,8 @@
 """LiteLLM provider configuration.
 
 Provides a unified interface for LLM calls with Alibaba DashScope Qwen
-as primary and Anthropic Claude as fallback. Uses LiteLLM for provider abstraction.
+as primary and Anthropic Claude as fallback, with optional Google Gemini
+support. Uses LiteLLM for provider abstraction.
 
 Cost tracking is persisted to Redis so that all worker processes and the
 API server share a single, consistent usage ledger.
@@ -84,6 +85,9 @@ class LLMProvider:
             # LiteLLM reads DASHSCOPE_API_KEY env var for the dashscope/ prefix
             os.environ["DASHSCOPE_API_KEY"] = settings.dashscope_api_key
             os.environ["DASHSCOPE_API_BASE"] = DASHSCOPE_API_BASE
+        if settings.gemini_api_key:
+            # LiteLLM reads GEMINI_API_KEY env var for the gemini/ prefix
+            os.environ["GEMINI_API_KEY"] = settings.gemini_api_key
 
         # Configure LiteLLM behavior
         litellm.set_verbose = settings.debug
@@ -268,6 +272,7 @@ class LLMProvider:
             "dashscope_key_set": bool(settings.dashscope_api_key),
             "anthropic_key_set": bool(settings.anthropic_api_key),
             "openai_key_set": bool(settings.openai_api_key),
+            "gemini_key_set": bool(settings.gemini_api_key),
         }
 
     def get_cost_summary(self) -> dict[str, Any]:
@@ -342,6 +347,123 @@ class LLMProvider:
         except Exception as e:
             logger.warning("Redis cost read failed, falling back to in-memory: %s", e)
             return self.get_cost_summary()
+
+
+    def with_user_settings(
+        self,
+        user_settings: Any,  # UserModelSettings — using Any to avoid circular import
+    ) -> "ScopedLLMProvider":
+        """Return a ScopedLLMProvider using the user's models and decrypted API keys."""
+        from app.infra.encryption import decrypt_value
+
+        def _safe_decrypt(enc: str | None) -> str | None:
+            if enc is None:
+                return None
+            try:
+                return decrypt_value(enc)
+            except Exception:
+                return None
+
+        return ScopedLLMProvider(
+            base=self,
+            chat_model=user_settings.chat_model,
+            ingestion_model=user_settings.ingestion_model,
+            anthropic_api_key=_safe_decrypt(user_settings.anthropic_api_key_enc),
+            openai_api_key=_safe_decrypt(user_settings.openai_api_key_enc),
+            dashscope_api_key=_safe_decrypt(user_settings.dashscope_api_key_enc),
+        )
+
+
+class ScopedLLMProvider:
+    """Lightweight wrapper around LLMProvider that overrides model names
+    and injects per-user API keys into LiteLLM call kwargs.
+
+    Does NOT mutate the global llm_provider singleton.
+    """
+
+    def __init__(
+        self,
+        base: LLMProvider,
+        chat_model: str,
+        ingestion_model: str,
+        anthropic_api_key: str | None = None,
+        openai_api_key: str | None = None,
+        dashscope_api_key: str | None = None,
+    ) -> None:
+        self._base = base
+        self._chat_model = chat_model
+        self._ingestion_model = ingestion_model
+        self._api_keys: dict[str, str] = {}
+        if anthropic_api_key:
+            self._api_keys["anthropic"] = anthropic_api_key
+        if openai_api_key:
+            self._api_keys["openai"] = openai_api_key
+        if dashscope_api_key:
+            self._api_keys["dashscope"] = dashscope_api_key
+
+    def _get_api_key_for_model(self, model: str) -> str | None:
+        """Return the user's API key for the given model's provider prefix."""
+        if model.startswith("anthropic/"):
+            return self._api_keys.get("anthropic")
+        if model.startswith("openai/"):
+            return self._api_keys.get("openai")
+        if model.startswith("dashscope/"):
+            return self._api_keys.get("dashscope")
+        return None
+
+    async def complete(
+        self,
+        messages: list[dict],
+        model: str | None = None,
+        stream: bool = False,
+        **kwargs: Any,
+    ) -> Any:
+        """Chat completion using the user's model and API key."""
+        effective_model = model or self._chat_model
+        api_key = self._get_api_key_for_model(effective_model)
+        if api_key:
+            kwargs["api_key"] = api_key
+        # For DashScope, always inject the API base
+        if effective_model.startswith("dashscope/"):
+            kwargs.setdefault("api_base", DASHSCOPE_API_BASE)
+        return await self._base.complete(
+            messages=messages,
+            model=effective_model,
+            stream=stream,
+            **kwargs,
+        )
+
+    async def complete_for_ingestion(
+        self,
+        messages: list[dict],
+        **kwargs: Any,
+    ) -> Any:
+        """Chat completion specifically for ingestion jobs (uses ingestion_model)."""
+        return await self.complete(
+            messages=messages,
+            model=self._ingestion_model,
+            **kwargs,
+        )
+
+    async def complete_with_retry(
+        self,
+        messages: list[dict],
+        model: str | None = None,
+        max_retries: int = 3,
+        **kwargs: Any,
+    ) -> Any:
+        effective_model = model or self._chat_model
+        api_key = self._get_api_key_for_model(effective_model)
+        if api_key:
+            kwargs["api_key"] = api_key
+        if effective_model.startswith("dashscope/"):
+            kwargs.setdefault("api_base", DASHSCOPE_API_BASE)
+        return await self._base.complete_with_retry(
+            messages=messages,
+            model=effective_model,
+            max_retries=max_retries,
+            **kwargs,
+        )
 
 
 # Module-level singleton (initialized via lifespan)
