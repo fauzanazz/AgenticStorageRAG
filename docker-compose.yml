@@ -36,10 +36,11 @@ services:
     restart: unless-stopped
 
   # --- Redis ---
+  # Uses port 16379 on the host to avoid conflicts with other Redis instances
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "16379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -107,6 +108,8 @@ services:
       target: development
     profiles: ["local"]
     command: python -m app.infra.worker
+    deploy:
+      replicas: 2  # Scale up with: docker compose --profile local up --scale worker-local=N
     environment:
       - DEBUG=true
       - ENVIRONMENT=development
@@ -138,6 +141,7 @@ services:
       - "3000:3000"
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
+      - WATCHPACK_POLLING=true
     volumes:
       - ./frontend:/app
       - /app/node_modules
@@ -183,6 +187,8 @@ services:
       target: development
     profiles: ["supabase"]
     command: python -m app.infra.worker
+    deploy:
+      replicas: 2  # Scale up with: docker compose --profile supabase up --scale worker-supabase=N
     environment:
       - DEBUG=true
       - ENVIRONMENT=development
@@ -211,6 +217,7 @@ services:
       - "3000:3000"
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
+      - WATCHPACK_POLLING=true
     volumes:
       - ./frontend:/app
       - /app/node_modules

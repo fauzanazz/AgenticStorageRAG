@@ -1,5 +1,5 @@
 /**
- * Auth layout -- no sidebar, centered content.
+ * Auth layout -- split-panel design with brand showcase on the left.
  * Used by /login and /register routes.
  */
 export default function AuthLayout({
@@ -7,5 +7,77 @@ export default function AuthLayout({
 }: {
   children: React.ReactNode;
 }) {
-  return <>{children}</>;
+  return (
+    <div className="flex min-h-dvh" style={{ background: "#0A0A0F" }}>
+      {/* Left brand panel */}
+      <div className="hidden lg:flex lg:w-1/2 flex-col justify-between p-12 relative overflow-hidden">
+        {/* Gradient orbs */}
+        <div
+          className="absolute -top-32 -left-32 w-96 h-96 rounded-full opacity-20 blur-3xl"
+          style={{ background: "radial-gradient(circle, #6366F1 0%, transparent 70%)" }}
+        />
+        <div
+          className="absolute bottom-0 right-0 w-80 h-80 rounded-full opacity-15 blur-3xl"
+          style={{ background: "radial-gradient(circle, #A855F7 0%, transparent 70%)" }}
+        />
+
+        {/* Logo */}
+        <div className="relative z-10">
+          <div className="flex items-center gap-3">
+            <div
+              className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-lg"
+              style={{ background: "linear-gradient(135deg, #6366F1, #A855F7)" }}
+            >
+              D
+            </div>
+            <span className="text-white text-xl font-semibold tracking-tight">
+              DingDong RAG
+            </span>
+          </div>
+        </div>
+
+        {/* Center tagline */}
+        <div className="relative z-10 flex-1 flex flex-col justify-center max-w-md">
+          <h1 className="text-5xl font-bold leading-tight mb-6" style={{ color: "white" }}>
+            Intelligent
+            <br />
+            <span
+              className="bg-clip-text text-transparent"
+              style={{ backgroundImage: "linear-gradient(135deg, #818CF8, #C084FC)" }}
+            >
+              Knowledge
+            </span>
+            <br />
+            Discovery
+          </h1>
+          <p className="text-lg leading-relaxed" style={{ color: "rgba(255,255,255,0.5)" }}>
+            Transform your documents into an interactive knowledge graph.
+            Ask questions, explore connections, and discover insights with
+            AI-powered retrieval.
+          </p>
+        </div>
+
+        {/* Bottom stats */}
+        <div className="relative z-10 flex gap-8">
+          {[
+            { value: "10K+", label: "Documents Processed" },
+            { value: "50K+", label: "Entities Extracted" },
+            { value: "99.2%", label: "Accuracy Rate" },
+          ].map((stat) => (
+            <div key={stat.label}>
+              <div className="text-2xl font-bold text-white">{stat.value}</div>
+              <div className="text-xs" style={{ color: "rgba(255,255,255,0.4)" }}>
+                {stat.label}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Right form panel */}
+      <div className="flex-1 flex items-center justify-center p-8 lg:p-12">
+        {children}
+      </div>
+    </div>
+  );
 }

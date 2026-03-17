@@ -18,6 +18,7 @@ from app.domain.documents.exceptions import (
     UnsupportedFileTypeError,
 )
 from app.domain.documents.schemas import (
+    DashboardStatsResponse,
     DocumentListResponse,
     DocumentResponse,
     DocumentUploadResponse,
@@ -156,3 +157,16 @@ async def delete_document(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(e),
         ) from e
+
+
+@router.get(
+    "/stats/dashboard",
+    response_model=DashboardStatsResponse,
+    summary="Get dashboard stats",
+)
+async def get_dashboard_stats(
+    user_id: uuid.UUID = Depends(get_current_user_id),
+    service: DocumentService = Depends(_get_document_service),
+) -> DashboardStatsResponse:
+    """Get aggregated stats for the user dashboard."""
+    return await service.get_dashboard_stats(user_id=user_id)

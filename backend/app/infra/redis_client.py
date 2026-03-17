@@ -131,6 +131,26 @@ class RedisClient:
         """Get the number of jobs in a queue."""
         return await self.client.llen(queue_name)
 
+    async def move_to_dlq(self, queue_name: str, job_data: dict[str, Any]) -> None:
+        """Move a failed job to the dead-letter queue after max retries.
+
+        Args:
+            queue_name: Original queue the job came from
+            job_data: Job payload (should already contain error info)
+        """
+        dlq_key = f"dlq:{queue_name}"
+        await self.client.rpush(dlq_key, json.dumps(job_data, default=str))
+        logger.warning(
+            "Job moved to DLQ %s: type=%s id=%s",
+            dlq_key,
+            job_data.get("type", "unknown"),
+            job_data.get("id", "unknown"),
+        )
+
+    async def dlq_length(self, queue_name: str) -> int:
+        """Get the number of jobs in a dead-letter queue."""
+        return await self.client.llen(f"dlq:{queue_name}")
+
 
 # Module-level singleton (initialized via lifespan)
 redis_client = RedisClient()

@@ -1,7 +1,6 @@
 "use client";
 
-import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
+import { Plus, Trash2 } from "lucide-react";
 import type { ChatSession } from "@/types/chat";
 
 interface ConversationListProps {
@@ -21,15 +20,20 @@ export function ConversationList({
 }: ConversationListProps) {
   return (
     <div className="flex h-full flex-col">
-      <div className="border-b p-3">
-        <Button onClick={onNew} className="w-full" size="sm">
+      <div className="p-3" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+        <button
+          onClick={onNew}
+          className="w-full h-10 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-2 transition-all hover:opacity-90"
+          style={{ background: "linear-gradient(135deg, #6366F1, #A855F7)" }}
+        >
+          <Plus className="size-4" />
           New Chat
-        </Button>
+        </button>
       </div>
 
       <div className="flex-1 overflow-y-auto">
         {conversations.length === 0 ? (
-          <div className="p-4 text-center text-sm text-muted-foreground">
+          <div className="p-4 text-center text-sm" style={{ color: "rgba(255,255,255,0.3)" }}>
             No conversations yet
           </div>
         ) : (
@@ -37,17 +41,16 @@ export function ConversationList({
             {conversations.map((conv) => (
               <div
                 key={conv.id}
-                className={cn(
-                  "group flex cursor-pointer items-center justify-between rounded-lg px-3 py-2 text-sm transition-colors",
-                  activeId === conv.id
-                    ? "bg-accent text-accent-foreground"
-                    : "hover:bg-muted"
-                )}
+                className="group flex cursor-pointer items-center justify-between rounded-xl px-3 py-2.5 text-sm transition-all"
+                style={{
+                  background: activeId === conv.id ? "rgba(99,102,241,0.12)" : "transparent",
+                  color: activeId === conv.id ? "#818CF8" : "rgba(255,255,255,0.6)",
+                }}
                 onClick={() => onSelect(conv)}
               >
                 <div className="min-w-0 flex-1">
                   <p className="truncate font-medium">{conv.title}</p>
-                  <p className="text-muted-foreground text-xs">
+                  <p className="text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>
                     {conv.message_count} messages
                   </p>
                 </div>
@@ -56,22 +59,11 @@ export function ConversationList({
                     e.stopPropagation();
                     onDelete(conv.id);
                   }}
-                  className="text-muted-foreground hover:text-destructive ml-2 opacity-0 transition-opacity group-hover:opacity-100"
+                  className="ml-2 opacity-0 transition-opacity group-hover:opacity-100 rounded-lg p-1 hover:bg-white/5"
+                  style={{ color: "rgba(255,255,255,0.3)" }}
                   aria-label="Delete conversation"
                 >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="14"
-                    height="14"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                  >
-                    <path d="M3 6h18" />
-                    <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
-                    <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
-                  </svg>
+                  <Trash2 className="size-3.5" />
                 </button>
               </div>
             ))}

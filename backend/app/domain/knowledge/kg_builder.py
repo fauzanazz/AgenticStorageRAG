@@ -6,6 +6,7 @@ then populates the Neo4j graph and PostgreSQL shadow records.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -17,6 +18,9 @@ from app.domain.knowledge.schemas import EntityCreate, RelationshipCreate
 from app.infra.llm import LLMProvider
 
 logger = logging.getLogger(__name__)
+
+# Concurrent chunk extraction limit (avoid overwhelming the LLM API)
+_KG_CONCURRENCY = 5
 
 # Prompt for entity/relationship extraction
 EXTRACTION_SYSTEM_PROMPT = """You are a knowledge graph extraction expert. Given a text chunk, extract entities and relationships.
@@ -79,15 +83,29 @@ class KGBuilder(IKGBuilder):
         all_entities: dict[str, EntityCreate] = {}  # name:type -> entity
         all_relationships: list[dict[str, str]] = []
 
-        # Extract from each chunk
-        for i, chunk in enumerate(chunks):
-            try:
-                extraction = await self._extract_from_chunk(chunk["content"])
-                if not extraction:
-                    continue
+        # Extract from all chunks concurrently (bounded by semaphore)
+        semaphore = asyncio.Semaphore(_KG_CONCURRENCY)
 
-                # Collect entities (deduplicate by name:type key)
-                for ent in extraction.get("entities", []):
+        async def _extract_one(i: int, chunk: dict[str, Any]) -> dict[str, Any] | None:
+            async with semaphore:
+                try:
+                    return await self._extract_from_chunk(chunk["content"])
+                except Exception as e:
+                    logger.warning("Failed to extract from chunk %d: %s", i, e)
+                    return None
+
+        extractions = await asyncio.gather(
+            *[_extract_one(i, chunk) for i, chunk in enumerate(chunks)],
+            return_exceptions=False,
+        )
+
+        for i, extraction in enumerate(extractions):
+            if not extraction:
+                continue
+
+            # Collect entities (deduplicate by name:type key)
+            for ent in extraction.get("entities", []):
+                try:
                     key = f"{ent['name'].lower()}:{ent['type'].lower()}"
                     if key not in all_entities:
                         all_entities[key] = EntityCreate(
@@ -96,24 +114,20 @@ class KGBuilder(IKGBuilder):
                             description=ent.get("description"),
                             source_document_id=document_id,
                         )
+                except (KeyError, AttributeError) as e:
+                    logger.warning("Malformed entity in chunk %d: %s", i, e)
 
-                # Collect relationships
-                for rel in extraction.get("relationships", []):
-                    all_relationships.append(rel)
+            # Collect relationships
+            for rel in extraction.get("relationships", []):
+                all_relationships.append(rel)
 
-                logger.debug(
-                    "Extracted from chunk %d/%d: %d entities, %d relationships",
-                    i + 1,
-                    len(chunks),
-                    len(extraction.get("entities", [])),
-                    len(extraction.get("relationships", [])),
-                )
-
-            except Exception as e:
-                logger.warning(
-                    "Failed to extract from chunk %d: %s", i, e
-                )
-                continue
+            logger.debug(
+                "Extracted from chunk %d/%d: %d entities, %d relationships",
+                i + 1,
+                len(chunks),
+                len(extraction.get("entities", [])),
+                len(extraction.get("relationships", [])),
+            )
 
         # Create entities in graph
         entity_map: dict[str, uuid.UUID] = {}  # name_lower -> entity ID

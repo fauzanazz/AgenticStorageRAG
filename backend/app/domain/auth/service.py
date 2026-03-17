@@ -29,6 +29,7 @@ from app.domain.auth.schemas import (
     LoginRequest,
     RegisterRequest,
     TokenResponse,
+    UpdateProfileRequest,
     UserResponse,
 )
 from app.domain.auth.token import TokenService
@@ -166,6 +167,39 @@ class AuthService(AbstractAuthService):
         if user is None:
             raise UserNotFoundError(str(user_id))
 
+        return UserResponse.model_validate(user)
+
+    async def update_profile(
+        self, user_id: uuid.UUID, data: UpdateProfileRequest
+    ) -> UserResponse:
+        """Update user profile fields.
+
+        Args:
+            user_id: The user's UUID.
+            data: Fields to update (only non-None fields are applied).
+
+        Returns:
+            Updated UserResponse.
+
+        Raises:
+            UserNotFoundError: If no user with that ID exists.
+            EmailAlreadyExistsError: If the new email is taken by another user.
+        """
+        user = await self._get_user_by_id(user_id)
+        if user is None:
+            raise UserNotFoundError(str(user_id))
+
+        if data.full_name is not None:
+            user.full_name = data.full_name
+
+        if data.email is not None and data.email != user.email:
+            existing = await self._get_user_by_email(data.email)
+            if existing is not None:
+                raise EmailAlreadyExistsError(data.email)
+            user.email = data.email
+
+        await self._db.flush()
+        logger.info("User profile updated: %s", user_id)
         return UserResponse.model_validate(user)
 
     # --- Private helpers ---

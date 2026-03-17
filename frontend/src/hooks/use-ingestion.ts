@@ -5,12 +5,16 @@ import { apiClient } from "@/lib/api-client";
 import type {
   IngestionJob,
   IngestionJobList,
+  IngestionStatsResponse,
+  LLMCostSummary,
   TriggerIngestionRequest,
 } from "@/types/ingestion";
 
 export function useIngestion() {
   const [jobs, setJobs] = useState<IngestionJob[]>([]);
   const [totalJobs, setTotalJobs] = useState(0);
+  const [stats, setStats] = useState<IngestionStatsResponse | null>(null);
+  const [costSummary, setCostSummary] = useState<LLMCostSummary | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isTriggering, setIsTriggering] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,6 +35,30 @@ export function useIngestion() {
     }
   }, []);
 
+  const fetchStats = useCallback(async () => {
+    try {
+      const data = await apiClient.get<IngestionStatsResponse>(
+        "/admin/ingestion/stats"
+      );
+      setStats(data);
+    } catch {
+      // stats are non-fatal
+    }
+  }, []);
+
+  const fetchCostSummary = useCallback(async () => {
+    try {
+      const data = await apiClient.get<LLMCostSummary>("/admin/ingestion/cost");
+      setCostSummary(data);
+    } catch {
+      // non-fatal
+    }
+  }, []);
+
+  const refresh = useCallback(async (page = 1) => {
+    await Promise.all([fetchJobs(page), fetchStats(), fetchCostSummary()]);
+  }, [fetchJobs, fetchStats, fetchCostSummary]);
+
   const triggerIngestion = useCallback(
     async (request: TriggerIngestionRequest = {}) => {
       setIsTriggering(true);
@@ -41,6 +69,7 @@ export function useIngestion() {
           request
         );
         setJobs((prev) => [job, ...prev]);
+        fetchStats();
         return job;
       } catch (err) {
         setError(
@@ -51,7 +80,7 @@ export function useIngestion() {
         setIsTriggering(false);
       }
     },
-    []
+    [fetchStats]
   );
 
   const cancelJob = useCallback(async (jobId: string) => {
@@ -62,18 +91,24 @@ export function useIngestion() {
       setJobs((prev) =>
         prev.map((j) => (j.id === jobId ? updated : j))
       );
+      fetchStats();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to cancel job");
     }
-  }, []);
+  }, [fetchStats]);
 
   return {
     jobs,
     totalJobs,
+    stats,
+    costSummary,
     isLoading,
     isTriggering,
     error,
     fetchJobs,
+    fetchStats,
+    fetchCostSummary,
+    refresh,
     triggerIngestion,
     cancelJob,
     setError,

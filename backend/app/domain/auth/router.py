@@ -26,6 +26,7 @@ from app.domain.auth.schemas import (
     RefreshRequest,
     RegisterRequest,
     TokenResponse,
+    UpdateProfileRequest,
     UserResponse,
 )
 from app.domain.auth.service import AuthService
@@ -136,5 +137,33 @@ async def get_me(
     except UserNotFoundError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
+            detail=e.message,
+        ) from e
+
+
+@router.patch(
+    "/me",
+    response_model=UserResponse,
+    summary="Update current user profile",
+)
+async def update_me(
+    data: UpdateProfileRequest,
+    auth_service: AuthServiceDep,
+    current_user_id: CurrentUserIdDep,
+) -> UserResponse:
+    """Update the authenticated user's profile.
+
+    Only provided (non-null) fields are updated.
+    """
+    try:
+        return await auth_service.update_profile(current_user_id, data)
+    except UserNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=e.message,
+        ) from e
+    except EmailAlreadyExistsError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
             detail=e.message,
         ) from e

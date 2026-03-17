@@ -48,3 +48,15 @@ Thumbs.db
 
 # Planning (keep in repo for AI context)
 # .planning/ is intentionally tracked
+
+# Desloppify
+.desloppify/
+
+# Graph seed temporary artifacts (seed files themselves ARE tracked)
+backend/graph_seed/.tmp/
+backend/graph_seed/*.bak
+/.claude
+/.forge
+/.planning
+/.playwright-cli
+/plans

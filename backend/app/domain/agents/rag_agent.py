@@ -126,19 +126,18 @@ class RAGAgent(IRAGAgent):
                     data=json.dumps(tc.model_dump()),
                 )
 
-            # Phase 2: Generate response with context
-            response_text, citations = await self._generate_response(
-                llm_messages, tool_results
-            )
-
-            # Stream the response token by token (simulate streaming for now)
-            # In production, use actual LLM streaming
-            words = response_text.split(" ")
+            # Phase 2: Generate response with streaming
             accumulated = ""
-            for i, word in enumerate(words):
-                token = word if i == 0 else f" {word}"
-                accumulated += token
-                yield ChatStreamEvent(event="token", data=token)
+            citations = []
+
+            async for event in self._generate_response_stream(
+                llm_messages, tool_results
+            ):
+                if event["type"] == "token":
+                    accumulated += event["token"]
+                    yield ChatStreamEvent(event="token", data=event["token"])
+                elif event["type"] == "citations":
+                    citations = event["citations"]
 
             # Emit citations
             for citation in citations:
@@ -156,10 +155,13 @@ class RAGAgent(IRAGAgent):
                 tool_calls=[tc.model_dump() for tc in tool_call_records] if tool_call_records else None,
             )
 
-            # Update conversation title from first message
+            # Update conversation title from first user message
             if len(messages) <= 1:
                 title = request.message[:80]
-                # We'd update title here, but keeping service simple for now
+                await self._chat.update_conversation_title(
+                    conversation_id=conversation_id,
+                    title=title,
+                )
 
             yield ChatStreamEvent(
                 event="done",
@@ -269,12 +271,16 @@ class RAGAgent(IRAGAgent):
 
         return tool_results, tool_call_records
 
-    async def _generate_response(
+    async def _generate_response_stream(
         self,
         llm_messages: list[dict[str, str]],
         tool_results: list[dict[str, Any]],
-    ) -> tuple[str, list[Citation]]:
-        """Phase 2: Generate response using tool results as context."""
+    ) -> AsyncGenerator[dict[str, Any], None]:
+        """Phase 2: Stream response tokens using real LLM streaming.
+
+        Yields dicts with type="token" for each chunk, and type="citations"
+        at the end with the collected citation objects.
+        """
         # Build context from tool results
         context_parts = []
         citations: list[Citation] = []
@@ -324,14 +330,33 @@ class RAGAgent(IRAGAgent):
             },
         ]
 
-        response = await self._llm.complete_with_retry(
-            messages=response_messages,
-            temperature=0.3,
-            max_tokens=2000,
-        )
+        # Use actual LLM streaming
+        try:
+            stream_response = await self._llm.complete(
+                messages=response_messages,
+                temperature=0.3,
+                max_tokens=2000,
+                stream=True,
+            )
 
-        response_text = response.choices[0].message.content or "I couldn't generate a response."
-        return response_text, citations
+            async for chunk in stream_response:
+                delta = chunk.choices[0].delta if chunk.choices else None
+                if delta and delta.content:
+                    yield {"type": "token", "token": delta.content}
+
+        except Exception as e:
+            logger.error("Streaming response failed, falling back: %s", e)
+            # Fallback to non-streaming
+            response = await self._llm.complete_with_retry(
+                messages=response_messages,
+                temperature=0.3,
+                max_tokens=2000,
+            )
+            text = response.choices[0].message.content or "I couldn't generate a response."
+            yield {"type": "token", "token": text}
+
+        # Yield citations at the end
+        yield {"type": "citations", "citations": citations}
 
     def _parse_tool_calls(self, text: str) -> list[dict[str, Any]]:
         """Parse tool calls from LLM response."""

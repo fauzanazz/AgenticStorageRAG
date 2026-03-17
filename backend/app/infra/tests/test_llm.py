@@ -26,9 +26,10 @@ class TestLLMProviderInit:
         mock_settings = MagicMock()
         mock_settings.anthropic_api_key = "sk-ant-test"
         mock_settings.openai_api_key = "sk-oai-test"
+        mock_settings.dashscope_api_key = "sk-ds-test"
         mock_settings.debug = False
-        mock_settings.default_model = "anthropic/claude-sonnet-4-20250514"
-        mock_settings.fallback_model = "openai/gpt-4o"
+        mock_settings.default_model = "dashscope/qwen3-max"
+        mock_settings.fallback_model = "anthropic/claude-sonnet-4-20250514"
         mock_get_settings.return_value = mock_settings
 
         provider = LLMProvider()
@@ -52,8 +53,8 @@ class TestLLMProviderComplete:
     ) -> None:
         """complete() should use the default (primary) model."""
         mock_settings = MagicMock()
-        mock_settings.default_model = "anthropic/claude-sonnet-4-20250514"
-        mock_settings.fallback_model = "openai/gpt-4o"
+        mock_settings.default_model = "dashscope/qwen3-max"
+        mock_settings.fallback_model = "anthropic/claude-sonnet-4-20250514"
         mock_get_settings.return_value = mock_settings
 
         mock_response = MagicMock()
@@ -66,7 +67,7 @@ class TestLLMProviderComplete:
         result = await provider.complete(messages=messages)
 
         mock_acompletion.assert_called_once_with(
-            model="anthropic/claude-sonnet-4-20250514",
+            model="dashscope/qwen3-max",
             messages=messages,
             temperature=0.0,
             max_tokens=4096,
@@ -84,8 +85,8 @@ class TestLLMProviderComplete:
     ) -> None:
         """complete() should try fallback model when primary fails."""
         mock_settings = MagicMock()
-        mock_settings.default_model = "anthropic/claude-sonnet-4-20250514"
-        mock_settings.fallback_model = "openai/gpt-4o"
+        mock_settings.default_model = "dashscope/qwen3-max"
+        mock_settings.fallback_model = "anthropic/claude-sonnet-4-20250514"
         mock_get_settings.return_value = mock_settings
 
         mock_fallback_response = MagicMock()
@@ -113,8 +114,8 @@ class TestLLMProviderComplete:
     ) -> None:
         """complete() should raise when both primary and fallback fail."""
         mock_settings = MagicMock()
-        mock_settings.default_model = "anthropic/claude-sonnet-4-20250514"
-        mock_settings.fallback_model = "openai/gpt-4o"
+        mock_settings.default_model = "dashscope/qwen3-max"
+        mock_settings.fallback_model = "anthropic/claude-sonnet-4-20250514"
         mock_get_settings.return_value = mock_settings
 
         mock_acompletion.side_effect = Exception("All models down")
@@ -140,8 +141,8 @@ class TestLLMProviderCompleteWithRetry:
     ) -> None:
         """complete_with_retry() should succeed after transient failure."""
         mock_settings = MagicMock()
-        mock_settings.default_model = "anthropic/claude-sonnet-4-20250514"
-        mock_settings.fallback_model = "openai/gpt-4o"
+        mock_settings.default_model = "dashscope/qwen3-max"
+        mock_settings.fallback_model = "anthropic/claude-sonnet-4-20250514"
         mock_get_settings.return_value = mock_settings
 
         mock_response = MagicMock()
@@ -172,8 +173,8 @@ class TestLLMProviderCompleteWithRetry:
     ) -> None:
         """complete_with_retry() should raise after exhausting retries."""
         mock_settings = MagicMock()
-        mock_settings.default_model = "anthropic/claude-sonnet-4-20250514"
-        mock_settings.fallback_model = "openai/gpt-4o"
+        mock_settings.default_model = "dashscope/qwen3-max"
+        mock_settings.fallback_model = "anthropic/claude-sonnet-4-20250514"
         mock_get_settings.return_value = mock_settings
 
         mock_acompletion.side_effect = Exception("Persistent failure")
@@ -197,8 +198,8 @@ class TestLLMProviderCompleteWithRetry:
     ) -> None:
         """complete_with_retry(max_retries=0) should call complete exactly once."""
         mock_settings = MagicMock()
-        mock_settings.default_model = "anthropic/claude-sonnet-4-20250514"
-        mock_settings.fallback_model = "openai/gpt-4o"
+        mock_settings.default_model = "dashscope/qwen3-max"
+        mock_settings.fallback_model = "anthropic/claude-sonnet-4-20250514"
         mock_get_settings.return_value = mock_settings
 
         mock_response = MagicMock()
@@ -226,8 +227,9 @@ class TestLLMProviderHealthCheck:
     ) -> None:
         """Should return configured status when initialized."""
         mock_settings = MagicMock()
-        mock_settings.default_model = "anthropic/claude-sonnet-4-20250514"
-        mock_settings.fallback_model = "openai/gpt-4o"
+        mock_settings.default_model = "dashscope/qwen3-max"
+        mock_settings.fallback_model = "anthropic/claude-sonnet-4-20250514"
+        mock_settings.dashscope_api_key = "sk-ds-test"
         mock_settings.anthropic_api_key = "sk-ant-test"
         mock_settings.openai_api_key = "sk-oai-test"
         mock_get_settings.return_value = mock_settings
@@ -238,6 +240,7 @@ class TestLLMProviderHealthCheck:
         result = provider.health_check()
 
         assert result["status"] == "configured"
+        assert result["dashscope_key_set"] is True
         assert result["anthropic_key_set"] is True
         assert result["openai_key_set"] is True
 
@@ -248,8 +251,9 @@ class TestLLMProviderHealthCheck:
     ) -> None:
         """Should return not_initialized when not started."""
         mock_settings = MagicMock()
-        mock_settings.default_model = "test"
-        mock_settings.fallback_model = "test"
+        mock_settings.default_model = "dashscope/qwen3-max"
+        mock_settings.fallback_model = "anthropic/claude-sonnet-4-20250514"
+        mock_settings.dashscope_api_key = ""
         mock_settings.anthropic_api_key = ""
         mock_settings.openai_api_key = ""
         mock_get_settings.return_value = mock_settings

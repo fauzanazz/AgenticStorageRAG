@@ -89,3 +89,14 @@ class ChunkData(BaseModel):
 
 # Fix forward reference
 ProcessingResult.model_rebuild()
+
+
+class DashboardStatsResponse(BaseModel):
+    """Aggregated stats for the user dashboard."""
+
+    total_documents: int = 0
+    total_chunks: int = 0
+    total_entities: int = 0
+    total_relationships: int = 0
+    total_embeddings: int = 0
+    processing_documents: int = 0

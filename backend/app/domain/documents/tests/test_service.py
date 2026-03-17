@@ -338,7 +338,11 @@ class TestDocumentServiceProcessDocument:
 
         service = DocumentService(db=mock_db, storage=mock_storage)
 
-        with patch("app.domain.documents.service.get_processor", return_value=mock_processor):
+        with (
+            patch("app.domain.documents.service.get_processor", return_value=mock_processor),
+            patch.object(service, "_embed_chunks", new_callable=AsyncMock) as mock_embed,
+            patch.object(service, "_extract_knowledge_graph", new_callable=AsyncMock) as mock_kg,
+        ):
             await service.process_document(doc.id)
 
         # Verify status transitions
@@ -353,6 +357,10 @@ class TestDocumentServiceProcessDocument:
 
         # Verify file was downloaded
         mock_storage.download_file.assert_called_once_with(doc.storage_path)
+
+        # Verify post-processing was called
+        mock_embed.assert_called_once()
+        mock_kg.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_process_document_failure_marks_failed(self) -> None:

@@ -1,15 +1,26 @@
 """Google Drive source connector.
 
-Read-only OAuth2 connector for ingesting files from the owner's Google Drive.
-Uses the stored refresh token for headless operation after initial consent.
+Read-only connector for ingesting files from Google Drive.
+Supports two authentication methods:
+
+1. **Service Account** (production): Set GOOGLE_SERVICE_ACCOUNT_FILE or
+   GOOGLE_SERVICE_ACCOUNT_JSON. The Drive folder must be shared with the SA email.
+
+2. **OAuth2** (personal account): Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET,
+   and GOOGLE_REFRESH_TOKEN. Run `uv run python -m app.scripts.google_auth`
+   to obtain the refresh token. Accesses YOUR Drive directly -- no sharing needed.
+
+Service Account is tried first; OAuth2 is the fallback.
 """
 
 from __future__ import annotations
 
 import io
+import json
 import logging
 from typing import Any
 
+from google.oauth2 import service_account
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
@@ -22,7 +33,7 @@ from app.domain.ingestion.exceptions import (
     DriveFileDownloadError,
 )
 from app.domain.ingestion.interfaces import SourceConnector
-from app.domain.ingestion.schemas import DriveFileInfo
+from app.domain.ingestion.schemas import DriveFolderEntry, DriveFileInfo
 
 logger = logging.getLogger(__name__)
 
@@ -43,53 +54,80 @@ LIST_FIELDS = f"nextPageToken, files({FILE_FIELDS})"
 
 
 class GoogleDriveConnector(SourceConnector):
-    """Google Drive source connector using OAuth2 refresh token.
+    """Google Drive source connector with dual auth support.
 
-    Authentication flow:
-    1. Owner completes OAuth2 consent once (via /admin/ingestion/auth)
-    2. Refresh token stored in config/env
-    3. Connector uses refresh token headlessly for all subsequent requests
+    Priority order:
+    1. Service Account (GOOGLE_SERVICE_ACCOUNT_FILE / _JSON)
+    2. OAuth2 refresh token (GOOGLE_CLIENT_ID + SECRET + REFRESH_TOKEN)
 
-    This connector is read-only and owner-only. End users cannot connect
-    their own Drive accounts.
+    Service Account is ideal for production (no token expiry, headless).
+    OAuth2 is ideal for personal use (accesses your own Drive, no sharing needed).
     """
 
     def __init__(self) -> None:
         self._service: Any | None = None
-        self._credentials: Credentials | None = None
+        self._credentials: Any | None = None
+        self._auth_method: str | None = None
 
     @property
     def source_name(self) -> str:
         return "google_drive"
 
     async def authenticate(self) -> bool:
-        """Authenticate using the stored OAuth2 refresh token.
+        """Authenticate with Google Drive.
+
+        Tries Service Account first, then falls back to OAuth2.
 
         Returns:
             True if authentication succeeded
         """
         settings = get_settings()
 
-        if not settings.google_client_id or not settings.google_client_secret:
-            logger.error("Google OAuth2 credentials not configured")
-            return False
-
-        if not settings.google_refresh_token:
-            logger.warning(
-                "No Google refresh token. Complete OAuth2 consent first "
-                "via /admin/ingestion/auth/initiate"
-            )
-            return False
-
         try:
-            self._credentials = Credentials(
-                token=None,  # Will be refreshed automatically
-                refresh_token=settings.google_refresh_token,
-                token_uri="https://oauth2.googleapis.com/token",
-                client_id=settings.google_client_id,
-                client_secret=settings.google_client_secret,
-                scopes=SCOPES,
-            )
+            # --- Option 1: Service Account (preferred) ---
+            if settings.google_service_account_file:
+                self._credentials = (
+                    service_account.Credentials.from_service_account_file(
+                        settings.google_service_account_file,
+                        scopes=SCOPES,
+                    )
+                )
+                self._auth_method = "service_account_file"
+
+            elif settings.google_service_account_json:
+                info = json.loads(settings.google_service_account_json)
+                self._credentials = (
+                    service_account.Credentials.from_service_account_info(
+                        info,
+                        scopes=SCOPES,
+                    )
+                )
+                self._auth_method = "service_account_json"
+
+            # --- Option 2: OAuth2 refresh token (personal account) ---
+            elif (
+                settings.google_client_id
+                and settings.google_client_secret
+                and settings.google_refresh_token
+            ):
+                self._credentials = Credentials(
+                    token=None,  # Will be refreshed automatically
+                    refresh_token=settings.google_refresh_token,
+                    token_uri="https://oauth2.googleapis.com/token",
+                    client_id=settings.google_client_id,
+                    client_secret=settings.google_client_secret,
+                    scopes=SCOPES,
+                )
+                self._auth_method = "oauth2"
+
+            else:
+                logger.error(
+                    "Google Drive not configured. Set either:\n"
+                    "  - GOOGLE_SERVICE_ACCOUNT_FILE (or _JSON) for Service Account, or\n"
+                    "  - GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET + GOOGLE_REFRESH_TOKEN for OAuth2.\n"
+                    "  Run `uv run python -m app.scripts.google_auth` to get a refresh token."
+                )
+                return False
 
             # Build the Drive API service
             self._service = build(
@@ -101,7 +139,9 @@ class GoogleDriveConnector(SourceConnector):
                 pageSize=1, fields="files(id)"
             ).execute()
 
-            logger.info("Google Drive authentication successful")
+            logger.info(
+                "Google Drive authentication successful (%s)", self._auth_method
+            )
             return True
 
         except Exception as e:
@@ -240,3 +280,66 @@ class GoogleDriveConnector(SourceConnector):
             return dict(meta)
         except HttpError as e:
             raise DriveAccessError(file_id) from e
+
+    async def list_folder_children(
+        self,
+        folder_id: str,
+    ) -> list[DriveFolderEntry]:
+        """List ALL direct children (files + subfolders) of a Drive folder.
+
+        Unlike ``list_files``, this does NOT filter by MIME type -- it
+        returns every child so the orchestrator agent can see subfolders
+        and decide which ones to recurse into.
+
+        Args:
+            folder_id: Google Drive folder ID
+
+        Returns:
+            List of DriveFolderEntry (files + folders)
+        """
+        if not self._service:
+            raise DriveAuthError("Not authenticated. Call authenticate() first.")
+
+        entries: list[DriveFolderEntry] = []
+        page_token: str | None = None
+
+        try:
+            while True:
+                request = self._service.files().list(
+                    q=f"'{folder_id}' in parents and trashed=false",
+                    fields=f"nextPageToken, files({FILE_FIELDS})",
+                    pageSize=100,
+                    pageToken=page_token,
+                    orderBy="folder,name",
+                )
+                result = request.execute()
+
+                for f in result.get("files", []):
+                    mime = f["mimeType"]
+                    entries.append(
+                        DriveFolderEntry(
+                            file_id=f["id"],
+                            name=f["name"],
+                            mime_type=mime,
+                            size=int(f["size"]) if f.get("size") else None,
+                            modified_time=f.get("modifiedTime"),
+                            is_folder=(mime == "application/vnd.google-apps.folder"),
+                        )
+                    )
+
+                page_token = result.get("nextPageToken")
+                if not page_token:
+                    break
+
+            logger.info(
+                "Folder %s: %d children (%d folders, %d files)",
+                folder_id,
+                len(entries),
+                sum(1 for e in entries if e.is_folder),
+                sum(1 for e in entries if not e.is_folder),
+            )
+            return entries
+
+        except HttpError as e:
+            logger.error("Drive API error listing folder children: %s", e)
+            raise DriveAccessError(folder_id) from e

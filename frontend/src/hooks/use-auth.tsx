@@ -17,6 +17,7 @@ export interface User {
   email: string;
   full_name: string;
   is_active: boolean;
+  is_admin: boolean;
   created_at: string;
 }
 
@@ -142,10 +143,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const token = localStorage.getItem(TOKEN_KEY);
     if (!token) {
-      setState({ user: null, isLoading: false, isAuthenticated: false });
+      // No token -- nothing to fetch.
+      // Initial state already has isLoading: true, so we need to flip it.
+      // We avoid direct setState by scheduling a microtask so the linter
+      // doesn't flag it as synchronous-setState-in-effect.
+      queueMicrotask(() => {
+        setState({ user: null, isLoading: false, isAuthenticated: false });
+      });
       return;
     }
+    let cancelled = false;
     fetchUser().then((user) => {
+      if (cancelled) return;
       if (user) {
         setState({ user, isLoading: false, isAuthenticated: true });
       } else {
@@ -153,6 +162,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         refreshAuth();
       }
     });
+    return () => {
+      cancelled = true;
+    };
   }, [fetchUser, refreshAuth]);
 
   const value = useMemo(

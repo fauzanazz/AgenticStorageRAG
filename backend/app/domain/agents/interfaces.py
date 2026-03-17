@@ -106,6 +106,13 @@ class IChatService(ABC):
         ...
 
     @abstractmethod
+    async def update_conversation_title(
+        self, conversation_id: uuid.UUID, title: str
+    ) -> None:
+        """Update a conversation's title."""
+        ...
+
+    @abstractmethod
     async def add_message(
         self,
         conversation_id: uuid.UUID,

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback } from "react";
-import { Button } from "@/components/ui/button";
+import { Send, Square } from "lucide-react";
 
 interface ChatInputProps {
   onSend: (message: string) => void;
@@ -26,7 +26,6 @@ export function ChatInput({
     if (!trimmed || disabled || isStreaming) return;
     onSend(trimmed);
     setInput("");
-    // Reset textarea height
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
@@ -51,8 +50,14 @@ export function ChatInput({
   }, []);
 
   return (
-    <div className="bg-background border-t p-4">
-      <div className="bg-muted/50 flex items-end gap-2 rounded-2xl border px-3 py-2">
+    <div className="p-4" style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+      <div
+        className="flex items-end gap-3 rounded-2xl px-4 py-3"
+        style={{
+          background: "rgba(255,255,255,0.04)",
+          border: "1px solid rgba(255,255,255,0.08)",
+        }}
+      >
         <textarea
           ref={textareaRef}
           value={input}
@@ -62,27 +67,26 @@ export function ChatInput({
           placeholder={placeholder}
           disabled={disabled}
           rows={1}
-          className="max-h-[200px] min-h-[40px] flex-1 resize-none bg-transparent py-2 text-sm outline-none placeholder:text-muted-foreground"
+          className="max-h-[200px] min-h-[40px] flex-1 resize-none bg-transparent py-2 text-sm text-white outline-none placeholder:text-white/30"
         />
 
         {isStreaming ? (
-          <Button
-            variant="destructive"
-            size="sm"
+          <button
             onClick={onStop}
-            className="shrink-0 rounded-xl"
+            className="shrink-0 w-10 h-10 rounded-xl flex items-center justify-center transition-all hover:opacity-80"
+            style={{ background: "rgba(239,68,68,0.2)", color: "#FCA5A5" }}
           >
-            Stop
-          </Button>
+            <Square className="size-4" />
+          </button>
         ) : (
-          <Button
-            size="sm"
+          <button
             onClick={handleSubmit}
             disabled={!input.trim() || disabled}
-            className="shrink-0 rounded-xl"
+            className="shrink-0 w-10 h-10 rounded-xl flex items-center justify-center text-white transition-all hover:opacity-90 disabled:opacity-30"
+            style={{ background: "linear-gradient(135deg, #6366F1, #A855F7)" }}
           >
-            Send
-          </Button>
+            <Send className="size-4" />
+          </button>
         )}
       </div>
     </div>

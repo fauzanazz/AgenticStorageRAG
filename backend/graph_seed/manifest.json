@@ -1,0 +1,21 @@
+{
+  "version": "1.0.0",
+  "updated_at": "2026-03-16T00:00:00Z",
+  "updated_by": "system",
+  "description": "Initial empty base knowledge graph",
+  "source": "manual",
+  "stats": {
+    "total_entities": 0,
+    "total_relationships": 0,
+    "entity_types": {},
+    "relationship_types": {}
+  },
+  "files": {
+    "entities": [],
+    "relationships": [],
+    "schema": [
+      "schema/constraints.cypher"
+    ]
+  },
+  "checksum": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+}

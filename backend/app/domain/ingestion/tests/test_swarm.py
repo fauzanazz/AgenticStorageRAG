@@ -154,10 +154,13 @@ class TestSwarmFilterFiles:
 
     @pytest.mark.asyncio
     async def test_filters_existing_files(self) -> None:
-        """Should filter out already-ingested files."""
+        """Should filter out already-ingested files (unchanged)."""
         mock_db = AsyncMock()
         mock_result = MagicMock()
-        mock_result.all.return_value = [("existing-file-id",)]
+        # New query returns (doc_id, file_id, modified_time) tuples
+        mock_result.all.return_value = [
+            (uuid.uuid4(), "existing-file-id", "2025-01-01T00:00:00Z"),
+        ]
         mock_db.execute.return_value = mock_result
 
         mock_storage = AsyncMock()
@@ -173,3 +176,37 @@ class TestSwarmFilterFiles:
 
         assert len(result) == 1
         assert result[0].file_id == "new-file-id"
+
+    @pytest.mark.asyncio
+    async def test_detects_updated_files(self) -> None:
+        """Should include files that have been modified on Drive."""
+        mock_db = AsyncMock()
+        mock_result = MagicMock()
+        existing_doc_id = uuid.uuid4()
+        mock_result.all.return_value = [
+            (existing_doc_id, "updated-file-id", "2025-01-01T00:00:00Z"),
+        ]
+        mock_db.execute.return_value = mock_result
+        # Mock get() to return a document for marking as stale
+        mock_doc = MagicMock()
+        mock_doc.metadata_ = {}
+        mock_db.get.return_value = mock_doc
+
+        mock_storage = AsyncMock()
+        mock_connector = AsyncMock()
+
+        files = [
+            _make_file_info(
+                file_id="updated-file-id",
+                name="updated.pdf",
+                modified_time="2025-06-01T00:00:00Z",  # Newer than stored
+            ),
+        ]
+
+        swarm = IngestionSwarm(db=mock_db, storage=mock_storage, connector=mock_connector)
+        result = await swarm._filter_new_files(files)
+
+        assert len(result) == 1
+        assert result[0].file_id == "updated-file-id"
+        # Old doc should be marked stale
+        assert mock_doc.metadata_.get("_stale") is True

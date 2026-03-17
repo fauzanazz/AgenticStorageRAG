@@ -21,9 +21,11 @@ from app.domain.ingestion.exceptions import (
 from app.domain.ingestion.schemas import (
     IngestionJobListResponse,
     IngestionJobResponse,
+    IngestionStatsResponse,
     TriggerIngestionRequest,
 )
 from app.domain.ingestion.service import IngestionService
+from app.infra.llm import llm_provider
 from app.infra.storage import StorageClient
 
 logger = logging.getLogger(__name__)
@@ -81,6 +83,31 @@ async def trigger_ingestion(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=e.message,
         ) from e
+
+
+@router.get(
+    "/stats",
+    response_model=IngestionStatsResponse,
+    summary="Get aggregate ingestion statistics",
+)
+async def get_ingestion_stats(
+    _user: "User" = Depends(_require_admin),
+    service: IngestionService = Depends(_get_service),
+) -> IngestionStatsResponse:
+    """Get aggregate statistics for all ingestion jobs."""
+    return await service.get_stats()
+
+
+@router.get(
+    "/cost",
+    summary="Get LLM cost and token usage summary",
+    description="Returns accumulated LLM token usage and estimated cost since last server restart. Admin only.",
+)
+async def get_cost_summary(
+    _user: "User" = Depends(_require_admin),
+) -> dict:
+    """Get accumulated LLM cost and token usage (aggregated across all workers via Redis)."""
+    return await llm_provider.get_cost_summary_from_redis()
 
 
 @router.get(

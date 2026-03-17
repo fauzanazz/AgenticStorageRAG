@@ -36,6 +36,13 @@ class RefreshRequest(BaseModel):
     refresh_token: str
 
 
+class UpdateProfileRequest(BaseModel):
+    """User profile update request."""
+
+    full_name: str | None = Field(None, min_length=1, max_length=255)
+    email: EmailStr | None = None
+
+
 # --- Response Schemas ---
 
 

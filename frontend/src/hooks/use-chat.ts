@@ -4,14 +4,6 @@ import { useState, useCallback, useRef } from "react";
 import { apiClient } from "@/lib/api-client";
 import type { ChatSession, ChatMessage, Citation } from "@/types/chat";
 
-interface StreamEvent {
-  type: "token" | "citation" | "tool_call" | "error" | "done";
-  data?: string;
-  citation?: Citation;
-  tool?: string;
-  conversation_id?: string;
-}
-
 export function useChat() {
   const [conversations, setConversations] = useState<ChatSession[]>([]);
   const [activeConversation, setActiveConversation] =
@@ -32,10 +24,17 @@ export function useChat() {
 
   const fetchMessages = useCallback(async (conversationId: string) => {
     try {
-      const data = await apiClient.get<ChatMessage[]>(
-        `/chat/conversations/${conversationId}/messages`
+      // Backend returns `created_at`; frontend ChatMessage uses `timestamp`
+      const data = await apiClient.get<
+        (Omit<ChatMessage, "timestamp"> & { created_at: string })[]
+      >(`/chat/conversations/${conversationId}/messages`);
+      setMessages(
+        data.map(({ created_at, ...rest }) => ({
+          ...rest,
+          citations: rest.citations ?? [],
+          timestamp: created_at,
+        }))
       );
-      setMessages(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load messages");
     }
@@ -83,6 +82,10 @@ export function useChat() {
       setIsStreaming(true);
       setError(null);
 
+      // Create abort controller for this stream
+      const controller = new AbortController();
+      abortRef.current = controller;
+
       // Add user message immediately
       const userMessage: ChatMessage = {
         id: `temp-${Date.now()}`,
@@ -108,81 +111,89 @@ export function useChat() {
         const citations: Citation[] = [];
 
         await apiClient.stream(
-          "/chat/send",
+          "/chat/stream",
           {
             message: content,
             conversation_id: conversationId || activeConversation?.id,
           },
-          (chunk: string) => {
-            try {
-              const event: StreamEvent = JSON.parse(chunk);
+          (sseEvent) => {
+            switch (sseEvent.event) {
+              case "token":
+                streamedContent += sseEvent.data;
+                setMessages((prev) => {
+                  const updated = [...prev];
+                  const last = updated[updated.length - 1];
+                  if (last.role === "assistant") {
+                    updated[updated.length - 1] = {
+                      ...last,
+                      content: streamedContent,
+                    };
+                  }
+                  return updated;
+                });
+                break;
 
-              switch (event.type) {
-                case "token":
-                  streamedContent += event.data || "";
+              case "citation":
+                try {
+                  const citation: Citation = JSON.parse(sseEvent.data);
+                  citations.push(citation);
                   setMessages((prev) => {
                     const updated = [...prev];
                     const last = updated[updated.length - 1];
                     if (last.role === "assistant") {
                       updated[updated.length - 1] = {
                         ...last,
-                        content: streamedContent,
+                        citations: [...citations],
                       };
                     }
                     return updated;
                   });
-                  break;
+                } catch {
+                  // Ignore malformed citation data
+                }
+                break;
 
-                case "citation":
-                  if (event.citation) {
-                    citations.push(event.citation);
-                    setMessages((prev) => {
-                      const updated = [...prev];
-                      const last = updated[updated.length - 1];
-                      if (last.role === "assistant") {
-                        updated[updated.length - 1] = {
-                          ...last,
-                          citations: [...citations],
-                        };
-                      }
-                      return updated;
-                    });
-                  }
-                  break;
+              case "tool_call":
+                // Tool calls are informational -- shown in UI as "thinking" indicators
+                break;
 
-                case "tool_call":
-                  // Tool calls are informational -- shown in UI as "thinking" indicators
-                  break;
-
-                case "error":
-                  setError(event.data || "An error occurred");
-                  break;
-
-                case "done":
-                  if (event.conversation_id && !conversationId) {
-                    // New conversation created by backend
+              case "conversation_created":
+                try {
+                  const data = JSON.parse(sseEvent.data);
+                  if (data.conversation_id) {
+                    // Update active conversation with the backend-created ID
+                    setActiveConversation((prev) =>
+                      prev ? { ...prev, id: data.conversation_id } : prev
+                    );
                     fetchConversations();
                   }
-                  break;
-              }
-            } catch {
-              // Non-JSON chunk, treat as raw token
-              streamedContent += chunk;
-              setMessages((prev) => {
-                const updated = [...prev];
-                const last = updated[updated.length - 1];
-                if (last.role === "assistant") {
-                  updated[updated.length - 1] = {
-                    ...last,
-                    content: streamedContent,
-                  };
+                } catch {
+                  // Ignore parse errors
                 }
-                return updated;
-              });
+                break;
+
+              case "error":
+                try {
+                  const errData = JSON.parse(sseEvent.data);
+                  setError(errData.error || "An error occurred");
+                } catch {
+                  setError(sseEvent.data || "An error occurred");
+                }
+                break;
+
+              case "done":
+                // Stream complete -- refresh conversations to get updated title
+                fetchConversations();
+                break;
             }
-          }
+          },
+          controller.signal,
         );
       } catch (err) {
+        if (err instanceof Error && err.name === "AbortError") {
+          // User cancelled -- not an error
+          return;
+        }
         setError(err instanceof Error ? err.message : "Failed to send message");
         // Remove the empty assistant placeholder on error
         setMessages((prev) => {
@@ -194,6 +205,7 @@ export function useChat() {
           return updated;
         });
       } finally {
+        abortRef.current = null;
         setIsStreaming(false);
       }
     },
@@ -202,6 +214,7 @@ export function useChat() {
 
   const stopStreaming = useCallback(() => {
     abortRef.current?.abort();
+    abortRef.current = null;
     setIsStreaming(false);
   }, []);
 

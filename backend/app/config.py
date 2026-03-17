@@ -40,33 +40,44 @@ class Settings(BaseSettings):
 
     # --- Supabase (Database + Storage) ---
     supabase_url: str = ""
-    supabase_anon_key: str = ""
     supabase_service_role_key: str = ""
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/dingdong_rag"
 
     # --- Neo4j ---
-    neo4j_uri: str = "bolt://localhost:7687"
+    neo4j_uri: str = "bolt://localhost:17687"
     neo4j_user: str = "neo4j"
     neo4j_password: str = "password"
     neo4j_database: str = "dingdongrag"  # Separate from other projects (no underscores in Neo4j DB names)
 
     # --- Redis ---
-    redis_url: str = "redis://localhost:6379/0"
+    redis_url: str = "redis://localhost:16379/0"
 
     # --- LLM (LiteLLM) ---
     anthropic_api_key: str = ""
     openai_api_key: str = ""
-    default_model: str = "anthropic/claude-sonnet-4-20250514"
-    fallback_model: str = "openai/gpt-4o"
+    dashscope_api_key: str = ""  # Alibaba Cloud DashScope (Qwen models)
+    default_model: str = "dashscope/qwen3-max"
+    fallback_model: str = "anthropic/claude-sonnet-4-20250514"
 
-    # --- Google Drive (read-only, owner only) ---
+    # --- Google Drive (read-only) ---
+    # Option 1: Service Account (preferred for production)
+    google_service_account_file: str = ""  # Path to SA JSON key file
+    google_service_account_json: str = ""  # Inline SA JSON (alternative to file)
+    # Option 2: OAuth2 with your personal Google account
     google_client_id: str = ""
     google_client_secret: str = ""
-    google_refresh_token: str = ""
+    google_refresh_token: str = ""  # Run: uv run python -m app.scripts.google_auth
+    # Shared
+    google_drive_folder_id: str = ""  # Default Drive folder ID to scan
 
     # --- File Upload ---
     max_upload_size_mb: int = 50
     upload_ttl_days: int = 7
+
+    # --- Worker / Ingestion concurrency ---
+    # Number of worker replicas is controlled via docker-compose deploy.replicas
+    # (default: 2 -- each handles one ingestion job at a time)
+    file_concurrency: int = 3  # Max parallel files within a single orchestrator run
 
 
 @lru_cache

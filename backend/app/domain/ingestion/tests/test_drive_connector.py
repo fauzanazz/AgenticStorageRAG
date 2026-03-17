@@ -1,13 +1,36 @@
-"""Tests for Google Drive connector."""
+"""Tests for Google Drive connector (dual auth: Service Account + OAuth2)."""
+
+import json
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 from app.domain.ingestion.drive_connector import (
     GoogleDriveConnector,
     SUPPORTED_MIME_TYPES,
 )
 from app.domain.ingestion.exceptions import DriveAuthError
+
+
+# Shared mock settings factory -- all auth fields empty by default
+def _empty_settings(**overrides: str) -> MagicMock:
+    defaults = {
+        "google_service_account_file": "",
+        "google_service_account_json": "",
+        "google_client_id": "",
+        "google_client_secret": "",
+        "google_refresh_token": "",
+    }
+    defaults.update(overrides)
+    return MagicMock(**defaults)
+
+
+def _mock_drive_service() -> MagicMock:
+    svc = MagicMock()
+    svc.files.return_value.list.return_value.execute.return_value = {
+        "files": [{"id": "123"}]
+    }
+    return svc
 
 
 class TestSourceName:
@@ -19,56 +42,154 @@ class TestSourceName:
 
 
 class TestAuthenticate:
-    """Test OAuth2 authentication."""
+    """Test dual auth: Service Account and OAuth2."""
+
+    # --- No credentials at all ---
 
     @pytest.mark.asyncio
     async def test_auth_no_credentials(self) -> None:
-        """Should return False when Google credentials not configured."""
+        """Should return False when nothing is configured."""
         connector = GoogleDriveConnector()
         with patch("app.domain.ingestion.drive_connector.get_settings") as mock_settings:
-            mock_settings.return_value = MagicMock(
-                google_client_id="",
-                google_client_secret="",
-                google_refresh_token="",
-            )
+            mock_settings.return_value = _empty_settings()
             result = await connector.authenticate()
             assert result is False
 
-    @pytest.mark.asyncio
-    async def test_auth_no_refresh_token(self) -> None:
-        """Should return False when no refresh token."""
-        connector = GoogleDriveConnector()
-        with patch("app.domain.ingestion.drive_connector.get_settings") as mock_settings:
-            mock_settings.return_value = MagicMock(
-                google_client_id="client-id",
-                google_client_secret="client-secret",
-                google_refresh_token="",
-            )
-            result = await connector.authenticate()
-            assert result is False
+    # --- Service Account: file path ---
 
     @pytest.mark.asyncio
-    async def test_auth_success(self) -> None:
-        """Should authenticate and build Drive service."""
+    async def test_auth_sa_file(self) -> None:
+        """Should authenticate using a Service Account JSON key file."""
         connector = GoogleDriveConnector()
-        mock_service = MagicMock()
-        mock_service.files.return_value.list.return_value.execute.return_value = {
-            "files": [{"id": "123"}]
-        }
+        mock_creds = MagicMock()
 
         with (
             patch("app.domain.ingestion.drive_connector.get_settings") as mock_settings,
-            patch("app.domain.ingestion.drive_connector.build", return_value=mock_service),
-            patch("app.domain.ingestion.drive_connector.Credentials"),
+            patch("app.domain.ingestion.drive_connector.build", return_value=_mock_drive_service()),
+            patch(
+                "app.domain.ingestion.drive_connector.service_account.Credentials.from_service_account_file",
+                return_value=mock_creds,
+            ) as mock_from_file,
         ):
-            mock_settings.return_value = MagicMock(
+            mock_settings.return_value = _empty_settings(
+                google_service_account_file="/path/to/sa.json"
+            )
+            result = await connector.authenticate()
+            assert result is True
+            assert connector._auth_method == "service_account_file"
+            mock_from_file.assert_called_once()
+
+    # --- Service Account: inline JSON ---
+
+    @pytest.mark.asyncio
+    async def test_auth_sa_inline_json(self) -> None:
+        """Should authenticate using inline Service Account JSON."""
+        connector = GoogleDriveConnector()
+        mock_creds = MagicMock()
+        sa_json = json.dumps({"type": "service_account", "project_id": "test"})
+
+        with (
+            patch("app.domain.ingestion.drive_connector.get_settings") as mock_settings,
+            patch("app.domain.ingestion.drive_connector.build", return_value=_mock_drive_service()),
+            patch(
+                "app.domain.ingestion.drive_connector.service_account.Credentials.from_service_account_info",
+                return_value=mock_creds,
+            ) as mock_from_info,
+        ):
+            mock_settings.return_value = _empty_settings(
+                google_service_account_json=sa_json
+            )
+            result = await connector.authenticate()
+            assert result is True
+            assert connector._auth_method == "service_account_json"
+            mock_from_info.assert_called_once()
+
+    # --- Service Account takes precedence over OAuth2 ---
+
+    @pytest.mark.asyncio
+    async def test_auth_sa_takes_precedence_over_oauth(self) -> None:
+        """SA file should be used even when OAuth2 vars are also set."""
+        connector = GoogleDriveConnector()
+        mock_creds = MagicMock()
+
+        with (
+            patch("app.domain.ingestion.drive_connector.get_settings") as mock_settings,
+            patch("app.domain.ingestion.drive_connector.build", return_value=_mock_drive_service()),
+            patch(
+                "app.domain.ingestion.drive_connector.service_account.Credentials.from_service_account_file",
+                return_value=mock_creds,
+            ) as mock_from_file,
+            patch(
+                "app.domain.ingestion.drive_connector.Credentials",
+            ) as mock_oauth_creds,
+        ):
+            mock_settings.return_value = _empty_settings(
+                google_service_account_file="/path/to/sa.json",
                 google_client_id="client-id",
                 google_client_secret="client-secret",
                 google_refresh_token="refresh-token",
             )
             result = await connector.authenticate()
             assert result is True
-            assert connector._service is not None
+            assert connector._auth_method == "service_account_file"
+            mock_from_file.assert_called_once()
+            mock_oauth_creds.assert_not_called()
+
+    # --- OAuth2 refresh token ---
+
+    @pytest.mark.asyncio
+    async def test_auth_oauth2(self) -> None:
+        """Should authenticate using OAuth2 refresh token."""
+        connector = GoogleDriveConnector()
+
+        with (
+            patch("app.domain.ingestion.drive_connector.get_settings") as mock_settings,
+            patch("app.domain.ingestion.drive_connector.build", return_value=_mock_drive_service()),
+            patch("app.domain.ingestion.drive_connector.Credentials") as mock_creds_cls,
+        ):
+            mock_creds_cls.return_value = MagicMock()
+            mock_settings.return_value = _empty_settings(
+                google_client_id="client-id",
+                google_client_secret="client-secret",
+                google_refresh_token="refresh-token",
+            )
+            result = await connector.authenticate()
+            assert result is True
+            assert connector._auth_method == "oauth2"
+            mock_creds_cls.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_auth_oauth2_partial_creds_returns_false(self) -> None:
+        """Should return False if only some OAuth2 fields are set."""
+        connector = GoogleDriveConnector()
+        with patch("app.domain.ingestion.drive_connector.get_settings") as mock_settings:
+            # Missing refresh token
+            mock_settings.return_value = _empty_settings(
+                google_client_id="client-id",
+                google_client_secret="client-secret",
+            )
+            result = await connector.authenticate()
+            assert result is False
+
+    # --- Auth failure ---
+
+    @pytest.mark.asyncio
+    async def test_auth_failure_raises_drive_auth_error(self) -> None:
+        """Should raise DriveAuthError when authentication fails."""
+        connector = GoogleDriveConnector()
+
+        with (
+            patch("app.domain.ingestion.drive_connector.get_settings") as mock_settings,
+            patch(
+                "app.domain.ingestion.drive_connector.service_account.Credentials.from_service_account_file",
+                side_effect=Exception("Invalid key file"),
+            ),
+        ):
+            mock_settings.return_value = _empty_settings(
+                google_service_account_file="/bad/path.json"
+            )
+            with pytest.raises(DriveAuthError):
+                await connector.authenticate()
 
 
 class TestListFiles:

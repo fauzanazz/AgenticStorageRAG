@@ -2,8 +2,6 @@
 
 import { useCallback, useRef, useState } from "react";
 import { Upload, X } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 
 interface FileUploadProps {
   onUpload: (file: File) => Promise<unknown>;
@@ -20,6 +18,19 @@ export function FileUpload({
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const validateAndSetFile = useCallback((file: File) => {
+    const ext = file.name.split(".").pop()?.toLowerCase();
+    if (!ext || !["pdf", "docx"].includes(ext)) {
+      setError("Only PDF and DOCX files are supported");
+      return;
+    }
+    if (file.size > 50 * 1024 * 1024) {
+      setError("File must be under 50 MB");
+      return;
+    }
+    setSelectedFile(file);
+  }, []);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -40,7 +51,7 @@ export function FileUpload({
     if (file) {
       validateAndSetFile(file);
     }
-  }, []);
+  }, [validateAndSetFile]);
 
   const handleFileSelect = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -50,21 +61,8 @@ export function FileUpload({
         validateAndSetFile(file);
       }
     },
-    []
+    [validateAndSetFile]
   );
-
-  function validateAndSetFile(file: File) {
-    const ext = file.name.split(".").pop()?.toLowerCase();
-    if (!ext || !["pdf", "docx"].includes(ext)) {
-      setError("Only PDF and DOCX files are supported");
-      return;
-    }
-    if (file.size > 50 * 1024 * 1024) {
-      setError("File must be under 50 MB");
-      return;
-    }
-    setSelectedFile(file);
-  }
 
   const handleUpload = useCallback(async () => {
     if (!selectedFile) return;
@@ -97,19 +95,28 @@ export function FileUpload({
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         onClick={() => inputRef.current?.click()}
-        className={cn(
-          "flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed p-6 transition-colors",
-          isDragOver
-            ? "border-primary bg-primary/5"
-            : "border-muted-foreground/25 hover:border-primary/50",
-          isUploading && "pointer-events-none opacity-50"
-        )}
+        className="flex cursor-pointer flex-col items-center justify-center rounded-2xl p-8 transition-all"
+        style={{
+          border: isDragOver
+            ? "2px dashed #6366F1"
+            : "2px dashed rgba(255,255,255,0.1)",
+          background: isDragOver
+            ? "rgba(99,102,241,0.05)"
+            : "rgba(255,255,255,0.02)",
+          opacity: isUploading ? 0.5 : 1,
+          pointerEvents: isUploading ? "none" : "auto",
+        }}
       >
-        <Upload className="mb-2 size-8 text-muted-foreground" />
-        <p className="text-sm font-medium">
+        <div
+          className="w-12 h-12 rounded-xl flex items-center justify-center mb-3"
+          style={{ background: "rgba(99,102,241,0.12)" }}
+        >
+          <Upload className="size-6" style={{ color: "#818CF8" }} />
+        </div>
+        <p className="text-sm font-medium text-white">
           {isDragOver ? "Drop file here" : "Click or drag file to upload"}
         </p>
-        <p className="mt-1 text-xs text-muted-foreground">
+        <p className="mt-1 text-xs" style={{ color: "rgba(255,255,255,0.4)" }}>
           PDF or DOCX, up to 50 MB
         </p>
         <input
@@ -122,32 +129,47 @@ export function FileUpload({
       </div>
 
       {error && (
-        <div className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+        <div
+          className="rounded-xl px-4 py-3 text-sm"
+          style={{
+            background: "rgba(239,68,68,0.1)",
+            border: "1px solid rgba(239,68,68,0.2)",
+            color: "#FCA5A5",
+          }}
+        >
           {error}
         </div>
       )}
 
       {selectedFile && (
-        <div className="flex items-center justify-between rounded-md bg-muted px-3 py-2">
+        <div
+          className="flex items-center justify-between rounded-xl px-4 py-3"
+          style={{
+            background: "rgba(255,255,255,0.04)",
+            border: "1px solid rgba(255,255,255,0.06)",
+          }}
+        >
           <div className="min-w-0">
-            <p className="truncate text-sm font-medium">
+            <p className="truncate text-sm font-medium text-white">
               {selectedFile.name}
             </p>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs" style={{ color: "rgba(255,255,255,0.4)" }}>
               {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Button
-              size="sm"
+            <button
               onClick={handleUpload}
               disabled={isUploading}
+              className="h-9 px-4 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90 disabled:opacity-50"
+              style={{ background: "linear-gradient(135deg, #6366F1, #A855F7)" }}
             >
               {isUploading ? "Uploading..." : "Upload"}
-            </Button>
+            </button>
             <button
               onClick={clearFile}
-              className="rounded p-1 text-muted-foreground hover:bg-background hover:text-foreground"
+              className="rounded-lg p-1.5 transition-colors hover:bg-white/5"
+              style={{ color: "rgba(255,255,255,0.4)" }}
             >
               <X className="size-4" />
             </button>

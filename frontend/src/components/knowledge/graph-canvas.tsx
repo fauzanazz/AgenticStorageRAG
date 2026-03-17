@@ -123,7 +123,7 @@ export function GraphCanvas({ data, className }: GraphCanvasProps) {
       ctx.clearRect(0, 0, width, height);
 
       // Draw edges
-      ctx.strokeStyle = "#374151";
+      ctx.strokeStyle = "rgba(255,255,255,0.1)";
       ctx.lineWidth = 1;
       data.edges.forEach((edge) => {
         const a = positions.get(edge.source);
@@ -138,7 +138,7 @@ export function GraphCanvas({ data, className }: GraphCanvasProps) {
         // Edge label
         const midX = (a.x + b.x) / 2;
         const midY = (a.y + b.y) / 2;
-        ctx.fillStyle = "#9ca3af";
+        ctx.fillStyle = "rgba(255,255,255,0.3)";
         ctx.font = "10px sans-serif";
         ctx.textAlign = "center";
         ctx.fillText(edge.label, midX, midY - 4);
@@ -157,7 +157,7 @@ export function GraphCanvas({ data, className }: GraphCanvasProps) {
         ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
         ctx.fillStyle = color;
         ctx.fill();
-        ctx.strokeStyle = "#1f2937";
+        ctx.strokeStyle = "rgba(255,255,255,0.1)";
         ctx.lineWidth = 2;
         ctx.stroke();
 
@@ -192,10 +192,10 @@ export function GraphCanvas({ data, className }: GraphCanvasProps) {
 
   if (data.nodes.length === 0) {
     return (
-      <div className="flex items-center justify-center h-full text-muted-foreground">
+      <div className="flex items-center justify-center h-full">
         <div className="text-center">
-          <p className="text-lg font-medium">No graph data</p>
-          <p className="text-sm">Upload and process documents to build the knowledge graph</p>
+          <p className="text-lg font-medium" style={{ color: "rgba(255,255,255,0.4)" }}>No graph data</p>
+          <p className="text-sm" style={{ color: "rgba(255,255,255,0.3)" }}>Upload and process documents to build the knowledge graph</p>
         </div>
       </div>
     );

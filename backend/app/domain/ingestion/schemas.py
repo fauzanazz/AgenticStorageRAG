@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -36,7 +37,7 @@ class IngestionJobResponse(BaseModel):
     failed_files: int
     skipped_files: int
     error_message: str | None
-    metadata_: dict = Field(alias="metadata", default_factory=dict)
+    metadata: dict = Field(default_factory=dict, validation_alias="metadata_")
     started_at: datetime
     completed_at: datetime | None
 
@@ -50,6 +51,17 @@ class IngestionJobListResponse(BaseModel):
     total: int
 
 
+class IngestionStatsResponse(BaseModel):
+    """Aggregate statistics for all ingestion jobs."""
+
+    total_jobs: int
+    jobs_by_status: dict[str, int]
+    total_files_processed: int
+    total_files_failed: int
+    total_files_skipped: int
+    active_job: IngestionJobResponse | None = None
+
+
 class DriveFileInfo(BaseModel):
     """Information about a file in Google Drive."""
 
@@ -61,6 +73,49 @@ class DriveFileInfo(BaseModel):
     parent_folder: str | None = None
 
 
+class DriveFolderEntry(BaseModel):
+    """A single item (file or subfolder) inside a Drive folder."""
+
+    file_id: str
+    name: str
+    mime_type: str
+    size: int | None = None
+    modified_time: str | None = None
+    is_folder: bool = False
+
+
+class FileMetadataClassification(BaseModel):
+    """LLM-classified metadata extracted from a file's folder path context.
+
+    Not rule-based -- the LLM infers these fields from the raw folder path
+    so it adapts to any folder structure.
+    """
+
+    folder_path: str = Field(
+        description="Raw folder breadcrumb, e.g. 'Informatika/Semester 3/IF2120 - Probabilitas dan Statistika/Referensi'",
+    )
+    major: str | None = Field(default=None, description="Academic major or department")
+    course_code: str | None = Field(default=None, description="Course code, e.g. IF2120")
+    course_name: str | None = Field(default=None, description="Course name, e.g. Probabilitas dan Statistika")
+    year: str | None = Field(default=None, description="Academic year or curriculum year")
+    category: str | None = Field(
+        default=None,
+        description="Content category: Referensi, Slide, Soal, Catatan, etc.",
+    )
+    additional_context: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Any other LLM-extracted fields that don't fit the above",
+    )
+
+
+class EnrichedFileInfo(DriveFileInfo):
+    """DriveFileInfo enriched with folder context and LLM classification."""
+
+    folder_path: str = ""
+    folder_path_ids: list[str] = Field(default_factory=list)
+    classification: FileMetadataClassification | None = None
+
+
 class IngestionProgressEvent(BaseModel):
     """SSE event for ingestion progress updates."""
 
@@ -69,3 +124,6 @@ class IngestionProgressEvent(BaseModel):
     file_name: str | None = None
     progress: float | None = None  # 0.0 - 1.0
     job_id: uuid.UUID | None = None
+    current_folder: str | None = None
+    files_discovered: int | None = None
+    files_classified: int | None = None

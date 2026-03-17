@@ -276,11 +276,15 @@ class TestGetStats:
         rel_types_result = MagicMock()
         rel_types_result.all.return_value = [("WORKS_AT", 4), ("KNOWS", 2)]
 
-        mock_db.execute.side_effect = [entity_types_result, rel_types_result]
+        embedding_count_result = MagicMock()
+        embedding_count_result.scalar.return_value = 42
+
+        mock_db.execute.side_effect = [entity_types_result, rel_types_result, embedding_count_result]
 
         result = await service.get_stats()
         assert result.total_entities == 8
         assert result.total_relationships == 6
+        assert result.total_embeddings == 42
         assert result.entity_types == {"Person": 5, "Organization": 3}
         assert result.relationship_types == {"WORKS_AT": 4, "KNOWS": 2}
 

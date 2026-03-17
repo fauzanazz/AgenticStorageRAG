@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.ingestion.drive_connector import GoogleDriveConnector
+from app.config import get_settings
 from app.domain.ingestion.exceptions import (
     IngestionAlreadyRunningError,
     IngestionJobNotFoundError,
@@ -22,10 +22,12 @@ from app.domain.ingestion.models import IngestionJob, IngestionStatus
 from app.domain.ingestion.schemas import (
     IngestionJobListResponse,
     IngestionJobResponse,
+    IngestionStatsResponse,
     TriggerIngestionRequest,
 )
-from app.domain.ingestion.swarm import IngestionSwarm
+from app.infra.redis_client import redis_client
 from app.infra.storage import StorageClient
+from app.infra.worker import QUEUE_INGESTION
 
 logger = logging.getLogger(__name__)
 
@@ -72,11 +74,15 @@ class IngestionService:
         if running.scalar_one_or_none() is not None:
             raise IngestionAlreadyRunningError()
 
+        # Resolve folder ID: request > config > None (root)
+        settings = get_settings()
+        folder_id = request.folder_id or settings.google_drive_folder_id or None
+
         # Create job
         job = IngestionJob(
             triggered_by=admin_user_id,
             source="google_drive",
-            folder_id=request.folder_id,
+            folder_id=folder_id,
             status=IngestionStatus.PENDING,
         )
         self._db.add(job)
@@ -85,27 +91,15 @@ class IngestionService:
 
         logger.info("Ingestion job created: %s", job.id)
 
-        # Run the swarm (async, non-blocking in background)
-        connector = GoogleDriveConnector()
-        swarm = IngestionSwarm(
-            db=self._db,
-            storage=self._storage,
-            connector=connector,
-        )
+        # Dispatch to worker queue (non-blocking)
+        await redis_client.enqueue(QUEUE_INGESTION, {
+            "type": "run_ingestion",
+            "job_id": str(job.id),
+            "admin_user_id": str(admin_user_id),
+            "force": request.force,
+        })
+        logger.info("Ingestion job %s dispatched to worker queue", job.id)
 
-        # Execute synchronously for now (background worker handles async)
-        try:
-            await swarm.run(
-                job=job,
-                admin_user_id=admin_user_id,
-                force=request.force,
-            )
-        except Exception as e:
-            logger.exception("Ingestion job %s failed: %s", job.id, e)
-            # Job status already updated by swarm
-
-        # Refresh to get final state
-        await self._db.refresh(job)
         return IngestionJobResponse.model_validate(job)
 
     async def get_job(self, job_id: uuid.UUID) -> IngestionJobResponse:
@@ -122,6 +116,56 @@ class IngestionService:
             raise IngestionJobNotFoundError(str(job_id))
 
         return IngestionJobResponse.model_validate(job)
+
+    async def get_stats(self) -> IngestionStatsResponse:
+        """Get aggregate ingestion statistics.
+
+        Returns counts by status, totals for files processed/failed/skipped,
+        and info about the most recent active job.
+        """
+        # Count by status
+        status_counts_result = await self._db.execute(
+            select(IngestionJob.status, func.count().label("cnt"))
+            .group_by(IngestionJob.status)
+        )
+        status_counts: dict[str, int] = {
+            row.status.value: row.cnt for row in status_counts_result
+        }
+
+        # Total files across all completed jobs
+        totals_result = await self._db.execute(
+            select(
+                func.sum(IngestionJob.processed_files).label("total_processed"),
+                func.sum(IngestionJob.failed_files).label("total_failed"),
+                func.sum(IngestionJob.skipped_files).label("total_skipped"),
+                func.count().label("total_jobs"),
+            )
+        )
+        totals = totals_result.one()
+
+        # Active job (most recent non-terminal)
+        active_result = await self._db.execute(
+            select(IngestionJob)
+            .where(
+                IngestionJob.status.in_([
+                    IngestionStatus.PENDING,
+                    IngestionStatus.SCANNING,
+                    IngestionStatus.PROCESSING,
+                ])
+            )
+            .order_by(IngestionJob.started_at.desc())
+            .limit(1)
+        )
+        active_job = active_result.scalar_one_or_none()
+
+        return IngestionStatsResponse(
+            total_jobs=totals.total_jobs or 0,
+            jobs_by_status=status_counts,
+            total_files_processed=totals.total_processed or 0,
+            total_files_failed=totals.total_failed or 0,
+            total_files_skipped=totals.total_skipped or 0,
+            active_job=IngestionJobResponse.model_validate(active_job) if active_job else None,
+        )
 
     async def list_jobs(
         self,

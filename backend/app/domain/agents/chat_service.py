@@ -140,6 +140,20 @@ class ChatService(IChatService):
         await self._db.flush()
         logger.info("Deleted conversation %s", conversation_id)
 
+    async def update_conversation_title(
+        self, conversation_id: uuid.UUID, title: str
+    ) -> None:
+        """Update a conversation's title.
+
+        Used to set the title from the first user message.
+        No ownership check -- called internally from the agent.
+        """
+        conversation = await self._db.get(Conversation, conversation_id)
+        if conversation:
+            conversation.title = title
+            await self._db.flush()
+            logger.debug("Updated conversation %s title: %s", conversation_id, title)
+
     async def add_message(
         self,
         conversation_id: uuid.UUID,

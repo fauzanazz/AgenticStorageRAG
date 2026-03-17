@@ -67,7 +67,7 @@ class GraphService(IGraphService):
                 properties["properties_json"] = json.dumps(entity.properties)
 
             await self._neo4j.execute_write(
-                f"CREATE (n:{_sanitize_label(entity.entity_type)} $props) RETURN n",
+                f"CREATE (n:Entity:{_sanitize_label(entity.entity_type)} $props) RETURN n",
                 {"props": properties},
             )
 
@@ -384,10 +384,15 @@ class GraphService(IGraphService):
         total_entities = sum(entity_types.values())
         total_relationships = sum(relationship_types.values())
 
+        # Count embeddings from the document_embeddings table
+        from app.domain.knowledge.models import DocumentEmbedding
+        embedding_count_stmt = select(sa_func.count(DocumentEmbedding.id))
+        total_embeddings = (await self._db.execute(embedding_count_stmt)).scalar() or 0
+
         return KnowledgeStats(
             total_entities=total_entities,
             total_relationships=total_relationships,
-            total_embeddings=0,  # Filled by caller if needed
+            total_embeddings=total_embeddings,
             entity_types=entity_types,
             relationship_types=relationship_types,
         )
@@ -432,28 +437,87 @@ class GraphService(IGraphService):
     async def _get_entity_relationships(
         self, neo4j_id: str
     ) -> list[RelationshipResponse]:
-        """Get all relationships for an entity from Neo4j."""
+        """Get all relationships for an entity from Neo4j.
+
+        Resolves real PostgreSQL entity/relationship IDs by looking up
+        neo4j_ids instead of using placeholder UUIDs.
+        """
         records = await self._neo4j.execute_read(
             """
             MATCH (n {neo4j_id: $id})-[r]-(m)
             RETURN type(r) AS rel_type, r.neo4j_id AS rel_id, r.weight AS weight,
                    m.neo4j_id AS other_id, m.name AS other_name, m.entity_type AS other_type,
-                   startNode(r).neo4j_id AS source_neo4j_id
+                   startNode(r).neo4j_id AS source_neo4j_id,
+                   n.neo4j_id AS self_neo4j_id
             """,
             {"id": neo4j_id},
         )
 
+        if not records:
+            return []
+
+        # Collect all neo4j_ids we need to resolve
+        all_neo4j_ids = set()
+        all_rel_neo4j_ids = set()
+        for record in records:
+            all_neo4j_ids.add(record.get("self_neo4j_id", ""))
+            all_neo4j_ids.add(record.get("other_id", ""))
+            if record.get("rel_id"):
+                all_rel_neo4j_ids.add(record["rel_id"])
+
+        all_neo4j_ids.discard("")
+
+        # Batch resolve entity IDs from PostgreSQL
+        entity_map: dict[str, tuple[uuid.UUID, str]] = {}  # neo4j_id -> (pg_id, name)
+        if all_neo4j_ids:
+            stmt = select(
+                KnowledgeEntity.neo4j_id,
+                KnowledgeEntity.id,
+                KnowledgeEntity.name,
+            ).where(KnowledgeEntity.neo4j_id.in_(list(all_neo4j_ids)))
+            result = await self._db.execute(stmt)
+            for neo_id, pg_id, name in result.all():
+                entity_map[neo_id] = (pg_id, name)
+
+        # Batch resolve relationship IDs
+        rel_id_map: dict[str, uuid.UUID] = {}  # neo4j_id -> pg_id
+        if all_rel_neo4j_ids:
+            rel_stmt = select(
+                KnowledgeRelationship.neo4j_id,
+                KnowledgeRelationship.id,
+            ).where(KnowledgeRelationship.neo4j_id.in_(list(all_rel_neo4j_ids)))
+            rel_result = await self._db.execute(rel_stmt)
+            for neo_id, pg_id in rel_result.all():
+                rel_id_map[neo_id] = pg_id
+
         relationships = []
         for record in records:
+            source_neo = record.get("source_neo4j_id", "")
+            other_neo = record.get("other_id", "")
+            rel_neo = record.get("rel_id", "")
+
+            # Determine source/target based on relationship direction
+            source_info = entity_map.get(source_neo)
+            target_neo = other_neo if source_neo == neo4j_id else neo4j_id
+            target_info = entity_map.get(other_neo)
+
+            # If this entity is the source
+            if source_neo == neo4j_id:
+                src_id, src_name = entity_map.get(neo4j_id, (uuid.UUID(int=0), ""))
+                tgt_id, tgt_name = entity_map.get(other_neo, (uuid.UUID(int=0), record.get("other_name", "")))
+            else:
+                src_id, src_name = entity_map.get(other_neo, (uuid.UUID(int=0), record.get("other_name", "")))
+                tgt_id, tgt_name = entity_map.get(neo4j_id, (uuid.UUID(int=0), ""))
+
             relationships.append(
                 RelationshipResponse(
-                    id=uuid.uuid4(),
-                    neo4j_id=record.get("rel_id", ""),
+                    id=rel_id_map.get(rel_neo, uuid.UUID(int=0)),
+                    neo4j_id=rel_neo,
                     relationship_type=record["rel_type"],
-                    source_entity_id=uuid.uuid4(),  # placeholder
-                    target_entity_id=uuid.uuid4(),  # placeholder
-                    source_entity_name="",
-                    target_entity_name=record.get("other_name", ""),
+                    source_entity_id=src_id,
+                    target_entity_id=tgt_id,
+                    source_entity_name=src_name,
+                    target_entity_name=tgt_name,
                     weight=record.get("weight", 1.0),
                     created_at=__import__("datetime").datetime.now(
                         __import__("datetime").timezone.utc

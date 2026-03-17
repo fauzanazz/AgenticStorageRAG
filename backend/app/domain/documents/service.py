@@ -24,6 +24,7 @@ from app.domain.documents.models import Document, DocumentChunk, DocumentSource,
 from app.domain.documents.processors import get_processor
 from app.domain.documents.schemas import (
     ChunkData,
+    DashboardStatsResponse,
     DocumentListResponse,
     DocumentResponse,
     DocumentUploadResponse,
@@ -123,7 +124,7 @@ class DocumentService:
         )
 
     async def process_document(self, document_id: uuid.UUID) -> None:
-        """Process a document: extract text, chunk, and store chunks.
+        """Process a document: extract text, chunk, store chunks, embed, and extract KG.
 
         Called by the background worker after upload.
         """
@@ -153,6 +154,7 @@ class DocumentService:
             processing_result: ProcessingResult = await processor.process(file_content)
 
             # Store chunks
+            chunk_records = []
             for chunk_data in processing_result.chunks:
                 chunk = DocumentChunk(
                     document_id=document.id,
@@ -163,16 +165,19 @@ class DocumentService:
                     metadata_=chunk_data.metadata,
                 )
                 self._db.add(chunk)
+                chunk_records.append(chunk)
+
+            await self._db.flush()
 
             # Update document status
             document.status = DocumentStatus.READY
             document.chunk_count = len(processing_result.chunks)
             document.metadata_ = processing_result.metadata
-            document.processed_at = datetime.now(timezone.utc)
 
             if processing_result.page_count is not None:
                 document.metadata_["page_count"] = processing_result.page_count
 
+            document.processed_at = datetime.now(timezone.utc)
             await self._db.commit()
 
             logger.info(
@@ -181,12 +186,107 @@ class DocumentService:
                 len(processing_result.chunks),
             )
 
+            # --- Post-processing: embeddings + KG extraction ---
+            # These run after commit so the chunks have IDs.
+            await self._embed_chunks(document, chunk_records)
+            await self._extract_knowledge_graph(document, chunk_records)
+
         except Exception as e:
             document.status = DocumentStatus.FAILED
             document.error_message = str(e)[:500]
             await self._db.commit()
             logger.exception("Document processing failed: %s", document_id)
             raise DocumentProcessingError(str(document_id), str(e)) from e
+
+    async def _embed_chunks(
+        self,
+        document: Document,
+        chunks: list[DocumentChunk],
+    ) -> None:
+        """Generate and store vector embeddings for document chunks.
+
+        Non-fatal: logs errors but does not fail the document processing.
+        """
+        if not chunks:
+            return
+
+        try:
+            from app.domain.knowledge.vector_service import VectorService
+
+            vector_service = VectorService(db=self._db)
+            chunk_dicts = [
+                {
+                    "id": chunk.id,
+                    "content": chunk.content,
+                    "metadata": chunk.metadata_ or {},
+                }
+                for chunk in chunks
+            ]
+
+            count = await vector_service.embed_chunks(
+                chunks=chunk_dicts,
+                document_id=document.id,
+            )
+            await self._db.commit()
+            logger.info(
+                "Embedded %d chunks for document %s", count, document.id
+            )
+        except Exception as e:
+            logger.error(
+                "Embedding generation failed for document %s (non-fatal): %s",
+                document.id,
+                e,
+            )
+
+    async def _extract_knowledge_graph(
+        self,
+        document: Document,
+        chunks: list[DocumentChunk],
+    ) -> None:
+        """Extract entities and relationships from chunks into the KG.
+
+        Non-fatal: logs errors but does not fail the document processing.
+        """
+        if not chunks:
+            return
+
+        try:
+            from app.domain.knowledge.graph_service import GraphService
+            from app.domain.knowledge.kg_builder import KGBuilder
+            from app.infra.llm import llm_provider
+            from app.infra.neo4j_client import neo4j_client
+
+            graph_service = GraphService(db=self._db, neo4j=neo4j_client)
+            kg_builder = KGBuilder(
+                graph_service=graph_service,
+                llm=llm_provider,
+            )
+
+            chunk_dicts = [
+                {
+                    "content": chunk.content,
+                    "metadata": chunk.metadata_ or {},
+                }
+                for chunk in chunks
+            ]
+
+            result = await kg_builder.build_from_chunks(
+                chunks=chunk_dicts,
+                document_id=document.id,
+            )
+            await self._db.commit()
+            logger.info(
+                "KG extraction for document %s: %d entities, %d relationships",
+                document.id,
+                result.get("entities_created", 0),
+                result.get("relationships_created", 0),
+            )
+        except Exception as e:
+            logger.error(
+                "KG extraction failed for document %s (non-fatal): %s",
+                document.id,
+                e,
+            )
 
     async def get_document(
         self,
@@ -315,3 +415,61 @@ class DocumentService:
 
         logger.info("Cleaned up %d expired documents", len(expired_docs))
         return len(expired_docs)
+
+    async def get_dashboard_stats(self, user_id: uuid.UUID) -> DashboardStatsResponse:
+        """Get aggregated stats for the user dashboard.
+
+        Collects document, chunk, entity, relationship, and embedding counts.
+        """
+        # Document counts
+        total_docs = (
+            await self._db.execute(
+                select(func.count()).where(Document.user_id == user_id)
+            )
+        ).scalar() or 0
+
+        processing_docs = (
+            await self._db.execute(
+                select(func.count()).where(
+                    Document.user_id == user_id,
+                    Document.status == DocumentStatus.PROCESSING,
+                )
+            )
+        ).scalar() or 0
+
+        # Chunk count
+        total_chunks = (
+            await self._db.execute(
+                select(func.count(DocumentChunk.id)).join(
+                    Document, DocumentChunk.document_id == Document.id
+                ).where(Document.user_id == user_id)
+            )
+        ).scalar() or 0
+
+        # Knowledge graph stats (global, not per-user)
+        from app.domain.knowledge.models import (
+            DocumentEmbedding,
+            KnowledgeEntity,
+            KnowledgeRelationship,
+        )
+
+        total_entities = (
+            await self._db.execute(select(func.count(KnowledgeEntity.id)))
+        ).scalar() or 0
+
+        total_relationships = (
+            await self._db.execute(select(func.count(KnowledgeRelationship.id)))
+        ).scalar() or 0
+
+        total_embeddings = (
+            await self._db.execute(select(func.count(DocumentEmbedding.id)))
+        ).scalar() or 0
+
+        return DashboardStatsResponse(
+            total_documents=total_docs,
+            total_chunks=total_chunks,
+            total_entities=total_entities,
+            total_relationships=total_relationships,
+            total_embeddings=total_embeddings,
+            processing_documents=processing_docs,
+        )

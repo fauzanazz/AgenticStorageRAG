@@ -9,7 +9,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any
 
-from app.domain.ingestion.schemas import DriveFileInfo
+from app.domain.ingestion.schemas import DriveFolderEntry, DriveFileInfo
 
 
 class SourceConnector(ABC):
@@ -79,5 +79,24 @@ class SourceConnector(ABC):
 
         Returns:
             Dict of metadata key-value pairs
+        """
+        ...
+
+    @abstractmethod
+    async def list_folder_children(
+        self,
+        folder_id: str,
+    ) -> list[DriveFolderEntry]:
+        """List all direct children (files AND subfolders) of a folder.
+
+        Unlike ``list_files`` (which only returns ingestible documents),
+        this returns every child including sub-folders so the orchestrator
+        agent can decide which folders to recurse into.
+
+        Args:
+            folder_id: The source-specific folder identifier
+
+        Returns:
+            List of DriveFolderEntry objects (files + folders)
         """
         ...

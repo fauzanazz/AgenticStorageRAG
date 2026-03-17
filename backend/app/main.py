@@ -20,6 +20,7 @@ from app.infra.redis_client import redis_client
 from app.infra.storage import storage_client
 from app.infra.llm import llm_provider
 from app.infra.middleware import RequestLoggingMiddleware
+from app.scripts.graph_schema import apply_schema
 from app.domain.auth.router import router as auth_router
 from app.domain.documents.router import router as documents_router
 from app.domain.knowledge.router import router as knowledge_router
@@ -27,6 +28,48 @@ from app.domain.agents.router import router as agents_router
 from app.domain.ingestion.router import router as ingestion_router
 
 logger = logging.getLogger(__name__)
+
+
+async def _auto_seed_graph_if_empty() -> None:
+    """Auto-seed the Neo4j graph from local seed files if the graph is empty.
+
+    Only triggers when:
+    1. Neo4j graph has zero nodes
+    2. manifest.json exists with data files listed
+    """
+    import json
+    from pathlib import Path
+
+    manifest_path = Path(__file__).resolve().parent.parent / "graph_seed" / "manifest.json"
+    if not manifest_path.exists():
+        return
+
+    # Check if graph is empty
+    settings = get_settings()
+    records = await neo4j_client.execute_read("MATCH (n) RETURN count(n) AS cnt LIMIT 1")
+    node_count = records[0]["cnt"] if records else 0
+
+    if node_count > 0:
+        logger.debug("Neo4j graph has %d nodes, skipping auto-seed", node_count)
+        return
+
+    # Check if manifest has data
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    entity_files = manifest.get("files", {}).get("entities", [])
+    if not entity_files:
+        logger.debug("No entity files in manifest, skipping auto-seed")
+        return
+
+    # Import
+    logger.info(
+        "Auto-seeding graph from local files (version %s, updated %s)",
+        manifest.get("version"),
+        manifest.get("updated_at"),
+    )
+    from app.scripts.graph_import import import_graph
+
+    await import_graph(clean=False)
+    logger.info("Auto-seed complete")
 
 
 @asynccontextmanager
@@ -43,10 +86,25 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     init_db()
     logger.info("Database engine initialized")
 
+    neo4j_connected = False
     try:
         await neo4j_client.connect()
+        neo4j_connected = True
     except Exception as e:
         logger.warning("Neo4j connection failed (non-fatal): %s", e)
+
+    # Apply Neo4j schema (indexes/constraints) and auto-seed if graph is empty
+    if neo4j_connected:
+        try:
+            await apply_schema(neo4j_client.driver)
+            logger.info("Neo4j schema applied")
+        except Exception as e:
+            logger.warning("Neo4j schema init failed (non-fatal): %s", e)
+
+        try:
+            await _auto_seed_graph_if_empty()
+        except Exception as e:
+            logger.warning("Neo4j auto-seed failed (non-fatal): %s", e)
 
     try:
         await redis_client.connect()
@@ -55,6 +113,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     try:
         storage_client.connect()
+        await storage_client.ensure_bucket()
     except Exception as e:
         logger.warning("Supabase Storage connection failed (non-fatal): %s", e)
 

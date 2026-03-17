@@ -1,31 +1,75 @@
 """LiteLLM provider configuration.
 
-Provides a unified interface for LLM calls with Anthropic Claude
-as primary and OpenAI as fallback. Uses LiteLLM for provider abstraction.
+Provides a unified interface for LLM calls with Alibaba DashScope Qwen
+as primary and Anthropic Claude as fallback. Uses LiteLLM for provider abstraction.
+
+Cost tracking is persisted to Redis so that all worker processes and the
+API server share a single, consistent usage ledger.
 """
 
 from __future__ import annotations
 
 import logging
+import os
+from dataclasses import dataclass, field
 from typing import Any
 
 import litellm
 from litellm import acompletion, ModelResponse
+from litellm import completion_cost as litellm_completion_cost
 
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+# Redis key prefix for LLM usage stats
+_REDIS_USAGE_KEY = "llm:usage:totals"
+_REDIS_MODEL_PREFIX = "llm:usage:model:"
+
+# DashScope international endpoint (Singapore region)
+DASHSCOPE_API_BASE = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+
+
+@dataclass
+class UsageStats:
+    """Accumulated LLM usage statistics (in-memory, resets on restart)."""
+
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    total_cost_usd: float = 0.0
+    total_calls: int = 0
+    by_model: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+    def record(self, model: str, input_tokens: int, output_tokens: int, cost: float) -> None:
+        """Record a single completion call."""
+        self.total_input_tokens += input_tokens
+        self.total_output_tokens += output_tokens
+        self.total_cost_usd += cost
+        self.total_calls += 1
+
+        if model not in self.by_model:
+            self.by_model[model] = {
+                "calls": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cost_usd": 0.0,
+            }
+        self.by_model[model]["calls"] += 1
+        self.by_model[model]["input_tokens"] += input_tokens
+        self.by_model[model]["output_tokens"] += output_tokens
+        self.by_model[model]["cost_usd"] += cost
 
 
 class LLMProvider:
     """LLM provider with primary/fallback model support.
 
     Uses LiteLLM to abstract away provider differences.
-    Claude is primary, OpenAI is fallback.
+    Qwen (DashScope) is primary, Claude is fallback.
     """
 
     def __init__(self) -> None:
         self._initialized: bool = False
+        self.usage: UsageStats = UsageStats()
 
     def initialize(self) -> None:
         """Configure LiteLLM with API keys and settings."""
@@ -36,6 +80,10 @@ class LLMProvider:
             litellm.anthropic_key = settings.anthropic_api_key
         if settings.openai_api_key:
             litellm.openai_key = settings.openai_api_key
+        if settings.dashscope_api_key:
+            # LiteLLM reads DASHSCOPE_API_KEY env var for the dashscope/ prefix
+            os.environ["DASHSCOPE_API_KEY"] = settings.dashscope_api_key
+            os.environ["DASHSCOPE_API_BASE"] = DASHSCOPE_API_BASE
 
         # Configure LiteLLM behavior
         litellm.set_verbose = settings.debug
@@ -98,6 +146,8 @@ class LLMProvider:
                 stream=stream,
                 **kwargs,
             )
+            if not stream:
+                self._record_usage(target_model, response)
             return response
 
         except Exception as primary_error:
@@ -119,7 +169,73 @@ class LLMProvider:
                 stream=stream,
                 **kwargs,
             )
+            if not stream:
+                self._record_usage(self.fallback_model, response)
             return response
+
+    def _record_usage(self, model: str, response: ModelResponse) -> None:
+        """Extract token usage and cost from a LiteLLM response and accumulate.
+
+        Writes to both in-memory stats (fast reads within same process)
+        and Redis (shared across workers + API server).
+        """
+        try:
+            usage = getattr(response, "usage", None)
+            if usage is None:
+                return
+            input_tokens = getattr(usage, "prompt_tokens", 0) or 0
+            output_tokens = getattr(usage, "completion_tokens", 0) or 0
+            try:
+                cost = litellm_completion_cost(completion_response=response)
+            except Exception:
+                # Cost lookup may fail for providers without pricing data
+                cost = 0.0
+
+            # In-memory accumulation (for local process reads)
+            self.usage.record(model, input_tokens, output_tokens, cost)
+
+            # Async Redis push — fire and forget via the event loop
+            import asyncio
+
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self._push_usage_to_redis(model, input_tokens, output_tokens, cost))
+            except RuntimeError:
+                # No running event loop (e.g., during sync tests)
+                pass
+        except Exception as e:
+            logger.debug("Failed to record usage: %s", e)
+
+    async def _push_usage_to_redis(
+        self,
+        model: str,
+        input_tokens: int,
+        output_tokens: int,
+        cost: float,
+    ) -> None:
+        """Push usage stats to Redis so all processes share a single ledger."""
+        try:
+            from app.infra.redis_client import redis_client
+
+            client = redis_client.client  # raises if not connected
+
+            # Atomic increments on the global totals hash
+            pipe = client.pipeline(transaction=False)
+            pipe.hincrby(_REDIS_USAGE_KEY, "total_input_tokens", input_tokens)
+            pipe.hincrby(_REDIS_USAGE_KEY, "total_output_tokens", output_tokens)
+            pipe.hincrby(_REDIS_USAGE_KEY, "total_calls", 1)
+            pipe.hincrbyfloat(_REDIS_USAGE_KEY, "total_cost_usd", cost)
+
+            # Per-model hash
+            model_key = f"{_REDIS_MODEL_PREFIX}{model}"
+            pipe.hincrby(model_key, "calls", 1)
+            pipe.hincrby(model_key, "input_tokens", input_tokens)
+            pipe.hincrby(model_key, "output_tokens", output_tokens)
+            pipe.hincrbyfloat(model_key, "cost_usd", cost)
+
+            await pipe.execute()
+        except Exception as e:
+            logger.debug("Failed to push usage to Redis: %s", e)
 
     async def complete_with_retry(
         self,
@@ -149,9 +265,83 @@ class LLMProvider:
             "status": "configured" if self._initialized else "not_initialized",
             "primary_model": settings.default_model,
             "fallback_model": settings.fallback_model,
+            "dashscope_key_set": bool(settings.dashscope_api_key),
             "anthropic_key_set": bool(settings.anthropic_api_key),
             "openai_key_set": bool(settings.openai_api_key),
         }
+
+    def get_cost_summary(self) -> dict[str, Any]:
+        """Return accumulated token usage and estimated cost.
+
+        Reads from in-memory stats only (synchronous).
+        Use get_cost_summary_from_redis() for cross-process totals.
+        """
+        return {
+            "total_calls": self.usage.total_calls,
+            "total_input_tokens": self.usage.total_input_tokens,
+            "total_output_tokens": self.usage.total_output_tokens,
+            "total_tokens": self.usage.total_input_tokens + self.usage.total_output_tokens,
+            "total_cost_usd": round(self.usage.total_cost_usd, 6),
+            "by_model": {
+                model: {
+                    **stats,
+                    "cost_usd": round(stats["cost_usd"], 6),
+                }
+                for model, stats in self.usage.by_model.items()
+            },
+            "note": "In-memory only — resets on server restart.",
+        }
+
+    async def get_cost_summary_from_redis(self) -> dict[str, Any]:
+        """Read aggregated cost data from Redis (cross-process totals).
+
+        This is the authoritative source — all workers push here.
+        """
+        try:
+            from app.infra.redis_client import redis_client
+
+            client = redis_client.client
+
+            # Read global totals
+            totals = await client.hgetall(_REDIS_USAGE_KEY)
+            total_input = int(totals.get("total_input_tokens", 0))
+            total_output = int(totals.get("total_output_tokens", 0))
+            total_calls = int(totals.get("total_calls", 0))
+            total_cost = float(totals.get("total_cost_usd", 0.0))
+
+            # Scan for per-model keys
+            by_model: dict[str, dict[str, Any]] = {}
+            cursor = "0"
+            while True:
+                cursor, keys = await client.scan(
+                    cursor=cursor,
+                    match=f"{_REDIS_MODEL_PREFIX}*",
+                    count=100,
+                )
+                for key in keys:
+                    model_name = key.replace(_REDIS_MODEL_PREFIX, "")
+                    model_data = await client.hgetall(key)
+                    by_model[model_name] = {
+                        "calls": int(model_data.get("calls", 0)),
+                        "input_tokens": int(model_data.get("input_tokens", 0)),
+                        "output_tokens": int(model_data.get("output_tokens", 0)),
+                        "cost_usd": round(float(model_data.get("cost_usd", 0.0)), 6),
+                    }
+                if cursor == "0":
+                    break
+
+            return {
+                "total_calls": total_calls,
+                "total_input_tokens": total_input,
+                "total_output_tokens": total_output,
+                "total_tokens": total_input + total_output,
+                "total_cost_usd": round(total_cost, 6),
+                "by_model": by_model,
+                "source": "redis",
+            }
+        except Exception as e:
+            logger.warning("Redis cost read failed, falling back to in-memory: %s", e)
+            return self.get_cost_summary()
 
 
 # Module-level singleton (initialized via lifespan)

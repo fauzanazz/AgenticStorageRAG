@@ -9,6 +9,7 @@ from app.infra.worker import (
     HANDLERS,
     register_handler,
     process_job,
+    MAX_RETRIES,
 )
 
 
@@ -34,7 +35,7 @@ class TestRegisterHandler:
 
 
 class TestProcessJob:
-    """Tests for job processing."""
+    """Tests for job processing with retry and DLQ."""
 
     @pytest.mark.asyncio
     async def test_process_job_dispatches_to_handler(self) -> None:
@@ -45,7 +46,7 @@ class TestProcessJob:
         HANDLERS["test_process"] = mock_handler
 
         job_data = {"type": "test_process", "id": "job-1", "payload": "test"}
-        await process_job(job_data)
+        await process_job(job_data, "jobs:test")
 
         mock_handler.assert_called_once_with(job_data)
 
@@ -56,26 +57,69 @@ class TestProcessJob:
     async def test_process_job_handles_missing_type(self) -> None:
         """process_job should log error for jobs without type."""
         # Should not raise, just log
-        await process_job({"data": "no type field"})
+        await process_job({"data": "no type field"}, "jobs:test")
 
     @pytest.mark.asyncio
-    async def test_process_job_handles_unknown_type(self) -> None:
-        """process_job should log error for unregistered job types."""
-        # Should not raise, just log
-        await process_job({"type": "unknown_type_xyz"})
+    @patch("app.infra.worker.redis_client")
+    async def test_process_job_handles_unknown_type(self, mock_redis: MagicMock) -> None:
+        """process_job should move unhandled job types to DLQ."""
+        mock_redis.move_to_dlq = AsyncMock()
+
+        job_data = {"type": "unknown_type_xyz"}
+        await process_job(job_data, "jobs:test")
+
+        # Should be moved to DLQ
+        mock_redis.move_to_dlq.assert_called_once()
+        call_args = mock_redis.move_to_dlq.call_args
+        assert call_args[0][0] == "jobs:test"
+        assert "_dlq_reason" in call_args[0][1]
 
     @pytest.mark.asyncio
-    async def test_process_job_catches_handler_errors(self) -> None:
-        """process_job should catch and log handler exceptions."""
+    @patch("app.infra.worker.redis_client")
+    async def test_process_job_retries_on_failure(self, mock_redis: MagicMock) -> None:
+        """process_job should re-enqueue with backoff on first failure."""
         original = dict(HANDLERS)
+
+        mock_redis.enqueue = AsyncMock()
 
         async def failing_handler(data: dict) -> None:
             raise ValueError("Handler exploded")
 
         HANDLERS["failing_job"] = failing_handler
 
-        # Should not raise -- error is caught and logged
-        await process_job({"type": "failing_job", "id": "fail-1"})
+        job_data = {"type": "failing_job", "id": "fail-1", "_retry_count": 0}
+        await process_job(job_data, "jobs:test")
+
+        # Should be re-enqueued with incremented retry count
+        mock_redis.enqueue.assert_called_once()
+        call_args = mock_redis.enqueue.call_args
+        assert call_args[0][0] == "jobs:test"
+        assert call_args[0][1]["_retry_count"] == 1
+
+        HANDLERS.clear()
+        HANDLERS.update(original)
+
+    @pytest.mark.asyncio
+    @patch("app.infra.worker.redis_client")
+    async def test_process_job_moves_to_dlq_after_max_retries(self, mock_redis: MagicMock) -> None:
+        """process_job should move to DLQ after max retries exceeded."""
+        original = dict(HANDLERS)
+
+        mock_redis.move_to_dlq = AsyncMock()
+
+        async def failing_handler(data: dict) -> None:
+            raise ValueError("Handler exploded")
+
+        HANDLERS["failing_job"] = failing_handler
+
+        job_data = {"type": "failing_job", "id": "fail-1", "_retry_count": MAX_RETRIES}
+        await process_job(job_data, "jobs:test")
+
+        # Should be moved to DLQ
+        mock_redis.move_to_dlq.assert_called_once()
+        call_args = mock_redis.move_to_dlq.call_args
+        assert call_args[0][0] == "jobs:test"
+        assert "_dlq_reason" in call_args[0][1]
 
         HANDLERS.clear()
         HANDLERS.update(original)

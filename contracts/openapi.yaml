@@ -1,7 +1,7 @@
 openapi: "3.1.0"
 info:
   title: DingDong RAG API
-  version: "0.1.0"
+  version: "0.2.0"
   description: |
     Agentic Knowledge Graph RAG system API.
     This is the contract that the backend implements and the frontend consumes.
@@ -13,13 +13,14 @@ servers:
     description: Production
 
 paths:
+  # ── System ────────────────────────────────────────────────────────────
   /health:
     get:
       operationId: healthCheck
       summary: Health check
       description: Returns the health status of the API and its dependencies.
-      tags:
-        - System
+      tags: [System]
+      security: []
       responses:
         "200":
           description: Service is healthy
@@ -28,13 +29,12 @@ paths:
               schema:
                 $ref: "#/components/schemas/HealthResponse"
 
-  # --- Auth endpoints (Wave 2) ---
+  # ── Auth ──────────────────────────────────────────────────────────────
   /auth/register:
     post:
       operationId: register
       summary: Register a new user
-      tags:
-        - Auth
+      tags: [Auth]
       security: []
       requestBody:
         required: true
@@ -56,8 +56,7 @@ paths:
     post:
       operationId: login
       summary: Authenticate user
-      tags:
-        - Auth
+      tags: [Auth]
       security: []
       requestBody:
         required: true
@@ -79,8 +78,7 @@ paths:
     post:
       operationId: refreshToken
       summary: Refresh access token
-      tags:
-        - Auth
+      tags: [Auth]
       security: []
       requestBody:
         required: true
@@ -102,8 +100,7 @@ paths:
     get:
       operationId: getCurrentUser
       summary: Get current authenticated user
-      tags:
-        - Auth
+      tags: [Auth]
       responses:
         "200":
           description: Current user info
@@ -113,48 +110,553 @@ paths:
                 $ref: "#/components/schemas/UserResponse"
         "401":
           description: Not authenticated
+    patch:
+      operationId: updateCurrentUser
+      summary: Update current user profile
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProfileRequest"
+      responses:
+        "200":
+          description: Profile updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResponse"
+        "401":
+          description: Not authenticated
+        "409":
+          description: Email already in use
 
-  # --- Document endpoints (Wave 3) ---
-  # /documents:
-  # /documents/{id}:
+  # ── Documents ─────────────────────────────────────────────────────────
+  /documents:
+    post:
+      operationId: uploadDocument
+      summary: Upload a document
+      tags: [Documents]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        "201":
+          description: Document uploaded and queued for processing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentUploadResponse"
+        "413":
+          description: File too large
+        "415":
+          description: Unsupported file type
+    get:
+      operationId: listDocuments
+      summary: List documents
+      tags: [Documents]
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: Paginated list of documents
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentListResponse"
 
-  # --- Knowledge endpoints (Wave 4) ---
-  # /knowledge/query:
-  # /knowledge/graph/stats:
+  /documents/{document_id}:
+    get:
+      operationId: getDocument
+      summary: Get document details
+      tags: [Documents]
+      parameters:
+        - name: document_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Document details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentResponse"
+        "404":
+          description: Document not found
+    delete:
+      operationId: deleteDocument
+      summary: Delete a document
+      tags: [Documents]
+      parameters:
+        - name: document_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Document deleted
+        "404":
+          description: Document not found
 
-  # --- Agent endpoints (Wave 5) ---
-  # /chat:
-  # /chat/ws:
+  /documents/stats/dashboard:
+    get:
+      operationId: getDashboardStats
+      summary: Get dashboard stats
+      tags: [Documents]
+      responses:
+        "200":
+          description: Aggregated dashboard statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardStatsResponse"
 
-  # --- Ingestion endpoints (Wave 6, admin-only) ---
-  # /admin/ingestion/trigger:
-  # /admin/ingestion/status:
+  # ── Knowledge ─────────────────────────────────────────────────────────
+  /knowledge/entities:
+    post:
+      operationId: createEntity
+      summary: Create a knowledge entity
+      tags: [Knowledge]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EntityCreate"
+      responses:
+        "201":
+          description: Entity created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EntityResponse"
+
+  /knowledge/entities/{entity_id}:
+    get:
+      operationId: getEntity
+      summary: Get entity with relationships
+      tags: [Knowledge]
+      parameters:
+        - name: entity_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Entity with relationships
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EntityWithRelationships"
+        "404":
+          description: Entity not found
+
+  /knowledge/relationships:
+    post:
+      operationId: createRelationship
+      summary: Create a relationship between entities
+      tags: [Knowledge]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RelationshipCreate"
+      responses:
+        "201":
+          description: Relationship created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RelationshipResponse"
+        "404":
+          description: Entity not found
+
+  /knowledge/search/vector:
+    post:
+      operationId: vectorSearch
+      summary: Search by vector similarity
+      tags: [Knowledge]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VectorSearchRequest"
+      responses:
+        "200":
+          description: Vector search results
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/VectorSearchResult"
+
+  /knowledge/search/hybrid:
+    post:
+      operationId: hybridSearch
+      summary: Hybrid search combining vector and graph
+      tags: [Knowledge]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HybridSearchRequest"
+      responses:
+        "200":
+          description: Hybrid search results
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/HybridSearchResult"
+
+  /knowledge/graph:
+    get:
+      operationId: getGraph
+      summary: Get graph visualization data
+      tags: [Knowledge]
+      parameters:
+        - name: document_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: entity_types
+          in: query
+          description: Comma-separated entity types
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+      responses:
+        "200":
+          description: Graph visualization data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GraphVisualization"
+
+  /knowledge/stats:
+    get:
+      operationId: getKnowledgeStats
+      summary: Get knowledge graph statistics
+      tags: [Knowledge]
+      responses:
+        "200":
+          description: Knowledge graph statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeStats"
+
+  # ── Chat ──────────────────────────────────────────────────────────────
+  /chat/stream:
+    post:
+      operationId: chatStream
+      summary: Stream a chat response (SSE)
+      description: |
+        Streams agent response via Server-Sent Events.
+        Event types: conversation_created, tool_call, token, citation, done, error
+      tags: [Chat]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatRequest"
+      responses:
+        "200":
+          description: SSE stream of chat events
+          content:
+            text/event-stream: {}
+
+  /chat/message:
+    post:
+      operationId: chatMessage
+      summary: Non-streaming chat response
+      tags: [Chat]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatRequest"
+      responses:
+        "200":
+          description: Complete chat message
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /chat/conversations:
+    get:
+      operationId: listConversations
+      summary: List conversations
+      tags: [Chat]
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        "200":
+          description: List of conversations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ConversationResponse"
+    post:
+      operationId: createConversation
+      summary: Create a new conversation
+      tags: [Chat]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConversationCreate"
+      responses:
+        "201":
+          description: Conversation created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationResponse"
+
+  /chat/conversations/{conversation_id}:
+    get:
+      operationId: getConversation
+      summary: Get conversation details
+      tags: [Chat]
+      parameters:
+        - name: conversation_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Conversation details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationResponse"
+        "404":
+          description: Conversation not found
+    delete:
+      operationId: deleteConversation
+      summary: Delete a conversation
+      tags: [Chat]
+      parameters:
+        - name: conversation_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Conversation deleted
+        "404":
+          description: Conversation not found
+
+  /chat/conversations/{conversation_id}/messages:
+    get:
+      operationId: getMessages
+      summary: Get conversation messages
+      tags: [Chat]
+      parameters:
+        - name: conversation_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+      responses:
+        "200":
+          description: Message history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MessageResponse"
+        "404":
+          description: Conversation not found
+
+  # ── Admin: Ingestion ──────────────────────────────────────────────────
+  /admin/ingestion/trigger:
+    post:
+      operationId: triggerIngestion
+      summary: Trigger a new ingestion job
+      description: Admin only. Starts ingesting files from Google Drive.
+      tags: [Admin]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TriggerIngestionRequest"
+      responses:
+        "202":
+          description: Ingestion job accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestionJobResponse"
+        "403":
+          description: Admin access required
+        "409":
+          description: Ingestion already running
+
+  /admin/ingestion/jobs:
+    get:
+      operationId: listIngestionJobs
+      summary: List ingestion jobs
+      tags: [Admin]
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: Paginated list of ingestion jobs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestionJobListResponse"
+        "403":
+          description: Admin access required
+
+  /admin/ingestion/jobs/{job_id}:
+    get:
+      operationId: getIngestionJob
+      summary: Get ingestion job details
+      tags: [Admin]
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ingestion job details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestionJobResponse"
+        "403":
+          description: Admin access required
+        "404":
+          description: Job not found
+
+  /admin/ingestion/jobs/{job_id}/cancel:
+    post:
+      operationId: cancelIngestionJob
+      summary: Cancel a running ingestion job
+      tags: [Admin]
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Job cancelled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestionJobResponse"
+        "403":
+          description: Admin access required
+        "404":
+          description: Job not found
 
 components:
   schemas:
+    # ── System ────────────────────────────────────────────────────────
     HealthResponse:
       type: object
-      required:
-        - status
-        - version
-        - environment
+      required: [status, version, environment]
       properties:
         status:
           type: string
           example: healthy
         version:
           type: string
-          example: "0.1.0"
+          example: "0.2.0"
         environment:
           type: string
           example: development
 
+    # ── Auth ──────────────────────────────────────────────────────────
     RegisterRequest:
       type: object
-      required:
-        - email
-        - password
-        - full_name
+      required: [email, password, full_name]
       properties:
         email:
           type: string
@@ -162,15 +664,15 @@ components:
         password:
           type: string
           minLength: 8
+          maxLength: 128
         full_name:
           type: string
           minLength: 1
+          maxLength: 255
 
     LoginRequest:
       type: object
-      required:
-        - email
-        - password
+      required: [email, password]
       properties:
         email:
           type: string
@@ -180,18 +682,25 @@ components:
 
     RefreshRequest:
       type: object
-      required:
-        - refresh_token
+      required: [refresh_token]
       properties:
         refresh_token:
           type: string
 
+    UpdateProfileRequest:
+      type: object
+      properties:
+        full_name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        email:
+          type: string
+          format: email
+
     TokenResponse:
       type: object
-      required:
-        - access_token
-        - refresh_token
-        - token_type
+      required: [access_token, refresh_token, token_type, expires_in]
       properties:
         access_token:
           type: string
@@ -200,16 +709,13 @@ components:
         token_type:
           type: string
           example: bearer
+        expires_in:
+          type: integer
+          description: Token lifetime in seconds
 
     UserResponse:
       type: object
-      required:
-        - id
-        - email
-        - full_name
-        - is_active
-        - is_admin
-        - created_at
+      required: [id, email, full_name, is_active, is_admin, created_at]
       properties:
         id:
           type: string
@@ -229,15 +735,560 @@ components:
 
     AuthResponse:
       type: object
-      description: Combined response returned by /auth/login and /auth/register
-      required:
-        - user
-        - tokens
+      required: [user, tokens]
       properties:
         user:
           $ref: "#/components/schemas/UserResponse"
         tokens:
           $ref: "#/components/schemas/TokenResponse"
+
+    # ── Documents ─────────────────────────────────────────────────────
+    DocumentUploadResponse:
+      type: object
+      required: [id, filename, file_type, file_size, status, uploaded_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        filename:
+          type: string
+        file_type:
+          type: string
+        file_size:
+          type: integer
+        status:
+          type: string
+          enum: [uploaded, processing, ready, failed]
+        uploaded_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    DocumentResponse:
+      type: object
+      required: [id, filename, file_type, file_size, status, source, chunk_count, is_base_knowledge, uploaded_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        filename:
+          type: string
+        file_type:
+          type: string
+        file_size:
+          type: integer
+        status:
+          type: string
+          enum: [uploaded, processing, ready, failed]
+        source:
+          type: string
+        chunk_count:
+          type: integer
+        error_message:
+          type: string
+          nullable: true
+        is_base_knowledge:
+          type: boolean
+        metadata:
+          type: object
+        uploaded_at:
+          type: string
+          format: date-time
+        processed_at:
+          type: string
+          format: date-time
+          nullable: true
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    DocumentListResponse:
+      type: object
+      required: [items, total, page, page_size]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/DocumentResponse"
+        total:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+
+    DashboardStatsResponse:
+      type: object
+      required: [total_documents, total_chunks, total_entities, total_relationships, total_embeddings, processing_documents]
+      properties:
+        total_documents:
+          type: integer
+        total_chunks:
+          type: integer
+        total_entities:
+          type: integer
+        total_relationships:
+          type: integer
+        total_embeddings:
+          type: integer
+        processing_documents:
+          type: integer
+
+    # ── Knowledge ─────────────────────────────────────────────────────
+    EntityCreate:
+      type: object
+      required: [entity_type, name]
+      properties:
+        entity_type:
+          type: string
+        name:
+          type: string
+          maxLength: 500
+        description:
+          type: string
+          nullable: true
+        properties:
+          type: object
+          nullable: true
+        source_document_id:
+          type: string
+          format: uuid
+          nullable: true
+
+    EntityResponse:
+      type: object
+      required: [id, neo4j_id, entity_type, name, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        neo4j_id:
+          type: string
+        entity_type:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        properties:
+          type: object
+          nullable: true
+        source_document_id:
+          type: string
+          format: uuid
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        relationship_count:
+          type: integer
+          default: 0
+
+    EntityWithRelationships:
+      allOf:
+        - $ref: "#/components/schemas/EntityResponse"
+        - type: object
+          properties:
+            relationships:
+              type: array
+              items:
+                $ref: "#/components/schemas/RelationshipResponse"
+
+    RelationshipCreate:
+      type: object
+      required: [relationship_type, source_entity_id, target_entity_id]
+      properties:
+        relationship_type:
+          type: string
+        source_entity_id:
+          type: string
+          format: uuid
+        target_entity_id:
+          type: string
+          format: uuid
+        properties:
+          type: object
+          nullable: true
+        weight:
+          type: number
+          minimum: 0
+          maximum: 1
+          default: 1.0
+        source_document_id:
+          type: string
+          format: uuid
+          nullable: true
+
+    RelationshipResponse:
+      type: object
+      required: [id, neo4j_id, relationship_type, source_entity_id, target_entity_id, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        neo4j_id:
+          type: string
+        relationship_type:
+          type: string
+        source_entity_id:
+          type: string
+          format: uuid
+        target_entity_id:
+          type: string
+          format: uuid
+        source_entity_name:
+          type: string
+          nullable: true
+        target_entity_name:
+          type: string
+          nullable: true
+        properties:
+          type: object
+          nullable: true
+        weight:
+          type: number
+        source_document_id:
+          type: string
+          format: uuid
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    VectorSearchRequest:
+      type: object
+      required: [query]
+      properties:
+        query:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        top_k:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 10
+        document_id:
+          type: string
+          format: uuid
+          nullable: true
+        similarity_threshold:
+          type: number
+          minimum: 0
+          maximum: 1
+          default: 0.7
+
+    VectorSearchResult:
+      type: object
+      required: [chunk_id, document_id, content, similarity]
+      properties:
+        chunk_id:
+          type: string
+          format: uuid
+        document_id:
+          type: string
+          format: uuid
+        content:
+          type: string
+        similarity:
+          type: number
+        metadata:
+          type: object
+          nullable: true
+
+    HybridSearchRequest:
+      type: object
+      required: [query]
+      properties:
+        query:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        top_k:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 10
+        vector_weight:
+          type: number
+          minimum: 0
+          maximum: 1
+          default: 0.5
+        document_id:
+          type: string
+          format: uuid
+          nullable: true
+
+    HybridSearchResult:
+      type: object
+      required: [content, source, score]
+      properties:
+        content:
+          type: string
+        source:
+          type: string
+          enum: [vector, graph, both]
+        score:
+          type: number
+        document_id:
+          type: string
+          format: uuid
+          nullable: true
+        chunk_id:
+          type: string
+          format: uuid
+          nullable: true
+        entity_id:
+          type: string
+          format: uuid
+          nullable: true
+        metadata:
+          type: object
+          nullable: true
+
+    GraphNode:
+      type: object
+      required: [id, label, type]
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        type:
+          type: string
+        description:
+          type: string
+          nullable: true
+        properties:
+          type: object
+          nullable: true
+        size:
+          type: number
+          default: 1.0
+
+    GraphEdge:
+      type: object
+      required: [source, target, label]
+      properties:
+        source:
+          type: string
+        target:
+          type: string
+        label:
+          type: string
+        weight:
+          type: number
+          default: 1.0
+
+    GraphVisualization:
+      type: object
+      properties:
+        nodes:
+          type: array
+          items:
+            $ref: "#/components/schemas/GraphNode"
+        edges:
+          type: array
+          items:
+            $ref: "#/components/schemas/GraphEdge"
+        total_nodes:
+          type: integer
+        total_edges:
+          type: integer
+
+    KnowledgeStats:
+      type: object
+      properties:
+        total_entities:
+          type: integer
+        total_relationships:
+          type: integer
+        total_embeddings:
+          type: integer
+        entity_types:
+          type: object
+          additionalProperties:
+            type: integer
+        relationship_types:
+          type: object
+          additionalProperties:
+            type: integer
+
+    # ── Chat ──────────────────────────────────────────────────────────
+    ChatRequest:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+          minLength: 1
+          maxLength: 10000
+        conversation_id:
+          type: string
+          format: uuid
+          nullable: true
+        vector_weight:
+          type: number
+          minimum: 0
+          maximum: 1
+          default: 0.5
+
+    Citation:
+      type: object
+      properties:
+        document_id:
+          type: string
+          format: uuid
+          nullable: true
+        document_name:
+          type: string
+          nullable: true
+        chunk_id:
+          type: string
+          format: uuid
+          nullable: true
+        entity_id:
+          type: string
+          format: uuid
+          nullable: true
+        entity_name:
+          type: string
+          nullable: true
+        content_snippet:
+          type: string
+        page_number:
+          type: integer
+          nullable: true
+        source_type:
+          type: string
+          enum: [vector, graph, both]
+        relevance_score:
+          type: number
+
+    MessageResponse:
+      type: object
+      required: [id, conversation_id, role, content, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        conversation_id:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum: [user, assistant, system]
+        content:
+          type: string
+        citations:
+          type: array
+          items:
+            $ref: "#/components/schemas/Citation"
+        tool_calls:
+          type: array
+          items:
+            type: object
+          nullable: true
+        token_count:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+
+    ConversationCreate:
+      type: object
+      properties:
+        title:
+          type: string
+          maxLength: 255
+          default: New conversation
+
+    ConversationResponse:
+      type: object
+      required: [id, title, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        message_count:
+          type: integer
+          default: 0
+
+    # ── Ingestion ─────────────────────────────────────────────────────
+    TriggerIngestionRequest:
+      type: object
+      properties:
+        folder_id:
+          type: string
+          nullable: true
+          description: Google Drive folder ID. null = use configured default.
+        force:
+          type: boolean
+          default: false
+          description: Re-ingest files even if already processed.
+
+    IngestionJobResponse:
+      type: object
+      required: [id, source, status, total_files, processed_files, failed_files, skipped_files, started_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        source:
+          type: string
+        status:
+          type: string
+          enum: [pending, scanning, processing, completed, failed, cancelled]
+        folder_id:
+          type: string
+          nullable: true
+        total_files:
+          type: integer
+        processed_files:
+          type: integer
+        failed_files:
+          type: integer
+        skipped_files:
+          type: integer
+        error_message:
+          type: string
+          nullable: true
+        metadata:
+          type: object
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    IngestionJobListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/IngestionJobResponse"
+        total:
+          type: integer
 
   securitySchemes:
     BearerAuth:

@@ -1,7 +1,7 @@
 # DingDong RAG - Makefile
 # Run `make help` to see all available commands.
 
-.PHONY: help dev dev-supabase dev-backend dev-frontend test test-backend test-frontend lint lint-backend lint-frontend build migrate migrate-local migration seed clean down logs ps
+.PHONY: help dev dev-supabase dev-backend dev-frontend test test-backend test-frontend lint lint-backend lint-frontend build migrate migrate-local migration seed graph-schema graph-seed graph-seed-clean graph-export clean down logs ps
 
 # Default
 help: ## Show this help message
@@ -59,6 +59,19 @@ migration: ## Create a new migration (usage: make migration msg="add users table
 
 seed: ## Seed dev accounts (admin@dingdong.dev / admin123, user@dingdong.dev / user123)
 	cd backend && python -m app.scripts.seed
+
+# --- Knowledge Graph ---
+graph-schema: ## Apply Neo4j indexes and constraints (idempotent)
+	cd backend && python -m app.scripts.graph_schema
+
+graph-seed: ## Seed Neo4j + PG from local graph files (idempotent merge/upsert)
+	cd backend && python -m app.scripts.graph_import
+
+graph-seed-clean: ## Wipe Neo4j + PG knowledge tables and re-seed from local graph files
+	cd backend && python -m app.scripts.graph_import --clean
+
+graph-export: ## Export current Neo4j graph to versioned JSONL seed files
+	cd backend && python -m app.scripts.graph_export
 
 # --- Build ---
 build: ## Build all Docker images

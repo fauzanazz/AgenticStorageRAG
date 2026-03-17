@@ -70,15 +70,27 @@ class ApiClient {
     });
   }
 
+  async patch<T>(path: string, body?: unknown): Promise<T> {
+    return this.request<T>(path, {
+      method: "PATCH",
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  }
+
   async delete<T>(path: string): Promise<T> {
     return this.request<T>(path, { method: "DELETE" });
   }
 
-  /** Stream a POST request as Server-Sent Events */
+  /** Stream a POST request as Server-Sent Events.
+   *
+   * The backend sends standard SSE with separate `event:` and `data:` lines.
+   * We parse these into `{ event, data }` objects for the callback.
+   */
   async stream(
     path: string,
     body?: unknown,
-    onChunk?: (data: string) => void
+    onEvent?: (event: { event: string; data: string }) => void,
+    signal?: AbortSignal,
   ): Promise<void> {
     const token = this.getToken();
     const headers: Record<string, string> = {
@@ -92,6 +104,7 @@ class ApiClient {
       method: "POST",
       headers,
       body: body ? JSON.stringify(body) : undefined,
+      signal,
     });
 
     if (!response.ok) {
@@ -106,6 +119,7 @@ class ApiClient {
 
     const decoder = new TextDecoder();
     let buffer = "";
+    let currentEvent = "message"; // SSE default event type
 
     while (true) {
       const { done, value } = await reader.read();
@@ -116,10 +130,16 @@ class ApiClient {
       buffer = lines.pop() || "";
 
       for (const line of lines) {
-        if (line.startsWith("data: ")) {
+        if (line.startsWith("event: ")) {
+          currentEvent = line.slice(7).trim();
+        } else if (line.startsWith("data: ")) {
           const data = line.slice(6);
           if (data === "[DONE]") return;
-          onChunk?.(data);
+          onEvent?.({ event: currentEvent, data });
+          currentEvent = "message"; // reset after dispatch
+        } else if (line === "") {
+          // Empty line = end of SSE block, reset event type
+          currentEvent = "message";
         }
       }
     }
