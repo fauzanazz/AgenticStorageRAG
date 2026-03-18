@@ -176,7 +176,6 @@ class TestIngestFileTool:
 
         tool = IngestFileTool(
             db=mock_db,
-            storage=mock_storage,
             connector=mock_connector,
             job=MagicMock(metadata_={}),
             llm=MagicMock(),
@@ -218,7 +217,6 @@ class TestIngestFileTool:
 
         tool = IngestFileTool(
             db=mock_db,
-            storage=mock_storage,
             connector=mock_connector,
             job=MagicMock(metadata_={}),
             llm=MagicMock(),
@@ -247,7 +245,6 @@ class TestIngestFileTool:
 
         tool = IngestFileTool(
             db=mock_db,
-            storage=mock_storage,
             connector=mock_connector,
             job=MagicMock(metadata_={}),
             llm=MagicMock(),

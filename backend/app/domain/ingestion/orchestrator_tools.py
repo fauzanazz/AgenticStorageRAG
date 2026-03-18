@@ -42,7 +42,6 @@ from app.domain.ingestion.schemas import (
     FileMetadataClassification,
 )
 from app.infra.llm import LLMProvider
-from app.infra.storage import StorageClient
 
 logger = logging.getLogger(__name__)
 
@@ -293,18 +292,18 @@ class IngestFileTool(OrchestratorTool):
     """Downloads a file, processes it (chunk + embed + KG), and commits.
 
     Each invocation is an atomic unit -- progress is committed after each file.
+    The file is NOT copied to Supabase Storage; only the Drive file ID reference
+    is stored on the Document record (storage_path = "drive://{file_id}").
     """
 
     def __init__(
         self,
         db: AsyncSession,
-        storage: StorageClient,
         connector: SourceConnector,
         job: IngestionJob,
         llm: LLMProvider,
     ) -> None:
         self._db = db
-        self._storage = storage
         self._connector = connector
         self._job = job
         self._llm = llm
@@ -424,15 +423,11 @@ class IngestFileTool(OrchestratorTool):
             # Download from Drive
             file_content, filename = await self._connector.download_file(file_id)
 
-            # Store in Supabase Storage
+            # Store the Drive reference on the Document — no copy to Supabase.
+            # The file already lives permanently in Drive; re-fetching is always
+            # possible via the connector using the Drive file ID.
             doc_id = uuid.uuid4()
-            storage_path = f"base_kg/{doc_id}/{filename}"
-
-            await self._storage.upload_file(
-                file_path=storage_path,
-                file_content=file_content,
-                content_type=target_mime,
-            )
+            storage_path = f"drive://{file_id}"
 
             # Build enriched metadata
             doc_metadata: dict[str, Any] = {
@@ -658,14 +653,12 @@ class BatchIngestFilesTool(OrchestratorTool):
     def __init__(
         self,
         session_factory: Any,
-        storage: StorageClient,
         connector: SourceConnector,
         job: IngestionJob,
         llm: LLMProvider,
         file_concurrency: int = 3,
     ) -> None:
         self._session_factory = session_factory
-        self._storage = storage
         self._connector = connector
         self._job = job
         self._llm = llm
@@ -719,7 +712,6 @@ class BatchIngestFilesTool(OrchestratorTool):
             async with self._session_factory() as db:
                 ingest_tool = IngestFileTool(
                     db=db,
-                    storage=self._storage,
                     connector=self._connector,
                     job=self._job,
                     llm=self._llm,

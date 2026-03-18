@@ -196,14 +196,12 @@ class IngestionOrchestrator:
             file_concurrency = self._settings.file_concurrency
             ingest_tool = IngestFileTool(
                 db=self._db,
-                storage=self._storage,
                 connector=self._connector,
                 job=job,
                 llm=self._llm,
             )
             batch_tool = BatchIngestFilesTool(
                 session_factory=self._session_factory,
-                storage=self._storage,
                 connector=self._connector,
                 job=job,
                 llm=self._llm,

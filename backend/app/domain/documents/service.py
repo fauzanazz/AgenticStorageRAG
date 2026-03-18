@@ -148,6 +148,14 @@ class DocumentService:
                 raise UnsupportedFileTypeError(document.file_type)
 
             # Download file from storage
+            # Drive-sourced documents store a logical reference ("drive://...")
+            # rather than a Supabase path — they are never re-processed via
+            # this path (ingestion handles them directly at ingest time).
+            if not document.storage_path or document.storage_path.startswith("drive://"):
+                raise UnsupportedFileTypeError(
+                    f"Cannot re-process Drive-sourced document {document_id} "
+                    "via the upload pipeline — no Supabase copy exists."
+                )
             file_content = await self._storage.download_file(document.storage_path)
 
             # Process document
@@ -362,11 +370,12 @@ class DocumentService:
         if document is None:
             raise DocumentNotFoundError(str(document_id))
 
-        # Delete from storage
-        try:
-            await self._storage.delete_file(document.storage_path)
-        except Exception:
-            logger.warning("Failed to delete storage file: %s", document.storage_path)
+        # Delete from storage (skip Drive-referenced docs — no Supabase copy)
+        if document.storage_path and not document.storage_path.startswith("drive://"):
+            try:
+                await self._storage.delete_file(document.storage_path)
+            except Exception:
+                logger.warning("Failed to delete storage file: %s", document.storage_path)
 
         # Delete from database (cascades to chunks)
         await self._db.delete(document)
@@ -395,8 +404,11 @@ class DocumentService:
         if not expired_docs:
             return 0
 
-        # Delete storage files in bulk
-        storage_paths = [doc.storage_path for doc in expired_docs]
+        # Delete storage files in bulk (skip Drive-referenced docs)
+        storage_paths = [
+            doc.storage_path for doc in expired_docs
+            if doc.storage_path and not doc.storage_path.startswith("drive://")
+        ]
         try:
             await self._storage.delete_files(storage_paths)
         except Exception:
