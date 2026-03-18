@@ -25,9 +25,7 @@ from app.domain.ingestion.schemas import (
     IngestionStatsResponse,
     TriggerIngestionRequest,
 )
-from app.infra.redis_client import redis_client
 from app.infra.storage import StorageClient
-from app.infra.worker import QUEUE_INGESTION
 
 logger = logging.getLogger(__name__)
 
@@ -91,14 +89,14 @@ class IngestionService:
 
         logger.info("Ingestion job created: %s", job.id)
 
-        # Dispatch to worker queue (non-blocking)
-        await redis_client.enqueue(QUEUE_INGESTION, {
-            "type": "run_ingestion",
-            "job_id": str(job.id),
-            "admin_user_id": str(admin_user_id),
-            "force": request.force,
-        })
-        logger.info("Ingestion job %s dispatched to worker queue", job.id)
+        # Dispatch to Celery worker (non-blocking)
+        from app.domain.ingestion.tasks import run_ingestion_task
+        run_ingestion_task.delay(
+            job_id=str(job.id),
+            admin_user_id=str(admin_user_id),
+            force=request.force,
+        )
+        logger.info("Ingestion job %s dispatched to Celery worker", job.id)
 
         return IngestionJobResponse.model_validate(job)
 

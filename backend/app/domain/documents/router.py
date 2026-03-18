@@ -11,7 +11,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies import get_current_user_id, get_db, get_redis, get_storage
+from app.dependencies import get_current_user_id, get_db, get_storage
 from app.domain.documents.exceptions import (
     DocumentNotFoundError,
     FileTooLargeError,
@@ -24,9 +24,7 @@ from app.domain.documents.schemas import (
     DocumentUploadResponse,
 )
 from app.domain.documents.service import DocumentService
-from app.infra.redis_client import RedisClient
 from app.infra.storage import StorageClient
-from app.infra.worker import QUEUE_DOCUMENTS
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/documents", tags=["Documents"])
@@ -49,7 +47,6 @@ async def upload_document(
     file: UploadFile,
     user_id: uuid.UUID = Depends(get_current_user_id),
     service: DocumentService = Depends(_get_document_service),
-    redis: RedisClient = Depends(get_redis),
 ) -> DocumentUploadResponse:
     """Upload a PDF or DOCX file for processing.
 
@@ -83,18 +80,12 @@ async def upload_document(
             detail=str(e),
         ) from e
 
-    # Queue background processing job -- fail gracefully
+    # Queue background processing job via Celery -- fail gracefully
     try:
-        await redis.enqueue(
-            QUEUE_DOCUMENTS,
-            {
-                "type": "process_document",
-                "id": str(result.id),
-                "document_id": str(result.id),
-            },
-        )
+        from app.domain.documents.tasks import process_document_task
+        process_document_task.delay(document_id=str(result.id))
     except Exception:
-        logger.exception("Failed to enqueue document processing: %s", result.id)
+        logger.exception("Failed to dispatch document processing task: %s", result.id)
         # Document is uploaded but not queued -- admin can retry manually
 
     return result
