@@ -206,8 +206,10 @@ class TestListFiles:
     async def test_list_files_success(self) -> None:
         """Should return file list from Drive API."""
         connector = GoogleDriveConnector()
-        connector._service = MagicMock()
-        connector._service.files.return_value.list.return_value.execute.return_value = {
+        connector._credentials = MagicMock()  # mark as authenticated
+
+        mock_svc = MagicMock()
+        mock_svc.files.return_value.list.return_value.execute.return_value = {
             "files": [
                 {
                     "id": "file-1",
@@ -226,7 +228,9 @@ class TestListFiles:
             ]
         }
 
-        files = await connector.list_files()
+        with patch.object(connector, "_build_service", return_value=mock_svc):
+            files = await connector.list_files()
+
         assert len(files) == 2
         assert files[0].file_id == "file-1"
         assert files[0].name == "doc.pdf"

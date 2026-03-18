@@ -155,6 +155,9 @@ class GoogleDriveConnector(SourceConnector):
     ) -> list[DriveFileInfo]:
         """List files in a Drive folder (or root).
 
+        Each call uses a fresh Drive service so concurrent invocations do
+        not share the non-thread-safe httplib2.Http connection.
+
         Args:
             folder_id: Drive folder ID. None = search all accessible files.
             supported_types: Filter by MIME types. None = use default supported types.
@@ -162,32 +165,31 @@ class GoogleDriveConnector(SourceConnector):
         Returns:
             List of DriveFileInfo for ingestible files
         """
-        if not self._service:
+        if not self._credentials:
             raise DriveAuthError("Not authenticated. Call authenticate() first.")
 
         allowed_types = supported_types or list(SUPPORTED_MIME_TYPES.keys())
-        files: list[DriveFileInfo] = []
-        page_token: str | None = None
 
         # Build query
         type_conditions = " or ".join(
             f"mimeType='{mt}'" for mt in allowed_types
         )
         query = f"({type_conditions}) and trashed=false"
-
         if folder_id:
             query = f"'{folder_id}' in parents and {query}"
 
-        try:
+        def _do_list() -> list[DriveFileInfo]:
+            svc = self._build_service()
+            files: list[DriveFileInfo] = []
+            page_token: str | None = None
             while True:
-                request = self._service.files().list(
+                request = svc.files().list(
                     q=query,
                     fields=LIST_FIELDS,
                     pageSize=100,
                     pageToken=page_token,
                 )
-                result = await asyncio.to_thread(request.execute)
-
+                result = request.execute()
                 for f in result.get("files", []):
                     files.append(
                         DriveFileInfo(
@@ -197,20 +199,19 @@ class GoogleDriveConnector(SourceConnector):
                             size=int(f["size"]) if f.get("size") else None,
                             modified_time=f.get("modifiedTime"),
                             parent_folder=(
-                                f["parents"][0]
-                                if f.get("parents")
-                                else None
+                                f["parents"][0] if f.get("parents") else None
                             ),
                         )
                     )
-
                 page_token = result.get("nextPageToken")
                 if not page_token:
                     break
-
-            logger.info("Found %d ingestible files in Drive", len(files))
             return files
 
+        try:
+            files = await asyncio.to_thread(_do_list)
+            logger.info("Found %d ingestible files in Drive", len(files))
+            return files
         except HttpError as e:
             logger.error("Drive API error listing files: %s", e)
             raise DriveAccessError(folder_id or "root") from e
@@ -287,18 +288,27 @@ class GoogleDriveConnector(SourceConnector):
                 raise DriveFileDownloadError(file_id, str(e2)) from e2
 
     async def get_file_metadata(self, file_id: str) -> dict[str, Any]:
-        """Get metadata for a Drive file."""
-        if not self._service:
+        """Get metadata for a Drive file.
+
+        Uses a fresh service per call to avoid shared httplib2 state.
+        """
+        if not self._credentials:
             raise DriveAuthError("Not authenticated. Call authenticate() first.")
 
-        try:
-            meta_request = self._service.files().get(
-                fileId=file_id,
-                fields="id, name, mimeType, size, modifiedTime, createdTime, "
-                       "owners, lastModifyingUser, webViewLink",
+        def _do_get() -> dict[str, Any]:
+            svc = self._build_service()
+            return dict(
+                svc.files()
+                .get(
+                    fileId=file_id,
+                    fields="id, name, mimeType, size, modifiedTime, createdTime, "
+                    "owners, lastModifyingUser, webViewLink",
+                )
+                .execute()
             )
-            meta = await asyncio.to_thread(meta_request.execute)
-            return dict(meta)
+
+        try:
+            return await asyncio.to_thread(_do_get)
         except HttpError as e:
             raise DriveAccessError(file_id) from e
 
@@ -312,29 +322,32 @@ class GoogleDriveConnector(SourceConnector):
         returns every child so the orchestrator agent can see subfolders
         and decide which ones to recurse into.
 
+        Each call uses a fresh Drive service so concurrent scan_folder
+        invocations from the orchestrator do not share the non-thread-safe
+        httplib2.Http connection.
+
         Args:
             folder_id: Google Drive folder ID
 
         Returns:
             List of DriveFolderEntry (files + folders)
         """
-        if not self._service:
+        if not self._credentials:
             raise DriveAuthError("Not authenticated. Call authenticate() first.")
 
-        entries: list[DriveFolderEntry] = []
-        page_token: str | None = None
-
-        try:
+        def _do_list_children() -> list[DriveFolderEntry]:
+            svc = self._build_service()
+            entries: list[DriveFolderEntry] = []
+            page_token: str | None = None
             while True:
-                request = self._service.files().list(
+                request = svc.files().list(
                     q=f"'{folder_id}' in parents and trashed=false",
                     fields=f"nextPageToken, files({FILE_FIELDS})",
                     pageSize=100,
                     pageToken=page_token,
                     orderBy="folder,name",
                 )
-                result = await asyncio.to_thread(request.execute)
-
+                result = request.execute()
                 for f in result.get("files", []):
                     mime = f["mimeType"]
                     entries.append(
@@ -347,11 +360,13 @@ class GoogleDriveConnector(SourceConnector):
                             is_folder=(mime == "application/vnd.google-apps.folder"),
                         )
                     )
-
                 page_token = result.get("nextPageToken")
                 if not page_token:
                     break
+            return entries
 
+        try:
+            entries = await asyncio.to_thread(_do_list_children)
             logger.info(
                 "Folder %s: %d children (%d folders, %d files)",
                 folder_id,
@@ -360,7 +375,6 @@ class GoogleDriveConnector(SourceConnector):
                 sum(1 for e in entries if not e.is_folder),
             )
             return entries
-
         except HttpError as e:
             logger.error("Drive API error listing folder children: %s", e)
             raise DriveAccessError(folder_id) from e

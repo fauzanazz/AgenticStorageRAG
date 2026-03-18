@@ -446,11 +446,14 @@ class TestListFolderChildren:
     @pytest.mark.asyncio
     async def test_returns_files_and_folders(self) -> None:
         """Should return both files and folders from Drive API."""
+        from unittest.mock import patch
         from app.domain.ingestion.drive_connector import GoogleDriveConnector
 
         connector = GoogleDriveConnector()
-        connector._service = MagicMock()
-        connector._service.files.return_value.list.return_value.execute.return_value = {
+        connector._credentials = MagicMock()  # mark as authenticated
+
+        mock_svc = MagicMock()
+        mock_svc.files.return_value.list.return_value.execute.return_value = {
             "files": [
                 {
                     "id": "folder-1",
@@ -469,7 +472,8 @@ class TestListFolderChildren:
             ]
         }
 
-        entries = await connector.list_folder_children("root-folder-id")
+        with patch.object(connector, "_build_service", return_value=mock_svc):
+            entries = await connector.list_folder_children("root-folder-id")
 
         assert len(entries) == 2
         folder = [e for e in entries if e.is_folder][0]
