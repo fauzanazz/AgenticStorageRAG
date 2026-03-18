@@ -16,15 +16,35 @@ interface ApiClientConfig {
 class ApiClient {
   private baseUrl: string;
   private getToken: () => string | null;
+  /**
+   * Called when a request receives a 401. Should attempt to refresh the
+   * access token and return true if a new token is now available, or false
+   * if the session cannot be recovered (triggers logout in the auth layer).
+   */
+  private onUnauthorized: (() => Promise<boolean>) | null = null;
+  /** Guards against concurrent refresh attempts */
+  private refreshPromise: Promise<boolean> | null = null;
 
   constructor(config: ApiClientConfig) {
     this.baseUrl = config.baseUrl;
     this.getToken = config.getToken || (() => null);
   }
 
+  /**
+   * Register a callback that the client will invoke when any request
+   * receives a 401. The callback should refresh the access token and
+   * return true on success or false if the session is unrecoverable.
+   *
+   * Call this once from AuthProvider after it mounts.
+   */
+  setOnUnauthorized(handler: () => Promise<boolean>): void {
+    this.onUnauthorized = handler;
+  }
+
   private async request<T>(
     path: string,
-    options: RequestInit = {}
+    options: RequestInit = {},
+    isRetry = false
   ): Promise<T> {
     const token = this.getToken();
     const headers: HeadersInit = {
@@ -41,6 +61,21 @@ class ApiClient {
       ...options,
       headers,
     });
+
+    if (response.status === 401 && !isRetry && this.onUnauthorized) {
+      // Deduplicate concurrent refresh attempts — only one in-flight at a time
+      if (!this.refreshPromise) {
+        this.refreshPromise = this.onUnauthorized().finally(() => {
+          this.refreshPromise = null;
+        });
+      }
+      const refreshed = await this.refreshPromise;
+      if (refreshed) {
+        // Retry once with the new access token
+        return this.request<T>(path, options, true);
+      }
+      // Refresh failed — fall through to throw the original 401
+    }
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({
@@ -91,6 +126,7 @@ class ApiClient {
     body?: unknown,
     onEvent?: (event: { event: string; data: string }) => void,
     signal?: AbortSignal,
+    isRetry = false,
   ): Promise<void> {
     const token = this.getToken();
     const headers: Record<string, string> = {
@@ -106,6 +142,18 @@ class ApiClient {
       body: body ? JSON.stringify(body) : undefined,
       signal,
     });
+
+    if (response.status === 401 && !isRetry && this.onUnauthorized) {
+      if (!this.refreshPromise) {
+        this.refreshPromise = this.onUnauthorized().finally(() => {
+          this.refreshPromise = null;
+        });
+      }
+      const refreshed = await this.refreshPromise;
+      if (refreshed) {
+        return this.stream(path, body, onEvent, signal, true);
+      }
+    }
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({
@@ -146,7 +194,7 @@ class ApiClient {
   }
 
   /** Upload a file with multipart/form-data */
-  async upload<T>(path: string, formData: FormData): Promise<T> {
+  async upload<T>(path: string, formData: FormData, isRetry = false): Promise<T> {
     const token = this.getToken();
     const headers: Record<string, string> = {};
     if (token) {
@@ -158,6 +206,18 @@ class ApiClient {
       headers,
       body: formData,
     });
+
+    if (response.status === 401 && !isRetry && this.onUnauthorized) {
+      if (!this.refreshPromise) {
+        this.refreshPromise = this.onUnauthorized().finally(() => {
+          this.refreshPromise = null;
+        });
+      }
+      const refreshed = await this.refreshPromise;
+      if (refreshed) {
+        return this.upload<T>(path, formData, true);
+      }
+    }
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({

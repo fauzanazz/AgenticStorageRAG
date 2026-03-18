@@ -139,6 +139,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [setTokens, clearTokens, fetchUser]);
 
+  // Wire the 401 handler into the shared API client so any request that
+  // receives an expired-token response will transparently refresh and retry.
+  // Done synchronously during render (not in useEffect) so the handler is
+  // in place before any child renders and fires its first request.
+  // setTokens and clearTokens are stable (empty-dep useCallbacks), so
+  // unauthorizedHandler is also stable — re-registering it on each render
+  // is idempotent and safe.
+  const unauthorizedHandler = useCallback(async (): Promise<boolean> => {
+    const refreshToken = localStorage.getItem(REFRESH_KEY);
+    if (!refreshToken) return false;
+    try {
+      const tokens = await apiClient.post<AuthTokens>("/auth/refresh", {
+        refresh_token: refreshToken,
+      });
+      setTokens(tokens);
+      return true;
+    } catch {
+      clearTokens();
+      setState({ user: null, isLoading: false, isAuthenticated: false });
+      return false;
+    }
+  }, [setTokens, clearTokens]);
+
+  apiClient.setOnUnauthorized(unauthorizedHandler);
+
   // On mount: try to load user from stored token
   useEffect(() => {
     const token = localStorage.getItem(TOKEN_KEY);
