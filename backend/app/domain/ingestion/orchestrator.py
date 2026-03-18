@@ -104,6 +104,7 @@ class IngestionOrchestrator:
         connector: SourceConnector,
         llm: LLMProvider,
         user_settings: "Any | None" = None,
+        session_factory: Any = None,
     ) -> None:
         from app.config import get_settings
         self._db = db
@@ -112,6 +113,13 @@ class IngestionOrchestrator:
         # Use a scoped provider (user's model + API key) when settings are present
         self._llm = llm.with_user_settings(user_settings) if user_settings is not None else llm
         self._settings = get_settings()
+        # Session factory for BatchIngestFilesTool to create per-file sessions.
+        # Falls back to reading the module global if not provided (e.g. in tests).
+        if session_factory is not None:
+            self._session_factory = session_factory
+        else:
+            import app.infra.database as _db_module
+            self._session_factory = _db_module._session_factory
 
     async def _update_job_status(
         self,
@@ -194,7 +202,7 @@ class IngestionOrchestrator:
                 llm=self._llm,
             )
             batch_tool = BatchIngestFilesTool(
-                db=self._db,
+                session_factory=self._session_factory,
                 storage=self._storage,
                 connector=self._connector,
                 job=job,

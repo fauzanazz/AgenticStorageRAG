@@ -72,6 +72,7 @@ def run_ingestion_task(  # type: ignore[misc]
                 storage=storage_client,
                 connector=connector,
                 llm=llm_provider,
+                session_factory=_db_module._session_factory,
             )
 
             try:

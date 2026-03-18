@@ -641,10 +641,14 @@ class IngestFileTool(OrchestratorTool):
 class BatchIngestFilesTool(OrchestratorTool):
     """Fan-out ingestion for a batch of files using asyncio.gather.
 
-    Wraps :class:`IngestFileTool` to allow the orchestrator to ingest
-    multiple files in parallel rather than sequentially.  Concurrency
-    is bounded by ``FILE_CONCURRENCY`` (default 3) from settings, so the
-    database and LLM APIs are not overwhelmed.
+    Each concurrent ingest call gets its **own** ``AsyncSession`` (created
+    from ``session_factory``) to avoid SQLAlchemy's "concurrent operations
+    not permitted" error.  The orchestrator's shared session is only used by
+    the outer loop (scan_folder, update_progress, classify_file); actual file
+    ingestion is fully isolated per file here.
+
+    Concurrency is bounded by ``FILE_CONCURRENCY`` (default 3) from settings,
+    so the database and LLM APIs are not overwhelmed.
 
     The agent should use this instead of calling ``ingest_file`` in a loop
     when it has a list of files ready to process (e.g. all files in a folder
@@ -653,21 +657,19 @@ class BatchIngestFilesTool(OrchestratorTool):
 
     def __init__(
         self,
-        db: AsyncSession,
+        session_factory: Any,
         storage: StorageClient,
         connector: SourceConnector,
         job: IngestionJob,
         llm: LLMProvider,
         file_concurrency: int = 3,
     ) -> None:
-        self._db = db
+        self._session_factory = session_factory
         self._storage = storage
         self._connector = connector
         self._job = job
+        self._llm = llm
         self._semaphore = asyncio.Semaphore(file_concurrency)
-        self._ingest_tool = IngestFileTool(
-            db=db, storage=storage, connector=connector, job=job, llm=llm
-        )
 
     @property
     def name(self) -> str:
@@ -712,16 +714,24 @@ class BatchIngestFilesTool(OrchestratorTool):
         }
 
     async def _ingest_one(self, file_info: dict[str, Any], admin_user_id: str) -> dict[str, Any]:
-        """Ingest a single file, bounded by the semaphore."""
+        """Ingest a single file with its own DB session, bounded by the semaphore."""
         async with self._semaphore:
-            return await self._ingest_tool.execute(
-                file_id=file_info["file_id"],
-                file_name=file_info["file_name"],
-                mime_type=file_info["mime_type"],
-                folder_path=file_info.get("folder_path", ""),
-                classification=file_info.get("classification", {}),
-                admin_user_id=admin_user_id,
-            )
+            async with self._session_factory() as db:
+                ingest_tool = IngestFileTool(
+                    db=db,
+                    storage=self._storage,
+                    connector=self._connector,
+                    job=self._job,
+                    llm=self._llm,
+                )
+                return await ingest_tool.execute(
+                    file_id=file_info["file_id"],
+                    file_name=file_info["file_name"],
+                    mime_type=file_info["mime_type"],
+                    folder_path=file_info.get("folder_path", ""),
+                    classification=file_info.get("classification", {}),
+                    admin_user_id=admin_user_id,
+                )
 
     async def execute(self, **kwargs: Any) -> dict[str, Any]:
         files: list[dict[str, Any]] = kwargs["files"]
