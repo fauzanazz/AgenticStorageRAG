@@ -93,6 +93,7 @@ services:
       - .env
     volumes:
       - ./backend:/app
+      - /app/.venv
     depends_on:
       postgres:
         condition: service_healthy
@@ -108,7 +109,7 @@ services:
       target: development
     profiles: ["local"]
     command: >
-      uv run celery -A app.celery_app worker
+      python -m celery -A app.celery_app worker
       --loglevel=info
       --queues=documents,ingestion
       --concurrency=4
@@ -126,6 +127,7 @@ services:
       - .env
     volumes:
       - ./backend:/app
+      - /app/.venv
     depends_on:
       postgres:
         condition: service_healthy
@@ -177,6 +179,7 @@ services:
       - .env
     volumes:
       - ./backend:/app
+      - /app/.venv
     depends_on:
       neo4j:
         condition: service_healthy
@@ -190,7 +193,7 @@ services:
       target: development
     profiles: ["supabase"]
     command: >
-      uv run celery -A app.celery_app worker
+      python -m celery -A app.celery_app worker
       --loglevel=info
       --queues=documents,ingestion
       --concurrency=4
@@ -207,6 +210,7 @@ services:
       - .env
     volumes:
       - ./backend:/app
+      - /app/.venv
     depends_on:
       neo4j:
         condition: service_healthy
