@@ -49,13 +49,13 @@ lint-frontend: ## Lint frontend
 
 # --- Database ---
 migrate: ## Run migrations against Supabase (uses DATABASE_URL from .env)
-	cd backend && alembic upgrade head
+	cd backend && set -a && source ../.env && set +a && uv run alembic upgrade head
 
 migrate-local: ## Run migrations against local Docker Postgres
-	cd backend && DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/dingdong_rag alembic upgrade head
+	cd backend && DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/dingdong_rag uv run alembic upgrade head
 
 migration: ## Create a new migration (usage: make migration msg="add users table")
-	cd backend && alembic revision --autogenerate -m "$(msg)"
+	cd backend && set -a && source ../.env && set +a && uv run alembic revision --autogenerate -m "$(msg)"
 
 seed: ## Seed dev accounts (admin@dingdong.dev / admin123, user@dingdong.dev / user123)
 	cd backend && python -m app.scripts.seed

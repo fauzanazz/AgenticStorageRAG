@@ -19,6 +19,7 @@ from app.domain.documents.models import *  # noqa: F401, F403
 from app.domain.knowledge.models import *  # noqa: F401, F403
 from app.domain.agents.models import *  # noqa: F401, F403
 from app.domain.ingestion.models import *  # noqa: F401, F403
+from app.domain.settings.models import *  # noqa: F401, F403
 
 # Alembic Config object
 config = context.config
