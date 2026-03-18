@@ -107,9 +107,12 @@ services:
       context: ./backend
       target: development
     profiles: ["local"]
-    command: python -m app.infra.worker
-    deploy:
-      replicas: 2  # Scale up with: docker compose --profile local up --scale worker-local=N
+    command: >
+      uv run celery -A app.celery_app worker
+      --loglevel=info
+      --queues=documents,ingestion
+      --concurrency=4
+      --pool=threads
     environment:
       - DEBUG=true
       - ENVIRONMENT=development
@@ -186,9 +189,12 @@ services:
       context: ./backend
       target: development
     profiles: ["supabase"]
-    command: python -m app.infra.worker
-    deploy:
-      replicas: 2  # Scale up with: docker compose --profile supabase up --scale worker-supabase=N
+    command: >
+      uv run celery -A app.celery_app worker
+      --loglevel=info
+      --queues=documents,ingestion
+      --concurrency=4
+      --pool=threads
     environment:
       - DEBUG=true
       - ENVIRONMENT=development
