@@ -471,23 +471,9 @@ export default function IngestionPage() {
     }
   }, [user, router]);
 
-  // Initial load
-  useEffect(() => {
-    if (user?.is_admin) {
-      refresh();
-    }
-  }, [refresh, user]);
-
-  // Poll every 4s when there are active jobs
-  useEffect(() => {
-    const hasActive = jobs.some((j) =>
-      ["pending", "scanning", "processing"].includes(j.status)
-    );
-    if (!hasActive) return;
-
-    const id = setInterval(() => refresh(), 4000);
-    return () => clearInterval(id);
-  }, [jobs, refresh]);
+  // Initial load, polling while active, and error handling are all managed
+  // by TanStack Query (refetchInterval) inside useIngestion. No additional
+  // useEffect is needed here.
 
   return (
     <div className="flex-1 p-6 lg:p-8 space-y-6 max-w-4xl">

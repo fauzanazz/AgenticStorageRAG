@@ -39,6 +39,27 @@ class HybridSearchTool(IAgentTool):
             "Input: query (str), top_k (int, default 10), vector_weight (float 0-1, default 0.5)"
         )
 
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search query combining graph and vector retrieval.",
+                },
+                "top_k": {
+                    "type": "integer",
+                    "description": "Max results to return (default 10).",
+                },
+                "vector_weight": {
+                    "type": "number",
+                    "description": "Weight for vector results vs graph (0.0–1.0, default 0.5).",
+                },
+            },
+            "required": ["query"],
+        }
+
     async def execute(self, **kwargs: Any) -> dict[str, Any]:
         """Execute hybrid search.
 

@@ -1,51 +1,73 @@
-FROM python:3.12-slim AS base
+# ============================================================
+# Backend Dockerfile
+# Stages: deps → development | production
+#
+# Layer-cache strategy:
+#   1. Install uv (rarely changes)
+#   2. Copy only pyproject.toml + uv.lock → install deps
+#      (this layer is only busted when deps change)
+#   3. Copy source code last
+#      (source changes never re-trigger dep install)
+# ============================================================
+
+# ---- Stage 1: install dependencies -------------------------
+FROM python:3.12-slim AS deps
+
+# Install uv (fast, reproducible installs from uv.lock)
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 WORKDIR /app
 
-# System dependencies
+# System deps needed to compile some packages (e.g. cryptography, asyncpg)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy full source first (needed for editable install with hatchling)
-COPY pyproject.toml ./
-COPY app/ ./app/
+# Copy only the dependency manifest + lockfile.
+# Source code changes will NOT bust this layer.
+COPY pyproject.toml uv.lock ./
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -e ".[dev]"
+# Install all deps (including [dev] extras) into the system python.
+# We include the project itself here; the editable reinstall in stage 2
+# will replace it so hot-reload works correctly.
+RUN uv pip install --system ".[dev]"
 
-# Copy remaining files (alembic, scripts, etc.)
+# ---- Stage 2: development ----------------------------------
+FROM deps AS development
+
+# Now copy source — only this layer and below are busted on code changes.
 COPY . .
 
-# --- Development target ---
-FROM base AS development
+# Reinstall the project itself as editable so imports work with hot-reload.
+RUN uv pip install --system -e .
+
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 
-# --- Production target ---
+# ---- Stage 3: production -----------------------------------
 FROM python:3.12-slim AS production
 
-WORKDIR /app
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 # Non-root user for security
 RUN groupadd -r appuser && useradd -r -g appuser appuser
 
-# System dependencies (minimal)
+# Minimal runtime system dep (libpq for asyncpg)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy full source (needed for editable install)
-COPY pyproject.toml ./
-COPY app/ ./app/
+WORKDIR /app
 
-# Install only production dependencies
-RUN pip install --no-cache-dir -e .
+# Install production deps (no [dev] extras)
+COPY pyproject.toml uv.lock ./
+RUN uv pip install --system .
 
-# Copy remaining files
+# Copy source and install project package
 COPY . .
+RUN uv pip install --system -e .
 
-# Own files as non-root user
 RUN chown -R appuser:appuser /app
 USER appuser
 

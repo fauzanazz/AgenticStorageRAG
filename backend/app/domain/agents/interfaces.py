@@ -38,6 +38,12 @@ class IAgentTool(ABC):
         """Tool description for the LLM to understand when to use it."""
         ...
 
+    @property
+    @abstractmethod
+    def parameters_schema(self) -> dict[str, Any]:
+        """JSON Schema dict describing this tool's input parameters."""
+        ...
+
     @abstractmethod
     async def execute(self, **kwargs: Any) -> dict[str, Any]:
         """Execute the tool with given arguments.

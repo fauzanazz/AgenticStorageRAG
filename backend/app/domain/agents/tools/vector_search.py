@@ -38,6 +38,27 @@ class VectorSearchTool(IAgentTool):
             "Input: query (str), top_k (int, default 10), document_id (optional UUID)"
         )
 
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Text to search for semantically similar chunks.",
+                },
+                "top_k": {
+                    "type": "integer",
+                    "description": "Max chunks to return (default 10).",
+                },
+                "document_id": {
+                    "type": "string",
+                    "description": "Restrict search to a specific document UUID.",
+                },
+            },
+            "required": ["query"],
+        }
+
     async def execute(self, **kwargs: Any) -> dict[str, Any]:
         """Execute vector similarity search.
 

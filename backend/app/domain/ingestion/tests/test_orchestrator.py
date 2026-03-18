@@ -179,6 +179,7 @@ class TestIngestFileTool:
             storage=mock_storage,
             connector=mock_connector,
             job=MagicMock(metadata_={}),
+            llm=MagicMock(),
         )
 
         with (
@@ -220,6 +221,7 @@ class TestIngestFileTool:
             storage=mock_storage,
             connector=mock_connector,
             job=MagicMock(metadata_={}),
+            llm=MagicMock(),
         )
 
         with patch("app.domain.ingestion.orchestrator_tools.get_processor", return_value=None):
@@ -248,6 +250,7 @@ class TestIngestFileTool:
             storage=mock_storage,
             connector=mock_connector,
             job=MagicMock(metadata_={}),
+            llm=MagicMock(),
         )
 
         with (

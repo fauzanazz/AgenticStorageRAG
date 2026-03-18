@@ -292,8 +292,6 @@ class ClassifyFileTool(OrchestratorTool):
 class IngestFileTool(OrchestratorTool):
     """Downloads a file, processes it (chunk + embed + KG), and commits.
 
-    This is the core ingestion logic extracted from the old IngestionSwarm,
-    wrapped as a tool the orchestrator agent calls per-file.
     Each invocation is an atomic unit -- progress is committed after each file.
     """
 
@@ -303,11 +301,13 @@ class IngestFileTool(OrchestratorTool):
         storage: StorageClient,
         connector: SourceConnector,
         job: IngestionJob,
+        llm: LLMProvider,
     ) -> None:
         self._db = db
         self._storage = storage
         self._connector = connector
         self._job = job
+        self._llm = llm
 
     @property
     def name(self) -> str:
@@ -606,11 +606,10 @@ class IngestFileTool(OrchestratorTool):
         try:
             from app.domain.knowledge.kg_builder import KGBuilder
             from app.domain.knowledge.graph_service import GraphService
-            from app.infra.llm import llm_provider
             from app.infra.neo4j_client import neo4j_client
 
             graph_service = GraphService(db=self._db, neo4j=neo4j_client)
-            kg_builder = KGBuilder(graph_service=graph_service, llm=llm_provider)
+            kg_builder = KGBuilder(graph_service=graph_service, llm=self._llm)
 
             chunk_dicts = [
                 {"content": c.content, "metadata": c.metadata_ or {}}
@@ -658,6 +657,7 @@ class BatchIngestFilesTool(OrchestratorTool):
         storage: StorageClient,
         connector: SourceConnector,
         job: IngestionJob,
+        llm: LLMProvider,
         file_concurrency: int = 3,
     ) -> None:
         self._db = db
@@ -666,7 +666,7 @@ class BatchIngestFilesTool(OrchestratorTool):
         self._job = job
         self._semaphore = asyncio.Semaphore(file_concurrency)
         self._ingest_tool = IngestFileTool(
-            db=db, storage=storage, connector=connector, job=job
+            db=db, storage=storage, connector=connector, job=job, llm=llm
         )
 
     @property

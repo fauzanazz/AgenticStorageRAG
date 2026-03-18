@@ -39,6 +39,32 @@ class GraphSearchTool(IAgentTool):
             "Input: query (str), entity_types (optional list[str]), max_depth (int, default 2)"
         )
 
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Entity or relationship to search for.",
+                },
+                "entity_types": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Filter by entity type (e.g. ['Person', 'Course']).",
+                },
+                "max_depth": {
+                    "type": "integer",
+                    "description": "Relationship traversal depth (default 2).",
+                },
+                "top_k": {
+                    "type": "integer",
+                    "description": "Max entities to return (default 10).",
+                },
+            },
+            "required": ["query"],
+        }
+
     async def execute(self, **kwargs: Any) -> dict[str, Any]:
         """Execute graph search.
 

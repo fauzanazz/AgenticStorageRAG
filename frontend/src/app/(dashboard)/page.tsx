@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   FileText,
   MessageSquare,
@@ -12,6 +12,7 @@ import {
 import Link from "next/link";
 import { useAuth } from "@/hooks/use-auth";
 import { apiClient } from "@/lib/api-client";
+import { queryKeys } from "@/lib/query-keys";
 
 interface DashboardStats {
   total_documents: number;
@@ -88,22 +89,11 @@ function formatNumber(n: number): string {
 
 export default function DashboardPage() {
   const { user } = useAuth();
-  const [stats, setStats] = useState<DashboardStats | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    apiClient
-      .get<DashboardStats>("/documents/stats/dashboard")
-      .then((data) => {
-        if (!cancelled) setStats(data);
-      })
-      .catch(() => {
-        // Non-critical -- dashboard works without stats
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const { data: stats } = useQuery({
+    queryKey: queryKeys.documents.stats(),
+    queryFn: () => apiClient.get<DashboardStats>("/documents/stats/dashboard"),
+  });
 
   return (
     <div className="flex-1 p-6 lg:p-8 space-y-8">

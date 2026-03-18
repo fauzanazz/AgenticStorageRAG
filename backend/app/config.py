@@ -56,8 +56,17 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     openai_api_key: str = ""
     dashscope_api_key: str = ""  # Alibaba Cloud DashScope (Qwen models)
+    gemini_api_key: str = ""  # Google Gemini (via LiteLLM gemini/ prefix)
     default_model: str = "dashscope/qwen3-max"
     fallback_model: str = "anthropic/claude-sonnet-4-20250514"
+
+    # --- Embeddings ---
+    # LiteLLM model string for embedding generation.
+    # Examples:
+    #   "text-embedding-3-small"           (OpenAI)
+    #   "gemini/text-embedding-004"        (Google Gemini)
+    #   "text-embedding-v3"                (DashScope / Alibaba)
+    embedding_model: str = "text-embedding-3-small"
 
     # --- Google Drive (read-only) ---
     # Option 1: Service Account (preferred for production)

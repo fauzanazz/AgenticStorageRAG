@@ -1,92 +1,121 @@
 "use client";
 
 import { useState, useCallback, useRef } from "react";
+import {
+  useQuery,
+  useMutation,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
+import { queryKeys } from "@/lib/query-keys";
 import type { ChatSession, ChatMessage, Citation } from "@/types/chat";
 
+// ── Query / mutation functions ─────────────────────────────────────────────
+
+function fetchConversations(): Promise<ChatSession[]> {
+  return apiClient.get<ChatSession[]>("/chat/conversations");
+}
+
+async function fetchMessages(conversationId: string): Promise<ChatMessage[]> {
+  const data = await apiClient.get<
+    (Omit<ChatMessage, "timestamp"> & { created_at: string })[]
+  >(`/chat/conversations/${conversationId}/messages`);
+  return data.map(({ created_at, ...rest }) => ({
+    ...rest,
+    citations: rest.citations ?? [],
+    timestamp: created_at,
+  }));
+}
+
+// ── Hook ───────────────────────────────────────────────────────────────────
+
 export function useChat() {
-  const [conversations, setConversations] = useState<ChatSession[]>([]);
+  const queryClient = useQueryClient();
+
+  // Active conversation is local UI state (not a server resource by itself).
   const [activeConversation, setActiveConversation] =
     useState<ChatSession | null>(null);
+
+  // Streaming messages are kept in local state because SSE is push-based
+  // and not a typical query/cache pattern.
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  const fetchConversations = useCallback(async () => {
-    try {
-      const data = await apiClient.get<ChatSession[]>("/chat/conversations");
-      setConversations(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load conversations");
-    }
-  }, []);
+  // ── Conversations query ──────────────────────────────────────────────────
+  const conversationsQuery = useQuery({
+    queryKey: queryKeys.conversations.lists(),
+    queryFn: fetchConversations,
+  });
 
-  const fetchMessages = useCallback(async (conversationId: string) => {
-    try {
-      // Backend returns `created_at`; frontend ChatMessage uses `timestamp`
-      const data = await apiClient.get<
-        (Omit<ChatMessage, "timestamp"> & { created_at: string })[]
-      >(`/chat/conversations/${conversationId}/messages`);
-      setMessages(
-        data.map(({ created_at, ...rest }) => ({
-          ...rest,
-          citations: rest.citations ?? [],
-          timestamp: created_at,
-        }))
+  // ── Messages query (enabled only when a conversation is selected) ────────
+  const messagesQuery = useQuery({
+    queryKey: queryKeys.conversations.messages(activeConversation?.id ?? ""),
+    queryFn: () => fetchMessages(activeConversation!.id),
+    enabled: !!activeConversation,
+    // Sync fetched messages into local state so streaming can append to them.
+    select: (data) => data,
+  });
+
+  // Keep local messages in sync with the cache when a conversation is loaded.
+  // We only reset local state when the conversation changes (not on every re-render).
+  const lastConversationIdRef = useRef<string | null>(null);
+  if (
+    messagesQuery.data &&
+    activeConversation?.id !== lastConversationIdRef.current
+  ) {
+    lastConversationIdRef.current = activeConversation?.id ?? null;
+    setMessages(messagesQuery.data);
+  }
+
+  // ── Create conversation mutation ─────────────────────────────────────────
+  const createMutation = useMutation({
+    mutationFn: (title?: string) =>
+      apiClient.post<ChatSession>("/chat/conversations", { title }),
+    onSuccess: (newConversation) => {
+      // Prepend the new conversation to the cached list immediately.
+      queryClient.setQueryData<ChatSession[]>(
+        queryKeys.conversations.lists(),
+        (prev) => (prev ? [newConversation, ...prev] : [newConversation])
       );
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load messages");
-    }
-  }, []);
-
-  const createConversation = useCallback(async (title?: string) => {
-    try {
-      const data = await apiClient.post<ChatSession>("/chat/conversations", {
-        title,
-      });
-      setConversations((prev) => [data, ...prev]);
-      setActiveConversation(data);
+      setActiveConversation(newConversation);
       setMessages([]);
-      return data;
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to create conversation"
-      );
-      return null;
-    }
-  }, []);
+      lastConversationIdRef.current = newConversation.id;
+    },
+  });
 
-  const deleteConversation = useCallback(
-    async (conversationId: string) => {
-      try {
-        await apiClient.delete(`/chat/conversations/${conversationId}`);
-        setConversations((prev) =>
-          prev.filter((c) => c.id !== conversationId)
-        );
-        if (activeConversation?.id === conversationId) {
-          setActiveConversation(null);
-          setMessages([]);
-        }
-      } catch (err) {
-        setError(
-          err instanceof Error ? err.message : "Failed to delete conversation"
-        );
+  // ── Delete conversation mutation ─────────────────────────────────────────
+  const deleteMutation = useMutation({
+    mutationFn: (conversationId: string) =>
+      apiClient.delete(`/chat/conversations/${conversationId}`),
+    onSuccess: (_, conversationId) => {
+      // Remove from cache immediately — no stale key.
+      queryClient.setQueryData<ChatSession[]>(
+        queryKeys.conversations.lists(),
+        (prev) => (prev ? prev.filter((c) => c.id !== conversationId) : [])
+      );
+      // Remove the messages cache entry for this conversation.
+      queryClient.removeQueries({
+        queryKey: queryKeys.conversations.messages(conversationId),
+      });
+      if (activeConversation?.id === conversationId) {
+        setActiveConversation(null);
+        setMessages([]);
+        lastConversationIdRef.current = null;
       }
     },
-    [activeConversation]
-  );
+  });
 
+  // ── SSE streaming (remains imperative — TanStack Query doesn't model SSE) ─
   const sendMessage = useCallback(
     async (content: string, conversationId?: string) => {
       setIsStreaming(true);
       setError(null);
 
-      // Create abort controller for this stream
       const controller = new AbortController();
       abortRef.current = controller;
 
-      // Add user message immediately
       const userMessage: ChatMessage = {
         id: `temp-${Date.now()}`,
         role: "user",
@@ -94,9 +123,6 @@ export function useChat() {
         citations: [],
         timestamp: new Date().toISOString(),
       };
-      setMessages((prev) => [...prev, userMessage]);
-
-      // Create placeholder for assistant response
       const assistantMessage: ChatMessage = {
         id: `temp-assistant-${Date.now()}`,
         role: "assistant",
@@ -104,7 +130,7 @@ export function useChat() {
         citations: [],
         timestamp: new Date().toISOString(),
       };
-      setMessages((prev) => [...prev, assistantMessage]);
+      setMessages((prev) => [...prev, userMessage, assistantMessage]);
 
       try {
         let streamedContent = "";
@@ -114,7 +140,7 @@ export function useChat() {
           "/chat/stream",
           {
             message: content,
-            conversation_id: conversationId || activeConversation?.id,
+            conversation_id: conversationId ?? activeConversation?.id,
           },
           (sseEvent) => {
             switch (sseEvent.event) {
@@ -154,18 +180,19 @@ export function useChat() {
                 break;
 
               case "tool_call":
-                // Tool calls are informational -- shown in UI as "thinking" indicators
                 break;
 
               case "conversation_created":
                 try {
                   const data = JSON.parse(sseEvent.data);
                   if (data.conversation_id) {
-                    // Update active conversation with the backend-created ID
                     setActiveConversation((prev) =>
                       prev ? { ...prev, id: data.conversation_id } : prev
                     );
-                    fetchConversations();
+                    // Refresh the conversations list to include the new one.
+                    queryClient.invalidateQueries({
+                      queryKey: queryKeys.conversations.lists(),
+                    });
                   }
                 } catch {
                   // Ignore parse errors
@@ -182,26 +209,31 @@ export function useChat() {
                 break;
 
               case "done":
-                // Stream complete -- refresh conversations to get updated title
-                fetchConversations();
+                // Invalidate conversations list so updated titles appear.
+                queryClient.invalidateQueries({
+                  queryKey: queryKeys.conversations.lists(),
+                });
+                // Invalidate message cache for this conversation so a hard
+                // refresh will load the persisted messages from the server.
+                if (activeConversation?.id) {
+                  queryClient.invalidateQueries({
+                    queryKey: queryKeys.conversations.messages(
+                      activeConversation.id
+                    ),
+                  });
+                }
                 break;
             }
           },
-          controller.signal,
+          controller.signal
         );
       } catch (err) {
-        if (err instanceof Error && err.name === "AbortError") {
-          // User cancelled -- not an error
-          return;
-        }
+        if (err instanceof Error && err.name === "AbortError") return;
         setError(err instanceof Error ? err.message : "Failed to send message");
-        // Remove the empty assistant placeholder on error
         setMessages((prev) => {
           const updated = [...prev];
           const last = updated[updated.length - 1];
-          if (last.role === "assistant" && !last.content) {
-            updated.pop();
-          }
+          if (last.role === "assistant" && !last.content) updated.pop();
           return updated;
         });
       } finally {
@@ -209,7 +241,7 @@ export function useChat() {
         setIsStreaming(false);
       }
     },
-    [activeConversation, fetchConversations]
+    [activeConversation, queryClient]
   );
 
   const stopStreaming = useCallback(() => {
@@ -221,23 +253,36 @@ export function useChat() {
   const selectConversation = useCallback(
     async (conversation: ChatSession) => {
       setActiveConversation(conversation);
-      await fetchMessages(conversation.id);
+      lastConversationIdRef.current = null; // force sync on next render
     },
-    [fetchMessages]
+    []
+  );
+
+  // Legacy imperative refresh — kept for backward-compat with callers.
+  const refreshConversations = useCallback(
+    () =>
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.conversations.lists(),
+      }),
+    [queryClient]
   );
 
   return {
-    conversations,
+    conversations: conversationsQuery.data ?? [],
     activeConversation,
     messages,
     isStreaming,
     error,
-    fetchConversations,
-    createConversation,
-    deleteConversation,
+
+    // mutations
+    createConversation: (title?: string) => createMutation.mutateAsync(title),
+    deleteConversation: (id: string) => deleteMutation.mutateAsync(id),
     sendMessage,
     stopStreaming,
     selectConversation,
+
+    // legacy
+    fetchConversations: refreshConversations,
     setError,
   };
 }

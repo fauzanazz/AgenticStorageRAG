@@ -96,7 +96,7 @@ describe("useDocuments API contracts", () => {
 
   it("should handle API error on list", async () => {
     const { ApiError } = await import("@/lib/api-client");
-    mockGet.mockRejectedValue(new ApiError("Unauthorized", 401));
+    mockGet.mockRejectedValue(new ApiError(401, "Unauthorized"));
 
     await expect(mockGet("/documents?page=1&page_size=20")).rejects.toThrow(
       "Unauthorized"

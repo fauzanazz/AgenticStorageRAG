@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Search } from "lucide-react";
 import { GraphCanvas } from "@/components/knowledge/graph-canvas";
 import { StatsCard } from "@/components/knowledge/stats-card";
@@ -14,22 +14,18 @@ export default function KnowledgePage() {
     searchResults,
     loading,
     error,
-    fetchGraph,
-    fetchStats,
     search,
   } = useKnowledge();
 
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState<"graph" | "search">("graph");
 
-  useEffect(() => {
-    fetchGraph();
-    fetchStats();
-  }, [fetchGraph, fetchStats]);
+  // No useEffect needed — graph and stats are fetched automatically by
+  // the useQuery calls inside useKnowledge on component mount.
 
   const handleSearch = () => {
     if (searchQuery.trim()) {
-      search(searchQuery);
+      search({ query: searchQuery });
       setActiveTab("search");
     }
   };

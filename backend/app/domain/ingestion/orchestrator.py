@@ -1,8 +1,7 @@
 """Ingestion orchestrator -- ReAct agent for Google Drive ingestion.
 
-Replaces the pipeline-style ``IngestionSwarm`` with an LLM-powered
-orchestrator that dynamically explores folder structures, classifies
-file metadata, and ingests documents incrementally.
+LLM-powered orchestrator that dynamically explores folder structures,
+classifies file metadata, and ingests documents incrementally.
 
 Architecture
 ~~~~~~~~~~~~
@@ -192,12 +191,14 @@ class IngestionOrchestrator:
                 storage=self._storage,
                 connector=self._connector,
                 job=job,
+                llm=self._llm,
             )
             batch_tool = BatchIngestFilesTool(
                 db=self._db,
                 storage=self._storage,
                 connector=self._connector,
                 job=job,
+                llm=self._llm,
                 file_concurrency=file_concurrency,
             )
             tools: list[OrchestratorTool] = [

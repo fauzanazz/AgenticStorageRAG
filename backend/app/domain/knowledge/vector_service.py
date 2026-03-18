@@ -15,6 +15,7 @@ import litellm
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.domain.knowledge.exceptions import EmbeddingError
 from app.domain.knowledge.interfaces import IVectorService
 from app.domain.knowledge.models import DocumentEmbedding
@@ -22,26 +23,33 @@ from app.domain.knowledge.schemas import VectorSearchRequest, VectorSearchResult
 
 logger = logging.getLogger(__name__)
 
-# Default embedding model
-EMBEDDING_MODEL = "text-embedding-3-small"
-EMBEDDING_DIMENSIONS = 1536
+# Fallback embedding model (used when no config value is available)
+_DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
 BATCH_SIZE = 100  # Max chunks per embedding API call
+
+
+def _get_embedding_model() -> str:
+    """Return the configured embedding model (defaults to text-embedding-3-small)."""
+    return get_settings().embedding_model or _DEFAULT_EMBEDDING_MODEL
 
 
 class VectorService(IVectorService):
     """Vector embedding service using pgvector + LiteLLM embeddings.
 
-    Generates embeddings via LiteLLM (OpenAI text-embedding-3-small)
-    and stores them in PostgreSQL with pgvector for similarity search.
+    Generates embeddings via LiteLLM and stores them in PostgreSQL with
+    pgvector for similarity search. The embedding model is configured via
+    the ``EMBEDDING_MODEL`` environment variable (default: text-embedding-3-small).
+    To use Gemini embeddings set ``EMBEDDING_MODEL=gemini/text-embedding-004``
+    and provide ``GEMINI_API_KEY``.
     """
 
     def __init__(
         self,
         db: AsyncSession,
-        embedding_model: str = EMBEDDING_MODEL,
+        embedding_model: str | None = None,
     ) -> None:
         self._db = db
-        self._embedding_model = embedding_model
+        self._embedding_model = embedding_model or _get_embedding_model()
 
     async def embed_chunks(
         self,
@@ -190,7 +198,9 @@ class VectorService(IVectorService):
     ) -> list[list[float]]:
         """Generate embeddings using LiteLLM.
 
-        Uses OpenAI's text-embedding-3-small by default.
+        Uses the model configured by the EMBEDDING_MODEL setting.
+        Supports any provider that LiteLLM supports, including OpenAI,
+        Google Gemini (``gemini/text-embedding-004``), and DashScope.
         """
         try:
             response = await litellm.aembedding(
