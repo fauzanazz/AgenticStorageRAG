@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 CHAT_MODELS: list[dict[str, str]] = [
     {"provider": "Anthropic", "model_id": "anthropic/claude-opus-4-5", "label": "Claude Opus 4.5"},
     {"provider": "Anthropic", "model_id": "anthropic/claude-sonnet-4-20250514", "label": "Claude Sonnet 4"},
+    {"provider": "Anthropic", "model_id": "anthropic/claude-haiku-4-5-20251001", "label": "Claude Haiku 4.5"},
     {"provider": "Anthropic", "model_id": "anthropic/claude-3-5-haiku-20241022", "label": "Claude 3.5 Haiku"},
     {"provider": "OpenAI", "model_id": "openai/gpt-4o", "label": "GPT-4o"},
     {"provider": "OpenAI", "model_id": "openai/gpt-4o-mini", "label": "GPT-4o mini"},
