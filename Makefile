@@ -1,7 +1,7 @@
 # DingDong RAG - Makefile
 # Run `make help` to see all available commands.
 
-.PHONY: help dev dev-supabase dev-backend dev-frontend test test-backend test-frontend lint lint-backend lint-frontend build migrate migrate-local migration seed graph-schema graph-seed graph-seed-clean graph-export clean down logs ps
+.PHONY: help dev dev-supabase dev-backend dev-worker dev-frontend test test-backend test-frontend lint lint-backend lint-frontend build migrate migrate-local migration seed graph-schema graph-seed graph-seed-clean graph-export clean down logs ps
 
 # Default
 help: ## Show this help message
@@ -15,7 +15,10 @@ dev-supabase: ## Start with Supabase DB (Neo4j + Redis + backend + worker + fron
 	docker compose --profile supabase up --build
 
 dev-backend: ## Start backend with hot-reload (no Docker)
-	cd backend && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+	cd backend && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+dev-worker: ## Start Celery worker locally (no Docker) — 4 threads, documents + ingestion queues
+	cd backend && uv run celery -A app.celery_app worker --loglevel=info --queues=documents,ingestion --concurrency=4 --pool=threads
 
 dev-frontend: ## Start frontend dev server (no Docker)
 	cd frontend && npm run dev
@@ -33,7 +36,7 @@ ps: ## Show running service status
 test: test-backend test-frontend ## Run all tests
 
 test-backend: ## Run backend tests with coverage
-	cd backend && python -m pytest --cov=app --cov-report=term-missing
+	cd backend && uv run python -m pytest --cov=app --cov-report=term-missing
 
 test-frontend: ## Run frontend tests
 	cd frontend && npm run test -- --run
@@ -58,20 +61,20 @@ migration: ## Create a new migration (usage: make migration msg="add users table
 	cd backend && set -a && source ../.env && set +a && uv run alembic revision --autogenerate -m "$(msg)"
 
 seed: ## Seed dev accounts (admin@dingdong.dev / admin123, user@dingdong.dev / user123)
-	cd backend && python -m app.scripts.seed
+	cd backend && uv run python -m app.scripts.seed
 
 # --- Knowledge Graph ---
 graph-schema: ## Apply Neo4j indexes and constraints (idempotent)
-	cd backend && python -m app.scripts.graph_schema
+	cd backend && uv run python -m app.scripts.graph_schema
 
 graph-seed: ## Seed Neo4j + PG from local graph files (idempotent merge/upsert)
-	cd backend && python -m app.scripts.graph_import
+	cd backend && uv run python -m app.scripts.graph_import
 
 graph-seed-clean: ## Wipe Neo4j + PG knowledge tables and re-seed from local graph files
-	cd backend && python -m app.scripts.graph_import --clean
+	cd backend && uv run python -m app.scripts.graph_import --clean
 
 graph-export: ## Export current Neo4j graph to versioned JSONL seed files
-	cd backend && python -m app.scripts.graph_export
+	cd backend && uv run python -m app.scripts.graph_export
 
 # --- Build ---
 build: ## Build all Docker images
