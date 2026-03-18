@@ -9,6 +9,14 @@ No auto-retry: the orchestrator manages its own internal error handling
 and progress tracking (status field on IngestionJob). A crashed task
 is redelivered once by Celery (acks_late=True). Re-running after that
 must be triggered manually by the admin.
+
+IMPORTANT — event loop isolation:
+Each Celery thread task calls asyncio.run(), which creates a brand-new
+event loop. The global _session_factory holds asyncpg connections bound
+to the event loop from the API server process. Those connections cannot
+be used from a different loop (raises "Future attached to a different loop").
+We therefore build a fresh async engine + session factory per task
+invocation, scoped to the task's own event loop, and dispose it on exit.
 """
 
 from __future__ import annotations
@@ -55,31 +63,40 @@ def run_ingestion_task(  # type: ignore[misc]
 
     async def _run() -> None:
         import app.infra.database as _db_module
+        from app.infra.database import build_session_factory
 
-        if _db_module._session_factory is None:
+        if _db_module._engine is None:
             logger.error("Database not initialised before ingestion task")
             return
 
-        async with _db_module._session_factory() as db:
-            job = await db.get(IngestionJob, job_uuid)
-            if job is None:
-                logger.error("Ingestion job not found: %s", job_uuid)
-                return
+        # Build a fresh engine + session factory bound to THIS event loop.
+        # The global _engine/_session_factory is bound to the API server's
+        # event loop and cannot be safely used from a different asyncio.run().
+        task_engine, task_session_factory = build_session_factory(_db_module._engine.url)
 
-            connector = GoogleDriveConnector()
-            orchestrator = IngestionOrchestrator(
-                db=db,
-                storage=storage_client,
-                connector=connector,
-                llm=llm_provider,
-                session_factory=_db_module._session_factory,
-            )
+        try:
+            async with task_session_factory() as db:
+                job = await db.get(IngestionJob, job_uuid)
+                if job is None:
+                    logger.error("Ingestion job not found: %s", job_uuid)
+                    return
 
-            try:
-                await orchestrator.run(job=job, admin_user_id=admin_uuid, force=force)
-                logger.info("Ingestion job completed: %s", job_uuid)
-            except Exception:
-                logger.exception("Ingestion job failed: %s", job_uuid)
-                raise  # Let Celery record the failure; acks_late ensures redelivery
+                connector = GoogleDriveConnector()
+                orchestrator = IngestionOrchestrator(
+                    db=db,
+                    storage=storage_client,
+                    connector=connector,
+                    llm=llm_provider,
+                    session_factory=task_session_factory,
+                )
+
+                try:
+                    await orchestrator.run(job=job, admin_user_id=admin_uuid, force=force)
+                    logger.info("Ingestion job completed: %s", job_uuid)
+                except Exception:
+                    logger.exception("Ingestion job failed: %s", job_uuid)
+                    raise  # Let Celery record the failure; acks_late ensures redelivery
+        finally:
+            await task_engine.dispose()
 
     asyncio.run(_run())

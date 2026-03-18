@@ -215,10 +215,24 @@ class GoogleDriveConnector(SourceConnector):
             logger.error("Drive API error listing files: %s", e)
             raise DriveAccessError(folder_id or "root") from e
 
+    def _build_service(self) -> Any:
+        """Build a fresh Drive service instance using the stored credentials.
+
+        google-api-python-client's service object wraps an httplib2.Http
+        instance that is NOT thread-safe.  Calling this method returns a
+        brand-new service (and underlying Http connection) so that concurrent
+        download_file() calls each get their own isolated HTTP client.
+        """
+        return build("drive", "v3", credentials=self._credentials)
+
     async def download_file(self, file_id: str) -> tuple[bytes, str]:
         """Download a file from Drive.
 
         For Google Docs, exports as DOCX. For other files, downloads directly.
+
+        Each call builds its own Drive service instance so that concurrent
+        downloads from BatchIngestFilesTool do not share an httplib2.Http
+        connection (which is not thread-safe).
 
         Args:
             file_id: Google Drive file ID
@@ -226,44 +240,51 @@ class GoogleDriveConnector(SourceConnector):
         Returns:
             Tuple of (file bytes, original filename)
         """
-        if not self._service:
+        if not self._credentials:
             raise DriveAuthError("Not authenticated. Call authenticate() first.")
 
-        try:
-            # Get file metadata first
-            meta_request = self._service.files().get(fileId=file_id, fields=FILE_FIELDS)
-            meta = await asyncio.to_thread(meta_request.execute)
-            filename = meta["name"]
-            mime_type = meta["mimeType"]
+        def _do_download() -> tuple[bytes, str]:
+            """Run the full download in a single thread with its own service."""
+            svc = self._build_service()
 
-            # Google Docs need to be exported
-            if mime_type == "application/vnd.google-apps.document":
+            meta = svc.files().get(fileId=file_id, fields=FILE_FIELDS).execute()
+            fname = meta["name"]
+            mime = meta["mimeType"]
+
+            if mime == "application/vnd.google-apps.document":
                 export_mime = (
                     "application/vnd.openxmlformats-officedocument"
                     ".wordprocessingml.document"
                 )
-                request = self._service.files().export_media(
-                    fileId=file_id, mimeType=export_mime
-                )
-                if not filename.endswith(".docx"):
-                    filename = f"{filename}.docx"
+                req = svc.files().export_media(fileId=file_id, mimeType=export_mime)
+                if not fname.endswith(".docx"):
+                    fname = f"{fname}.docx"
             else:
-                request = self._service.files().get_media(fileId=file_id)
+                req = svc.files().get_media(fileId=file_id)
 
-            # Download to buffer
-            buffer = io.BytesIO()
-            downloader = MediaIoBaseDownload(buffer, request)
-
+            buf = io.BytesIO()
+            dl = MediaIoBaseDownload(buf, req, chunksize=10 * 1024 * 1024)  # 10 MB chunks
             done = False
             while not done:
-                _, done = await asyncio.to_thread(downloader.next_chunk)
+                _, done = dl.next_chunk()
 
-            content = buffer.getvalue()
+            return buf.getvalue(), fname
+
+        try:
+            content, filename = await asyncio.to_thread(_do_download)
             logger.info("Downloaded %s (%d bytes)", filename, len(content))
             return content, filename
-
         except HttpError as e:
             raise DriveFileDownloadError(file_id, str(e)) from e
+        except Exception as e:
+            # Retry once on transient errors (SSL reset, timeout, etc.)
+            logger.warning("Download failed for %s (%s), retrying once…", file_id, e)
+            try:
+                content, filename = await asyncio.to_thread(_do_download)
+                logger.info("Downloaded %s (%d bytes) on retry", filename, len(content))
+                return content, filename
+            except HttpError as e2:
+                raise DriveFileDownloadError(file_id, str(e2)) from e2
 
     async def get_file_metadata(self, file_id: str) -> dict[str, Any]:
         """Get metadata for a Drive file."""

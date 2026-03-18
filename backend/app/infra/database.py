@@ -72,6 +72,35 @@ def init_db() -> tuple["AsyncEngine", async_sessionmaker[AsyncSession]]:  # noqa
     return _engine, _session_factory
 
 
+def build_session_factory(
+    url: "URL | str",  # noqa: F821
+) -> tuple["AsyncEngine", async_sessionmaker[AsyncSession]]:  # noqa: F821
+    """Create a fresh engine + session factory bound to the current event loop.
+
+    Use this inside Celery tasks (asyncio.run) so the engine is bound to the
+    task's event loop, not the API server's event loop.  Always call
+    ``await engine.dispose()`` in a finally block after the task finishes.
+
+    Args:
+        url: SQLAlchemy database URL (use ``_engine.url`` from the global engine).
+
+    Returns:
+        Tuple of (engine, session_factory) scoped to the current event loop.
+    """
+    from sqlalchemy.engine import URL as SAUrl  # noqa: F811
+
+    engine = create_async_engine(
+        url if isinstance(url, str) else url,
+        echo=False,
+        pool_pre_ping=True,
+        pool_size=5,
+        max_overflow=10,
+        connect_args={"statement_cache_size": 0, "prepared_statement_cache_size": 0},
+    )
+    session_factory = create_session_factory(engine)
+    return engine, session_factory
+
+
 async def close_db() -> None:
     """Close the database engine. Called during application shutdown."""
     global _engine

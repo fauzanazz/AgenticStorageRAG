@@ -27,10 +27,8 @@ class TestRunIngestionTask:
     @patch("app.domain.ingestion.drive_connector.GoogleDriveConnector", autospec=True)
     @patch("app.domain.ingestion.tasks.storage_client")
     @patch("app.domain.ingestion.tasks.llm_provider")
-    @patch("app.infra.database._session_factory")
     def test_run_ingestion_calls_orchestrator(
         self,
-        mock_session_factory: MagicMock,
         mock_llm: MagicMock,
         mock_storage: MagicMock,
         mock_connector_cls: MagicMock,
@@ -42,12 +40,15 @@ class TestRunIngestionTask:
         job_id = str(uuid.uuid4())
         admin_user_id = str(uuid.uuid4())
 
-        # Mock async context manager for _session_factory()
+        # Mock a fresh engine + session factory returned by build_session_factory
+        mock_engine = AsyncMock()
+        mock_engine.url = "postgresql+asyncpg://test/db"
+
         mock_db = AsyncMock()
         mock_ctx = AsyncMock()
         mock_ctx.__aenter__ = AsyncMock(return_value=mock_db)
         mock_ctx.__aexit__ = AsyncMock(return_value=False)
-        mock_session_factory.return_value = mock_ctx
+        mock_session_factory = MagicMock(return_value=mock_ctx)
 
         mock_job = MagicMock()
         mock_db.get = AsyncMock(return_value=mock_job)
@@ -55,7 +56,14 @@ class TestRunIngestionTask:
         mock_orchestrator = AsyncMock()
         mock_orchestrator_cls.return_value = mock_orchestrator
 
-        run_ingestion_task.run(job_id=job_id, admin_user_id=admin_user_id, force=False)
+        with (
+            patch("app.infra.database._engine", mock_engine),
+            patch(
+                "app.infra.database.build_session_factory",
+                return_value=(mock_engine, mock_session_factory),
+            ),
+        ):
+            run_ingestion_task.run(job_id=job_id, admin_user_id=admin_user_id, force=False)
 
         mock_orchestrator.run.assert_awaited_once_with(
             job=mock_job,
@@ -63,7 +71,7 @@ class TestRunIngestionTask:
             force=False,
         )
 
-    @patch("app.infra.database._session_factory", None)
+    @patch("app.infra.database._engine", None)
     def test_run_ingestion_handles_missing_db(self) -> None:
         """Task must log and return gracefully when DB is not initialised."""
         from app.domain.ingestion.tasks import run_ingestion_task

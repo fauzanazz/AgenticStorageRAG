@@ -248,20 +248,21 @@ class TestDownloadFile:
     async def test_download_pdf(self) -> None:
         """Should download a regular PDF file."""
         connector = GoogleDriveConnector()
-        connector._service = MagicMock()
+        connector._credentials = MagicMock()  # mark as authenticated
 
-        # Mock get metadata
-        connector._service.files.return_value.get.return_value.execute.return_value = {
+        mock_svc = MagicMock()
+        mock_svc.files.return_value.get.return_value.execute.return_value = {
             "id": "file-1",
             "name": "doc.pdf",
             "mimeType": "application/pdf",
         }
-
-        # Mock download
         mock_request = MagicMock()
-        connector._service.files.return_value.get_media.return_value = mock_request
+        mock_svc.files.return_value.get_media.return_value = mock_request
 
-        with patch("app.domain.ingestion.drive_connector.MediaIoBaseDownload") as mock_dl:
+        with (
+            patch.object(connector, "_build_service", return_value=mock_svc),
+            patch("app.domain.ingestion.drive_connector.MediaIoBaseDownload") as mock_dl,
+        ):
             mock_dl_instance = MagicMock()
             mock_dl_instance.next_chunk.return_value = (None, True)
             mock_dl.return_value = mock_dl_instance
@@ -273,18 +274,21 @@ class TestDownloadFile:
     async def test_download_google_doc_exports_docx(self) -> None:
         """Google Docs should be exported as DOCX."""
         connector = GoogleDriveConnector()
-        connector._service = MagicMock()
+        connector._credentials = MagicMock()  # mark as authenticated
 
-        connector._service.files.return_value.get.return_value.execute.return_value = {
+        mock_svc = MagicMock()
+        mock_svc.files.return_value.get.return_value.execute.return_value = {
             "id": "file-2",
             "name": "My Document",
             "mimeType": "application/vnd.google-apps.document",
         }
-
         mock_request = MagicMock()
-        connector._service.files.return_value.export_media.return_value = mock_request
+        mock_svc.files.return_value.export_media.return_value = mock_request
 
-        with patch("app.domain.ingestion.drive_connector.MediaIoBaseDownload") as mock_dl:
+        with (
+            patch.object(connector, "_build_service", return_value=mock_svc),
+            patch("app.domain.ingestion.drive_connector.MediaIoBaseDownload") as mock_dl,
+        ):
             mock_dl_instance = MagicMock()
             mock_dl_instance.next_chunk.return_value = (None, True)
             mock_dl.return_value = mock_dl_instance
