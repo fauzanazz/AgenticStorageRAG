@@ -111,6 +111,16 @@ class LLMProvider:
         """Get the fallback model identifier."""
         return get_settings().fallback_model
 
+    @property
+    def ingestion_model(self) -> str:
+        """Get the dedicated ingestion model identifier.
+
+        Defaults to claude-haiku-3-5 — a fast, cheap model with a 100K
+        tokens/min rate limit, ideal for the structured JSON tasks in the
+        ingestion pipeline (classify_file, KG extraction).
+        """
+        return get_settings().ingestion_model
+
     async def complete(
         self,
         messages: list[dict[str, str]],
@@ -262,6 +272,26 @@ class LLMProvider:
 
         raise last_error  # type: ignore[misc]
 
+    async def complete_for_ingestion(
+        self,
+        messages: list[dict[str, str]],
+        **kwargs: Any,
+    ) -> ModelResponse:
+        """Chat completion optimized for ingestion pipeline tasks.
+
+        Uses the dedicated ingestion_model (default: claude-haiku-3-5) which
+        has a much higher rate limit (100K tok/min) and lower cost than the
+        frontier chat model — ideal for the structured JSON tasks in classify_file
+        and KG extraction that run many times per ingestion job.
+
+        Falls back to the standard fallback_model if the ingestion model fails.
+        """
+        return await self.complete(
+            messages=messages,
+            model=self.ingestion_model,
+            **kwargs,
+        )
+
     def health_check(self) -> dict[str, Any]:
         """Return LLM provider health status."""
         settings = get_settings()
@@ -269,6 +299,7 @@ class LLMProvider:
             "status": "configured" if self._initialized else "not_initialized",
             "primary_model": settings.default_model,
             "fallback_model": settings.fallback_model,
+            "ingestion_model": settings.ingestion_model,
             "dashscope_key_set": bool(settings.dashscope_api_key),
             "anthropic_key_set": bool(settings.anthropic_api_key),
             "openai_key_set": bool(settings.openai_api_key),

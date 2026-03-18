@@ -242,7 +242,7 @@ class ClassifyFileTool(OrchestratorTool):
         )
 
         try:
-            response = await self._llm.complete(
+            response = await self._llm.complete_for_ingestion(
                 messages=[
                     {"role": "system", "content": CLASSIFY_SYSTEM_PROMPT},
                     {"role": "user", "content": user_message},

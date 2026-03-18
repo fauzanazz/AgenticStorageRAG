@@ -116,7 +116,7 @@ class TestClassifyFileTool:
             "category": "Referensi",
             "additional_context": {},
         })
-        mock_llm.complete.return_value = mock_response
+        mock_llm.complete_for_ingestion.return_value = mock_response
 
         tool = ClassifyFileTool(llm=mock_llm)
         result = await tool.execute(
@@ -134,7 +134,7 @@ class TestClassifyFileTool:
     async def test_classify_llm_failure_returns_fallback(self) -> None:
         """Should return a fallback classification on LLM failure."""
         mock_llm = AsyncMock()
-        mock_llm.complete.side_effect = Exception("LLM down")
+        mock_llm.complete_for_ingestion.side_effect = Exception("LLM down")
 
         tool = ClassifyFileTool(llm=mock_llm)
         result = await tool.execute(
@@ -363,7 +363,16 @@ class TestIngestionOrchestrator:
         second_choice.message = second_message
         second_response.choices = [second_choice]
 
-        mock_llm.complete.side_effect = [first_response, second_response]
+        # First call: scan_folder tool call; second call: text response (done)
+        no_tool_response = MagicMock()
+        no_tool_choice = MagicMock()
+        no_tool_message = MagicMock()
+        no_tool_message.tool_calls = None
+        no_tool_message.content = "Ingestion complete. Scanned 1 folder, found 0 files."
+        no_tool_choice.message = no_tool_message
+        no_tool_response.choices = [no_tool_choice]
+
+        mock_llm.complete_for_ingestion.side_effect = [first_response, no_tool_response]
 
         job = _make_job()
         orchestrator = IngestionOrchestrator(
@@ -376,7 +385,7 @@ class TestIngestionOrchestrator:
         result = await orchestrator.run(job, admin_user_id=uuid.uuid4())
 
         assert result.status == IngestionStatus.COMPLETED
-        assert mock_llm.complete.call_count == 2
+        assert mock_llm.complete_for_ingestion.call_count == 2
         assert mock_connector.list_folder_children.await_count == 1
         assert "orchestrator_summary" in result.metadata_
 

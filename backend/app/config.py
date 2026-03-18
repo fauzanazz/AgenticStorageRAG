@@ -59,6 +59,11 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""  # Google Gemini (via LiteLLM gemini/ prefix)
     default_model: str = "dashscope/qwen3-max"
     fallback_model: str = "anthropic/claude-sonnet-4-20250514"
+    # Dedicated model for ingestion/KG-extraction tasks.
+    # These are pure JSON-structured-output tasks that do NOT need frontier
+    # reasoning — a fast, cheap model with high throughput limits is optimal.
+    # claude-haiku-3-5: 5× faster, 12× cheaper than Sonnet, 100K tok/min limit.
+    ingestion_model: str = "anthropic/claude-haiku-3-5-20241022"
 
     # --- Embeddings ---
     # LiteLLM model string for embedding generation.

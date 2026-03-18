@@ -245,7 +245,7 @@ class IngestionOrchestrator:
                 iteration += 1
 
                 try:
-                    response = await self._llm.complete(
+                    response = await self._llm.complete_for_ingestion(
                         messages=messages,
                         temperature=0.0,
                         max_tokens=4096,
