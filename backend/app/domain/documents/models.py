@@ -66,7 +66,7 @@ class Document(Base):
         nullable=False,
     )
     file_type: Mapped[str] = mapped_column(
-        String(50),
+        String(200),
         nullable=False,
         comment="MIME type or extension (e.g., 'application/pdf', 'docx')",
     )
@@ -75,10 +75,10 @@ class Document(Base):
         nullable=False,
         comment="File size in bytes",
     )
-    storage_path: Mapped[str] = mapped_column(
+    storage_path: Mapped[str | None] = mapped_column(
         String(1000),
-        nullable=False,
-        comment="Path in Supabase Storage bucket",
+        nullable=True,
+        comment="Path in Supabase Storage bucket, or 'drive://{file_id}' for Drive-sourced docs",
     )
     status: Mapped[DocumentStatus] = mapped_column(
         Enum(DocumentStatus, name="document_status", create_constraint=True),
