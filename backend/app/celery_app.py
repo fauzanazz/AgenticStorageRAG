@@ -103,6 +103,18 @@ def _init_worker_resources(**kwargs: object) -> None:
     from app.infra.llm import llm_provider
     from app.infra.storage import storage_client
 
+    # Register ALL domain models with Base.metadata before init_db() creates the
+    # engine. SQLAlchemy resolves cross-domain FK strings (e.g.
+    # IngestionJob.triggered_by → "users.id") by scanning Base.metadata at mapper
+    # configuration time. Without these imports the worker's metadata is incomplete
+    # and raises NoReferencedTableError on the first DB query.
+    import app.domain.auth.models          # noqa: F401
+    import app.domain.documents.models     # noqa: F401
+    import app.domain.knowledge.models     # noqa: F401
+    import app.domain.agents.models        # noqa: F401
+    import app.domain.ingestion.models     # noqa: F401
+    import app.domain.settings.models      # noqa: F401
+
     init_db()
     storage_client.connect()
     llm_provider.initialize()
