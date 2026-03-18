@@ -27,7 +27,7 @@ class TestRunIngestionTask:
     @patch("app.domain.ingestion.drive_connector.GoogleDriveConnector", autospec=True)
     @patch("app.domain.ingestion.tasks.storage_client")
     @patch("app.domain.ingestion.tasks.llm_provider")
-    @patch("app.domain.ingestion.tasks._session_factory")
+    @patch("app.infra.database._session_factory")
     def test_run_ingestion_calls_orchestrator(
         self,
         mock_session_factory: MagicMock,
@@ -63,7 +63,7 @@ class TestRunIngestionTask:
             force=False,
         )
 
-    @patch("app.domain.ingestion.tasks._session_factory", None)
+    @patch("app.infra.database._session_factory", None)
     def test_run_ingestion_handles_missing_db(self) -> None:
         """Task must log and return gracefully when DB is not initialised."""
         from app.domain.ingestion.tasks import run_ingestion_task

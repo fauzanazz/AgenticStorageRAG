@@ -18,7 +18,6 @@ import logging
 import uuid
 
 from app.celery_app import celery_app
-from app.infra.database import _session_factory
 from app.infra.llm import llm_provider
 from app.infra.storage import storage_client
 
@@ -55,11 +54,13 @@ def run_ingestion_task(  # type: ignore[misc]
     admin_uuid = uuid.UUID(admin_user_id)
 
     async def _run() -> None:
-        if _session_factory is None:
+        import app.infra.database as _db_module
+
+        if _db_module._session_factory is None:
             logger.error("Database not initialised before ingestion task")
             return
 
-        async with _session_factory() as db:
+        async with _db_module._session_factory() as db:
             job = await db.get(IngestionJob, job_uuid)
             if job is None:
                 logger.error("Ingestion job not found: %s", job_uuid)
