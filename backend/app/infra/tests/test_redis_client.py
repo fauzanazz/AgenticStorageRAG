@@ -154,62 +154,6 @@ class TestRedisClientCache:
         assert stored_value == {"foo": "bar"}
 
 
-class TestRedisClientQueue:
-    """Tests for queue operations."""
-
-    @pytest.mark.asyncio
-    async def test_enqueue(self) -> None:
-        """enqueue() should push serialized job to Redis list."""
-        client = RedisClient()
-        mock_redis = AsyncMock()
-        client._client = mock_redis
-
-        job = {"type": "test_job", "id": "123"}
-        await client.enqueue("jobs:test", job)
-
-        mock_redis.rpush.assert_called_once()
-        queue_name, payload = mock_redis.rpush.call_args[0]
-        assert queue_name == "jobs:test"
-        assert json.loads(payload) == job
-
-    @pytest.mark.asyncio
-    async def test_dequeue_returns_job(self) -> None:
-        """dequeue() should return deserialized job."""
-        client = RedisClient()
-        mock_redis = AsyncMock()
-        job = {"type": "test_job", "id": "123"}
-        mock_redis.blpop.return_value = ("jobs:test", json.dumps(job))
-        client._client = mock_redis
-
-        result = await client.dequeue("jobs:test", timeout=1)
-
-        assert result == job
-
-    @pytest.mark.asyncio
-    async def test_dequeue_returns_none_on_timeout(self) -> None:
-        """dequeue() should return None when timeout is reached."""
-        client = RedisClient()
-        mock_redis = AsyncMock()
-        mock_redis.blpop.return_value = None
-        client._client = mock_redis
-
-        result = await client.dequeue("jobs:test", timeout=1)
-
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_queue_length(self) -> None:
-        """queue_length() should return the list length."""
-        client = RedisClient()
-        mock_redis = AsyncMock()
-        mock_redis.llen.return_value = 5
-        client._client = mock_redis
-
-        result = await client.queue_length("jobs:test")
-
-        assert result == 5
-
-
 class TestRedisClientHealthCheck:
     """Tests for health check."""
 

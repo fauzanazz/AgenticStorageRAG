@@ -1,7 +1,9 @@
 """Redis client wrapper.
 
-Provides connection management, health check, and queue abstractions
-for caching and background job dispatch.
+Provides connection management and cache operations.
+
+Background job dispatch is handled by Celery (see app/celery_app.py).
+This client is used only for caching (get/set/delete/get_json/set_json).
 """
 
 from __future__ import annotations
@@ -19,9 +21,10 @@ logger = logging.getLogger(__name__)
 
 
 class RedisClient:
-    """Async Redis client with connection pooling and job queue support.
+    """Async Redis client with connection pooling and cache support.
 
     Initialized once during app startup, shared via dependency injection.
+    Background job dispatch is handled by Celery, not this client.
     """
 
     def __init__(self) -> None:
@@ -98,58 +101,6 @@ class RedisClient:
     ) -> None:
         """Serialize and set a JSON value."""
         await self.set(key, json.dumps(value, default=str), ttl=ttl)
-
-    # --- Queue operations (for background jobs) ---
-
-    async def enqueue(self, queue_name: str, job_data: dict[str, Any]) -> None:
-        """Push a job onto a Redis list (queue).
-
-        Args:
-            queue_name: Name of the queue (e.g., "jobs:documents", "jobs:ingestion")
-            job_data: Job payload as a dictionary
-        """
-        await self.client.rpush(queue_name, json.dumps(job_data, default=str))
-        logger.debug("Job enqueued to %s: %s", queue_name, job_data.get("type", "unknown"))
-
-    async def dequeue(self, queue_name: str, timeout: int = 0) -> dict[str, Any] | None:
-        """Pop a job from a Redis list (blocking).
-
-        Args:
-            queue_name: Name of the queue
-            timeout: Blocking timeout in seconds (0 = block forever)
-
-        Returns:
-            Job payload dict, or None if timeout reached
-        """
-        result = await self.client.blpop(queue_name, timeout=timeout)
-        if result is None:
-            return None
-        _, raw = result
-        return json.loads(raw)
-
-    async def queue_length(self, queue_name: str) -> int:
-        """Get the number of jobs in a queue."""
-        return await self.client.llen(queue_name)
-
-    async def move_to_dlq(self, queue_name: str, job_data: dict[str, Any]) -> None:
-        """Move a failed job to the dead-letter queue after max retries.
-
-        Args:
-            queue_name: Original queue the job came from
-            job_data: Job payload (should already contain error info)
-        """
-        dlq_key = f"dlq:{queue_name}"
-        await self.client.rpush(dlq_key, json.dumps(job_data, default=str))
-        logger.warning(
-            "Job moved to DLQ %s: type=%s id=%s",
-            dlq_key,
-            job_data.get("type", "unknown"),
-            job_data.get("id", "unknown"),
-        )
-
-    async def dlq_length(self, queue_name: str) -> int:
-        """Get the number of jobs in a dead-letter queue."""
-        return await self.client.llen(f"dlq:{queue_name}")
 
 
 # Module-level singleton (initialized via lifespan)
