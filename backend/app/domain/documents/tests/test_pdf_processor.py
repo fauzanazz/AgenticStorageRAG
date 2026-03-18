@@ -3,23 +3,19 @@
 from __future__ import annotations
 
 import io
+from unittest.mock import MagicMock, patch
 
 import pytest
-from pypdf import PdfWriter
 
 from app.domain.documents.processors.pdf import PdfProcessor
 
 
-def _create_test_pdf(pages: list[str]) -> bytes:
-    """Create a simple PDF with the given page contents."""
-    writer = PdfWriter()
-    for text in pages:
-        writer.add_blank_page(width=612, height=792)
-        # pypdf doesn't easily write text to blank pages,
-        # so we test with real PDFs via fixtures or mock extract_text
-    buf = io.BytesIO()
-    writer.write(buf)
-    return buf.getvalue()
+def _make_page_dict(text: str, page: int = 0) -> dict:
+    """Build a minimal pymupdf4llm page-chunk dict."""
+    return {
+        "metadata": {"page": page, "title": "", "author": ""},
+        "text": text,
+    }
 
 
 class TestPdfProcessor:
@@ -41,26 +37,110 @@ class TestPdfProcessor:
         assert self.processor.can_process("text/plain") is False
 
     @pytest.mark.asyncio
-    async def test_extract_text_empty_pdf(self) -> None:
-        pdf_bytes = _create_test_pdf([""])
-        text = await self.processor.extract_text(pdf_bytes)
-        # Blank pages have no extractable text
-        assert isinstance(text, str)
-
-    @pytest.mark.asyncio
     async def test_process_empty_pdf(self) -> None:
-        pdf_bytes = _create_test_pdf([""])
-        result = await self.processor.process(pdf_bytes)
+        """Should return 0 chunks and correct metadata for a blank PDF."""
+        mock_doc = MagicMock()
+        mock_doc.__len__ = MagicMock(return_value=1)
+
+        with (
+            patch("app.domain.documents.processors.pdf.fitz.open", return_value=mock_doc),
+            patch(
+                "app.domain.documents.processors.pdf.pymupdf4llm.to_markdown",
+                return_value=[_make_page_dict("")],
+            ),
+        ):
+            result = await self.processor.process(b"fake-pdf-bytes")
+
         assert result.page_count == 1
         assert result.metadata["format"] == "pdf"
-        # May produce 0 chunks for blank pages
-        assert isinstance(result.chunks, list)
+        assert result.chunks == []
+        assert result.total_characters == 0
+
+    @pytest.mark.asyncio
+    async def test_process_single_page_markdown(self) -> None:
+        """Should produce chunks from Markdown page text."""
+        page_text = "# Section\n\nThis is some content about a topic."
+
+        mock_doc = MagicMock()
+        mock_doc.__len__ = MagicMock(return_value=1)
+
+        with (
+            patch("app.domain.documents.processors.pdf.fitz.open", return_value=mock_doc),
+            patch(
+                "app.domain.documents.processors.pdf.pymupdf4llm.to_markdown",
+                return_value=[_make_page_dict(page_text, page=0)],
+            ),
+        ):
+            result = await self.processor.process(b"fake-pdf-bytes")
+
+        assert result.page_count == 1
+        assert result.metadata["format"] == "pdf"
+        assert len(result.chunks) >= 1
+        assert result.chunks[0].page_number == 1  # 0-based → 1-based
+        assert "Section" in result.chunks[0].content
+
+    @pytest.mark.asyncio
+    async def test_process_metadata_extracted(self) -> None:
+        """Should pull title and author from the first page metadata."""
+        page_dict = {
+            "metadata": {"page": 0, "title": "My Doc", "author": "Alice"},
+            "text": "Some content here.",
+        }
+
+        mock_doc = MagicMock()
+        mock_doc.__len__ = MagicMock(return_value=1)
+
+        with (
+            patch("app.domain.documents.processors.pdf.fitz.open", return_value=mock_doc),
+            patch(
+                "app.domain.documents.processors.pdf.pymupdf4llm.to_markdown",
+                return_value=[page_dict],
+            ),
+        ):
+            result = await self.processor.process(b"fake-pdf-bytes")
+
+        assert result.metadata["title"] == "My Doc"
+        assert result.metadata["author"] == "Alice"
 
     @pytest.mark.asyncio
     async def test_process_returns_processing_result(self) -> None:
-        pdf_bytes = _create_test_pdf(["Hello world"])
-        result = await self.processor.process(pdf_bytes)
+        """ProcessingResult should always have required attributes."""
+        mock_doc = MagicMock()
+        mock_doc.__len__ = MagicMock(return_value=0)
+
+        with (
+            patch("app.domain.documents.processors.pdf.fitz.open", return_value=mock_doc),
+            patch(
+                "app.domain.documents.processors.pdf.pymupdf4llm.to_markdown",
+                return_value=[],
+            ),
+        ):
+            result = await self.processor.process(b"fake-pdf-bytes")
+
         assert hasattr(result, "chunks")
         assert hasattr(result, "metadata")
         assert hasattr(result, "page_count")
         assert hasattr(result, "total_characters")
+
+    @pytest.mark.asyncio
+    async def test_chunk_indices_are_globally_sequential(self) -> None:
+        """Chunks from multiple pages must have sequential global indices."""
+        pages = [
+            _make_page_dict("A " * 600, page=0),
+            _make_page_dict("B " * 600, page=1),
+        ]
+
+        mock_doc = MagicMock()
+        mock_doc.__len__ = MagicMock(return_value=2)
+
+        with (
+            patch("app.domain.documents.processors.pdf.fitz.open", return_value=mock_doc),
+            patch(
+                "app.domain.documents.processors.pdf.pymupdf4llm.to_markdown",
+                return_value=pages,
+            ),
+        ):
+            result = await self.processor.process(b"fake-pdf-bytes")
+
+        indices = [c.chunk_index for c in result.chunks]
+        assert indices == list(range(len(result.chunks)))
