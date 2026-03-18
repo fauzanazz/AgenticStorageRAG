@@ -15,6 +15,7 @@ Service Account is tried first; OAuth2 is the fallback.
 
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import logging
@@ -135,9 +136,8 @@ class GoogleDriveConnector(SourceConnector):
             )
 
             # Test with a simple request
-            self._service.files().list(
-                pageSize=1, fields="files(id)"
-            ).execute()
+            test_request = self._service.files().list(pageSize=1, fields="files(id)")
+            await asyncio.to_thread(test_request.execute)
 
             logger.info(
                 "Google Drive authentication successful (%s)", self._auth_method
@@ -186,7 +186,7 @@ class GoogleDriveConnector(SourceConnector):
                     pageSize=100,
                     pageToken=page_token,
                 )
-                result = request.execute()
+                result = await asyncio.to_thread(request.execute)
 
                 for f in result.get("files", []):
                     files.append(
@@ -231,9 +231,8 @@ class GoogleDriveConnector(SourceConnector):
 
         try:
             # Get file metadata first
-            meta = self._service.files().get(
-                fileId=file_id, fields=FILE_FIELDS
-            ).execute()
+            meta_request = self._service.files().get(fileId=file_id, fields=FILE_FIELDS)
+            meta = await asyncio.to_thread(meta_request.execute)
             filename = meta["name"]
             mime_type = meta["mimeType"]
 
@@ -257,7 +256,7 @@ class GoogleDriveConnector(SourceConnector):
 
             done = False
             while not done:
-                _, done = downloader.next_chunk()
+                _, done = await asyncio.to_thread(downloader.next_chunk)
 
             content = buffer.getvalue()
             logger.info("Downloaded %s (%d bytes)", filename, len(content))
@@ -272,11 +271,12 @@ class GoogleDriveConnector(SourceConnector):
             raise DriveAuthError("Not authenticated. Call authenticate() first.")
 
         try:
-            meta = self._service.files().get(
+            meta_request = self._service.files().get(
                 fileId=file_id,
                 fields="id, name, mimeType, size, modifiedTime, createdTime, "
                        "owners, lastModifyingUser, webViewLink",
-            ).execute()
+            )
+            meta = await asyncio.to_thread(meta_request.execute)
             return dict(meta)
         except HttpError as e:
             raise DriveAccessError(file_id) from e
@@ -312,7 +312,7 @@ class GoogleDriveConnector(SourceConnector):
                     pageToken=page_token,
                     orderBy="folder,name",
                 )
-                result = request.execute()
+                result = await asyncio.to_thread(request.execute)
 
                 for f in result.get("files", []):
                     mime = f["mimeType"]
