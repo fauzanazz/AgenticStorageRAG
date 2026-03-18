@@ -1,12 +1,19 @@
-"""RAG agent with autonomous tool selection.
+"""RAG agent with autonomous tool selection via a native ReAct loop.
 
-Uses LangChain to orchestrate an agent that autonomously selects
-retrieval strategies (graph, vector, hybrid), performs multi-hop
-reasoning, and generates responses with citations.
+The agent runs a genuine Reason-Act-Observe cycle:
+
+1. Receive user message + conversation history.
+2. Call the LLM with native function-calling specs (``tools=`` parameter).
+3. If the LLM returns tool calls, execute them all in parallel with
+   ``asyncio.gather``, then append results to the message history.
+4. Repeat until the LLM produces a text response or MAX_REACT_ITERATIONS
+   is reached.
+5. Stream the final answer and emit citation events.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -26,39 +33,43 @@ from app.infra.llm import LLMProvider
 
 logger = logging.getLogger(__name__)
 
+# Maximum ReAct iterations before forcing a final answer.
+MAX_REACT_ITERATIONS = 5
+
 SYSTEM_PROMPT = """You are DingDong RAG, an intelligent knowledge assistant. You have access to a knowledge graph and document embeddings to answer questions accurately.
 
 ## Your Capabilities
-You have access to the following tools:
+You have access to the following retrieval tools:
 {tool_descriptions}
 
 ## Instructions
-1. When asked a question, FIRST search for relevant information using the appropriate tool(s).
-2. Prefer `hybrid_search` as your primary retrieval method -- it combines both graph and vector results.
+1. When asked a question, search for relevant information using the appropriate tool(s).
+2. Prefer `hybrid_search` as your primary retrieval method — it combines both graph and vector results.
 3. Use `graph_search` when the question is about specific entities, relationships, or structured knowledge.
 4. Use `vector_search` when you need raw document passages or factual details.
 5. You may call multiple tools if needed for multi-hop reasoning.
-6. ALWAYS cite your sources. Include document names, page numbers, and entity names in your response.
-7. If the search results don't contain enough information, say so honestly.
-8. If the question is ambiguous, ask for clarification.
+6. After receiving tool results, decide if you have enough information to answer or if you need another search.
+7. ALWAYS cite your sources. Include document names, page numbers, and entity names in your response.
+8. If the search results don't contain enough information, say so honestly.
 
 ## Response Format
 - Be concise but thorough.
 - Use markdown formatting where appropriate.
-- Always mention your sources inline (e.g., "According to [Document Name, p.3]...").
-- If you used the knowledge graph, mention the entities and relationships you found."""
+- Always mention your sources inline (e.g., "According to [Document Name, p.3]...")."""
 
 
 class RAGAgent(IRAGAgent):
-    """Agentic RAG with autonomous tool selection and multi-hop reasoning.
+    """Agentic RAG with native function calling and parallel tool execution.
 
-    Flow:
-    1. Receive user message + conversation history
-    2. Build system prompt with tool descriptions
-    3. Let LLM decide which tools to call
-    4. Execute tool calls and collect results
-    5. Let LLM synthesize a response with citations
-    6. Stream response tokens to the client
+    Flow per user message:
+    1. Build system prompt with tool specs.
+    2. ReAct loop (up to MAX_REACT_ITERATIONS):
+       a. Call LLM with ``tools=tool_specs`` (native function calling).
+       b. If LLM returns tool_calls → execute all in parallel with asyncio.gather.
+       c. Append tool results to messages and loop.
+       d. If LLM returns text → loop done.
+    3. Stream the final answer from the LLM's last text response.
+    4. Emit citation events extracted from tool results.
     """
 
     def __init__(
@@ -70,6 +81,10 @@ class RAGAgent(IRAGAgent):
         self._llm = llm
         self._chat = chat_service
         self._tools = {tool.name: tool for tool in tools}
+
+    # ------------------------------------------------------------------
+    # Public interface
+    # ------------------------------------------------------------------
 
     async def chat(
         self,
@@ -96,27 +111,32 @@ class RAGAgent(IRAGAgent):
             )
 
             # Get conversation history
-            messages = await self._chat.get_messages(
+            history = await self._chat.get_messages(
                 conversation_id, user_id, limit=20
             )
 
-            # Build tool descriptions
+            # Build tool descriptions for system prompt
             tool_desc = "\n".join(
                 f"- **{name}**: {tool.description}"
                 for name, tool in self._tools.items()
             )
             system_prompt = SYSTEM_PROMPT.format(tool_descriptions=tool_desc)
 
-            # Build message history for LLM
-            llm_messages: list[dict[str, str]] = [
+            # Build initial message list
+            messages: list[dict[str, Any]] = [
                 {"role": "system", "content": system_prompt}
             ]
-            for msg in messages:
-                llm_messages.append({"role": msg.role, "content": msg.content})
+            for msg in history:
+                messages.append({"role": msg.role, "content": msg.content})
 
-            # Phase 1: Let LLM decide on tool calls
-            tool_results, tool_call_records = await self._execute_tool_phase(
-                llm_messages, request
+            # Build native tool specs once
+            tool_specs = [self._tool_to_spec(t) for t in self._tools.values()]
+
+            # ReAct loop — mutates messages in place
+            tool_results, tool_call_records = await self._react_loop(
+                messages=messages,
+                tool_specs=tool_specs,
+                request=request,
             )
 
             # Emit tool call events
@@ -126,13 +146,11 @@ class RAGAgent(IRAGAgent):
                     data=json.dumps(tc.model_dump()),
                 )
 
-            # Phase 2: Generate response with streaming
+            # Stream final answer
             accumulated = ""
-            citations = []
+            citations: list[Citation] = []
 
-            async for event in self._generate_response_stream(
-                llm_messages, tool_results
-            ):
+            async for event in self._generate_response_stream(messages, tool_results):
                 if event["type"] == "token":
                     accumulated += event["token"]
                     yield ChatStreamEvent(event="token", data=event["token"])
@@ -156,11 +174,10 @@ class RAGAgent(IRAGAgent):
             )
 
             # Update conversation title from first user message
-            if len(messages) <= 1:
-                title = request.message[:80]
+            if len(history) <= 1:
                 await self._chat.update_conversation_title(
                     conversation_id=conversation_id,
-                    title=title,
+                    title=request.message[:80],
                 )
 
             yield ChatStreamEvent(
@@ -179,82 +196,105 @@ class RAGAgent(IRAGAgent):
                 data=json.dumps({"error": str(e)}),
             )
 
-    async def _execute_tool_phase(
+    # ------------------------------------------------------------------
+    # ReAct loop
+    # ------------------------------------------------------------------
+
+    async def _react_loop(
         self,
-        llm_messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
+        tool_specs: list[dict[str, Any]],
         request: ChatRequest,
     ) -> tuple[list[dict[str, Any]], list[AgentToolCall]]:
-        """Phase 1: Ask LLM what tools to call, then execute them."""
+        """Run the native-tool-calling ReAct loop.
+
+        Mutates *messages* in place by appending assistant and tool turns.
+        Returns the accumulated tool results and call records for use in
+        the streaming response phase.
+        """
         tool_results: list[dict[str, Any]] = []
         tool_call_records: list[AgentToolCall] = []
 
-        # Ask LLM to decide which tools to use
-        planning_messages = llm_messages + [
-            {
-                "role": "user",
-                "content": (
-                    f"Based on the conversation, decide which tools to call to answer "
-                    f"the latest question. Respond with a JSON array of tool calls:\n"
-                    f'[{{"tool": "tool_name", "args": {{"query": "..."}}}}]\n'
-                    f"If no tools are needed, respond with an empty array: []"
-                ),
-            },
-        ]
+        for _iteration in range(MAX_REACT_ITERATIONS):
+            try:
+                response = await self._llm.complete(
+                    messages=messages,
+                    tools=tool_specs,
+                    tool_choice="auto",
+                    temperature=0.0,
+                    max_tokens=1000,
+                )
+            except Exception as e:
+                logger.warning("LLM call failed in ReAct loop: %s", e)
+                break
 
-        try:
-            planning_response = await self._llm.complete(
-                messages=planning_messages,
-                temperature=0.0,
-                max_tokens=500,
+            msg = response.choices[0].message
+
+            # Append the assistant turn (may include tool_calls)
+            assistant_entry: dict[str, Any] = {
+                "role": "assistant",
+                "content": msg.content or "",
+            }
+            raw_tool_calls = getattr(msg, "tool_calls", None)
+            if raw_tool_calls:
+                assistant_entry["tool_calls"] = [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments,
+                        },
+                    }
+                    for tc in raw_tool_calls
+                ]
+            messages.append(assistant_entry)
+
+            if not raw_tool_calls:
+                # LLM chose not to call any tool — loop done
+                break
+
+            # Execute all tool calls in parallel
+            outcomes = await asyncio.gather(
+                *[self._call_tool(tc) for tc in raw_tool_calls],
+                return_exceptions=False,
             )
 
-            content = planning_response.choices[0].message.content or "[]"
-            planned_calls = self._parse_tool_calls(content)
-
-            # Execute each tool call
-            for call in planned_calls:
-                tool_name = call.get("tool", "")
-                tool_args = call.get("args", {})
-
-                if tool_name not in self._tools:
-                    logger.warning("Unknown tool: %s", tool_name)
-                    continue
-
-                tool = self._tools[tool_name]
-                start_time = time.time()
-
-                try:
-                    result = await tool.execute(**tool_args)
-                    duration_ms = int((time.time() - start_time) * 1000)
-
+            for call_id, tool_name, args, result, error in outcomes:
+                if result is not None:
                     tool_results.append(result)
                     tool_call_records.append(
                         AgentToolCall(
                             tool_name=tool_name,
-                            arguments=tool_args,
+                            arguments=args,
                             result_summary=f"{result.get('count', 0)} results from {result.get('source', 'unknown')}",
-                            duration_ms=duration_ms,
                         )
                     )
-                except Exception as e:
-                    logger.warning("Tool %s failed: %s", tool_name, e)
+                else:
                     tool_call_records.append(
                         AgentToolCall(
                             tool_name=tool_name,
-                            arguments=tool_args,
-                            result_summary=f"Error: {e}",
-                            duration_ms=int((time.time() - start_time) * 1000),
+                            arguments=args,
+                            result_summary=f"Error: {error}",
                         )
                     )
 
-        except Exception as e:
-            logger.warning("Tool planning phase failed: %s", e)
+                # Append tool result so LLM sees the observation
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": call_id,
+                    "content": json.dumps(result) if result is not None else f"Error: {error}",
+                })
 
-        # If no tools were called, do a default hybrid search
+        # Fallback: if no tools were called, run hybrid_search once
         if not tool_results and "hybrid_search" in self._tools:
             try:
+                user_query = next(
+                    (m["content"] for m in reversed(messages) if m.get("role") == "user"),
+                    request.message,
+                )
                 result = await self._tools["hybrid_search"].execute(
-                    query=llm_messages[-1]["content"],
+                    query=user_query,
                     top_k=10,
                     vector_weight=request.vector_weight,
                 )
@@ -262,7 +302,7 @@ class RAGAgent(IRAGAgent):
                 tool_call_records.append(
                     AgentToolCall(
                         tool_name="hybrid_search",
-                        arguments={"query": llm_messages[-1]["content"]},
+                        arguments={"query": user_query},
                         result_summary=f"{result.get('count', 0)} results (fallback)",
                     )
                 )
@@ -271,66 +311,118 @@ class RAGAgent(IRAGAgent):
 
         return tool_results, tool_call_records
 
+    async def _call_tool(
+        self,
+        tc: Any,
+    ) -> tuple[str, str, dict[str, Any], dict[str, Any] | None, str | None]:
+        """Execute a single tool call. Returns (call_id, name, args, result, error)."""
+        tool_name = tc.function.name
+        call_id = tc.id
+
+        try:
+            args = json.loads(tc.function.arguments) if tc.function.arguments else {}
+        except json.JSONDecodeError:
+            args = {}
+
+        if tool_name not in self._tools:
+            logger.warning("Unknown tool requested: %s", tool_name)
+            return call_id, tool_name, args, None, f"unknown tool: {tool_name}"
+
+        start = time.time()
+        try:
+            result = await self._tools[tool_name].execute(**args)
+            elapsed_ms = int((time.time() - start) * 1000)
+            logger.debug("Tool %s completed in %dms", tool_name, elapsed_ms)
+            return call_id, tool_name, args, result, None
+        except Exception as e:
+            logger.warning("Tool %s failed: %s", tool_name, e)
+            return call_id, tool_name, args, None, str(e)
+
+    # ------------------------------------------------------------------
+    # Response streaming
+    # ------------------------------------------------------------------
+
     async def _generate_response_stream(
         self,
-        llm_messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         tool_results: list[dict[str, Any]],
     ) -> AsyncGenerator[dict[str, Any], None]:
-        """Phase 2: Stream response tokens using real LLM streaming.
+        """Stream the final answer.
 
-        Yields dicts with type="token" for each chunk, and type="citations"
-        at the end with the collected citation objects.
+        Appends a context synthesis request to messages, calls the LLM
+        with streaming, and yields token / citations events.
         """
-        # Build context from tool results
-        context_parts = []
+        # Build context text and collect citations from tool results
+        context_parts: list[str] = []
         citations: list[Citation] = []
 
         for result in tool_results:
             for item in result.get("result", []):
-                if isinstance(item, dict):
-                    content = item.get("content", "")
-                    if not content and item.get("entity_name"):
-                        content = f"{item['entity_name']} ({item.get('entity_type', '')}): {item.get('description', '')}"
+                if not isinstance(item, dict):
+                    continue
 
-                    if content:
-                        context_parts.append(content)
+                content = item.get("content", "")
+                if not content and item.get("entity_name"):
+                    content = (
+                        f"{item['entity_name']} ({item.get('entity_type', '')}): "
+                        f"{item.get('description', '')}"
+                    )
 
-                        # Build citation
-                        citation = Citation(
-                            content_snippet=content[:200],
-                            source_type=result.get("source", "unknown"),
-                            relevance_score=item.get("similarity", item.get("score", item.get("relevance", 0.0))),
+                if content:
+                    context_parts.append(content)
+
+                    citation = Citation(
+                        content_snippet=content[:200],
+                        source_type=result.get("source", "unknown"),
+                        relevance_score=item.get(
+                            "similarity", item.get("score", item.get("relevance", 0.0))
+                        ),
+                    )
+                    if item.get("document_id"):
+                        citation.document_id = (
+                            uuid.UUID(item["document_id"])
+                            if isinstance(item["document_id"], str)
+                            else item["document_id"]
                         )
-                        if item.get("document_id"):
-                            citation.document_id = uuid.UUID(item["document_id"]) if isinstance(item["document_id"], str) else item["document_id"]
-                        if item.get("chunk_id"):
-                            citation.chunk_id = uuid.UUID(item["chunk_id"]) if isinstance(item["chunk_id"], str) else item["chunk_id"]
-                        if item.get("entity_id"):
-                            citation.entity_id = uuid.UUID(item["entity_id"]) if isinstance(item["entity_id"], str) else item["entity_id"]
-                        if item.get("entity_name"):
-                            citation.entity_name = item["entity_name"]
-                        if item.get("metadata", {}).get("page_number"):
-                            citation.page_number = item["metadata"]["page_number"]
+                    if item.get("chunk_id"):
+                        citation.chunk_id = (
+                            uuid.UUID(item["chunk_id"])
+                            if isinstance(item["chunk_id"], str)
+                            else item["chunk_id"]
+                        )
+                    if item.get("entity_id"):
+                        citation.entity_id = (
+                            uuid.UUID(item["entity_id"])
+                            if isinstance(item["entity_id"], str)
+                            else item["entity_id"]
+                        )
+                    if item.get("entity_name"):
+                        citation.entity_name = item["entity_name"]
+                    if item.get("metadata", {}).get("page_number"):
+                        citation.page_number = item["metadata"]["page_number"]
 
-                        citations.append(citation)
+                    citations.append(citation)
 
-        # Build response messages
-        context_text = "\n\n---\n\n".join(context_parts) if context_parts else "No relevant information found."
+        context_text = (
+            "\n\n---\n\n".join(context_parts)
+            if context_parts
+            else "No relevant information found."
+        )
 
-        response_messages = llm_messages + [
+        # Append final synthesis request
+        response_messages = messages + [
             {
                 "role": "user",
                 "content": (
                     f"Here is the retrieved context from the knowledge base:\n\n"
                     f"{context_text}\n\n"
-                    f"Using this context, provide a comprehensive answer to the user's question. "
-                    f"Cite your sources inline. If the context doesn't contain enough information, "
-                    f"say so honestly."
+                    f"Using this context, provide a comprehensive answer to the user's "
+                    f"question. Cite your sources inline. If the context doesn't contain "
+                    f"enough information, say so honestly."
                 ),
-            },
+            }
         ]
 
-        # Use actual LLM streaming
         try:
             stream_response = await self._llm.complete(
                 messages=response_messages,
@@ -338,7 +430,6 @@ class RAGAgent(IRAGAgent):
                 max_tokens=2000,
                 stream=True,
             )
-
             async for chunk in stream_response:
                 delta = chunk.choices[0].delta if chunk.choices else None
                 if delta and delta.content:
@@ -346,7 +437,6 @@ class RAGAgent(IRAGAgent):
 
         except Exception as e:
             logger.error("Streaming response failed, falling back: %s", e)
-            # Fallback to non-streaming
             response = await self._llm.complete_with_retry(
                 messages=response_messages,
                 temperature=0.3,
@@ -355,41 +445,19 @@ class RAGAgent(IRAGAgent):
             text = response.choices[0].message.content or "I couldn't generate a response."
             yield {"type": "token", "token": text}
 
-        # Yield citations at the end
         yield {"type": "citations", "citations": citations}
 
-    def _parse_tool_calls(self, text: str) -> list[dict[str, Any]]:
-        """Parse tool calls from LLM response."""
-        try:
-            result = json.loads(text)
-            if isinstance(result, list):
-                return result
-            return []
-        except json.JSONDecodeError:
-            pass
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
 
-        # Try extracting from code block
-        if "```" in text:
-            try:
-                start = text.index("```") + 3
-                if text[start:].startswith("json"):
-                    start += 4
-                end = text.index("```", start)
-                result = json.loads(text[start:end].strip())
-                if isinstance(result, list):
-                    return result
-            except (json.JSONDecodeError, ValueError):
-                pass
-
-        # Try finding JSON array
-        bracket_start = text.find("[")
-        bracket_end = text.rfind("]") + 1
-        if bracket_start >= 0 and bracket_end > bracket_start:
-            try:
-                result = json.loads(text[bracket_start:bracket_end])
-                if isinstance(result, list):
-                    return result
-            except json.JSONDecodeError:
-                pass
-
-        return []
+    def _tool_to_spec(self, tool: IAgentTool) -> dict[str, Any]:
+        """Convert an IAgentTool to an OpenAI-format function calling spec."""
+        return {
+            "type": "function",
+            "function": {
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": tool.parameters_schema,
+            },
+        }
