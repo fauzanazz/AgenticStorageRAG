@@ -26,7 +26,7 @@ from __future__ import annotations
 import logging
 
 from celery import Celery
-from celery.signals import worker_process_init
+from celery.signals import worker_ready
 
 from app.config import get_settings
 
@@ -89,13 +89,15 @@ def create_celery_app() -> Celery:
 celery_app = create_celery_app()
 
 
-@worker_process_init.connect
+@worker_ready.connect
 def _init_worker_resources(**kwargs: object) -> None:
-    """Initialise shared resources once per worker process on startup.
+    """Initialise shared resources once when the worker is ready to accept tasks.
 
-    Celery forks worker processes; each fork must re-initialise
-    connections (DB engine, storage, LLM) because file descriptors
-    are not safely shared across fork boundaries.
+    ``worker_ready`` fires in the main process after the worker has fully
+    started, regardless of pool type. This is the correct signal for
+    ``--pool=threads`` because ``worker_process_init`` only fires on
+    *forked* child processes — with threads there are no forks, so that
+    signal never runs.
     """
     from app.infra.database import init_db
     from app.infra.llm import llm_provider
