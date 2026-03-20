@@ -8,17 +8,17 @@ export default function AuthLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex min-h-dvh" style={{ background: "#0A0A0F" }}>
+    <div className="flex min-h-dvh" style={{ background: "var(--background)" }}>
       {/* Left brand panel */}
       <div className="hidden lg:flex lg:w-1/2 flex-col justify-between p-12 relative overflow-hidden">
         {/* Gradient orbs */}
         <div
           className="absolute -top-32 -left-32 w-96 h-96 rounded-full opacity-20 blur-3xl"
-          style={{ background: "radial-gradient(circle, #6366F1 0%, transparent 70%)" }}
+          style={{ background: "radial-gradient(circle, var(--primary) 0%, transparent 70%)" }}
         />
         <div
           className="absolute bottom-0 right-0 w-80 h-80 rounded-full opacity-15 blur-3xl"
-          style={{ background: "radial-gradient(circle, #A855F7 0%, transparent 70%)" }}
+          style={{ background: "radial-gradient(circle, var(--tertiary) 0%, transparent 70%)" }}
         />
 
         {/* Logo */}
@@ -26,11 +26,11 @@ export default function AuthLayout({
           <div className="flex items-center gap-3">
             <div
               className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-lg"
-              style={{ background: "linear-gradient(135deg, #6366F1, #A855F7)" }}
+              style={{ background: "var(--primary)" }}
             >
               D
             </div>
-            <span className="text-white text-xl font-semibold tracking-tight">
+            <span className="text-xl font-semibold tracking-tight" style={{ color: "var(--foreground)" }}>
               DingDong RAG
             </span>
           </div>
@@ -38,19 +38,19 @@ export default function AuthLayout({
 
         {/* Center tagline */}
         <div className="relative z-10 flex-1 flex flex-col justify-center max-w-md">
-          <h1 className="text-5xl font-bold leading-tight mb-6" style={{ color: "white" }}>
+          <h1 className="text-5xl font-bold leading-tight mb-6" style={{ color: "var(--foreground)" }}>
             Intelligent
             <br />
             <span
               className="bg-clip-text text-transparent"
-              style={{ backgroundImage: "linear-gradient(135deg, #818CF8, #C084FC)" }}
+              style={{ backgroundImage: "linear-gradient(135deg, var(--primary), var(--chart-3))" }}
             >
               Knowledge
             </span>
             <br />
             Discovery
           </h1>
-          <p className="text-lg leading-relaxed" style={{ color: "rgba(255,255,255,0.5)" }}>
+          <p className="text-lg leading-relaxed" style={{ color: "var(--muted-foreground)" }}>
             Transform your documents into an interactive knowledge graph.
             Ask questions, explore connections, and discover insights with
             AI-powered retrieval.
@@ -65,8 +65,8 @@ export default function AuthLayout({
             { value: "99.2%", label: "Accuracy Rate" },
           ].map((stat) => (
             <div key={stat.label}>
-              <div className="text-2xl font-bold text-white">{stat.value}</div>
-              <div className="text-xs" style={{ color: "rgba(255,255,255,0.4)" }}>
+              <div className="text-2xl font-bold" style={{ color: "var(--foreground)" }}>{stat.value}</div>
+              <div className="text-xs" style={{ color: "var(--muted-foreground)" }}>
                 {stat.label}
               </div>
             </div>

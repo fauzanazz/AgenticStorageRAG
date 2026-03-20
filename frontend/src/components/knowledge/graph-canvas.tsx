@@ -1,9 +1,18 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import type { GraphVisualization } from "@/types/knowledge";
+import { buildClusterTree, buildTierView } from "./cluster-utils";
+import type { FGNode } from "./cluster-utils";
 
-// Entity type colors
+// Dynamic import — force-graph uses canvas APIs unavailable during SSR
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const ForceGraph2D = dynamic(() => import("react-force-graph-2d"), {
+  ssr: false,
+}) as any;
+
+// ── Entity type colors ───────────────────────────────────────────────────
 const TYPE_COLORS: Record<string, string> = {
   Person: "#3b82f6",
   Organization: "#10b981",
@@ -19,193 +28,210 @@ function getColor(type: string): string {
   return TYPE_COLORS[type] || TYPE_COLORS.Default;
 }
 
+// ── Zoom tier thresholds ─────────────────────────────────────────────────
+const TIER1_MAX = 0.4;
+const TIER2_MAX = 1.2;
+
+function getTier(k: number): 1 | 2 | 3 {
+  if (k < TIER1_MAX) return 1;
+  if (k < TIER2_MAX) return 2;
+  return 3;
+}
+
+// ── Component ────────────────────────────────────────────────────────────
 interface GraphCanvasProps {
   data: GraphVisualization;
   className?: string;
+  onExpandNode?: (nodeId: string) => Promise<GraphVisualization | null>;
 }
 
-/**
- * Simple force-directed graph visualization using Canvas.
- *
- * Uses basic force simulation without external libraries.
- * For production, consider integrating d3-force or react-force-graph.
- */
-export function GraphCanvas({ data, className }: GraphCanvasProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+export function GraphCanvas({ data, className, onExpandNode }: GraphCanvasProps) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const fgRef = useRef<any>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
+  const [tier, setTier] = useState<1 | 2 | 3>(3);
+  const skipNextZoomRef = useRef(false);
 
+  const hasClusters = !!data.clusters?.length;
+
+  // Resize observer
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || data.nodes.length === 0) return;
-
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    // Set canvas size to container
-    const rect = canvas.getBoundingClientRect();
-    canvas.width = rect.width * window.devicePixelRatio;
-    canvas.height = rect.height * window.devicePixelRatio;
-    ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
-
-    const width = rect.width;
-    const height = rect.height;
-
-    // Initialize node positions
-    const positions = new Map<
-      string,
-      { x: number; y: number; vx: number; vy: number }
-    >();
-
-    data.nodes.forEach((node) => {
-      positions.set(node.id, {
-        x: Math.random() * width * 0.8 + width * 0.1,
-        y: Math.random() * height * 0.8 + height * 0.1,
-        vx: 0,
-        vy: 0,
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => {
+      setDimensions({
+        width: entry.contentRect.width,
+        height: entry.contentRect.height,
       });
     });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
-    // Simple force simulation
-    function simulate() {
-      const nodes = Array.from(positions.entries());
-      const damping = 0.9;
-      const repulsion = 2000;
-      const attraction = 0.01;
-      const centerForce = 0.005;
+  // Build cluster tree
+  const clusterTree = useMemo(() => {
+    if (!hasClusters) return null;
+    return buildClusterTree(data.clusters!);
+  }, [data.clusters, hasClusters]);
 
-      // Repulsion between all nodes
-      for (let i = 0; i < nodes.length; i++) {
-        for (let j = i + 1; j < nodes.length; j++) {
-          const [, a] = nodes[i];
-          const [, b] = nodes[j];
-          const dx = a.x - b.x;
-          const dy = a.y - b.y;
-          const dist = Math.max(Math.sqrt(dx * dx + dy * dy), 1);
-          const force = repulsion / (dist * dist);
-          const fx = (dx / dist) * force;
-          const fy = (dy / dist) * force;
-          a.vx += fx;
-          a.vy += fy;
-          b.vx -= fx;
-          b.vy -= fy;
-        }
-      }
-
-      // Attraction along edges
-      data.edges.forEach((edge) => {
-        const a = positions.get(edge.source);
-        const b = positions.get(edge.target);
-        if (!a || !b) return;
-        const dx = b.x - a.x;
-        const dy = b.y - a.y;
-        const force = attraction;
-        a.vx += dx * force;
-        a.vy += dy * force;
-        b.vx -= dx * force;
-        b.vy -= dy * force;
-      });
-
-      // Center gravity
-      nodes.forEach(([, pos]) => {
-        pos.vx += (width / 2 - pos.x) * centerForce;
-        pos.vy += (height / 2 - pos.y) * centerForce;
-        pos.x += pos.vx;
-        pos.y += pos.vy;
-        pos.vx *= damping;
-        pos.vy *= damping;
-        // Clamp to bounds
-        pos.x = Math.max(20, Math.min(width - 20, pos.x));
-        pos.y = Math.max(20, Math.min(height - 20, pos.y));
-      });
+  // Pre-compute all 3 tier views
+  const tierViews = useMemo(() => {
+    if (!clusterTree) {
+      const flat = {
+        nodes: data.nodes.map((n) => ({
+          id: n.id,
+          label: n.label,
+          type: n.type,
+          size: n.size || 1,
+          isCluster: false as const,
+        })),
+        links: data.edges.map((e) => ({
+          source: e.source,
+          target: e.target,
+          label: e.label,
+          weight: e.weight,
+        })),
+      };
+      return { 1: flat, 2: flat, 3: flat };
     }
-
-    function draw() {
-      if (!ctx) return;
-      ctx.clearRect(0, 0, width, height);
-
-      // Draw edges
-      ctx.strokeStyle = "rgba(255,255,255,0.1)";
-      ctx.lineWidth = 1;
-      data.edges.forEach((edge) => {
-        const a = positions.get(edge.source);
-        const b = positions.get(edge.target);
-        if (!a || !b) return;
-
-        ctx.beginPath();
-        ctx.moveTo(a.x, a.y);
-        ctx.lineTo(b.x, b.y);
-        ctx.stroke();
-
-        // Edge label
-        const midX = (a.x + b.x) / 2;
-        const midY = (a.y + b.y) / 2;
-        ctx.fillStyle = "rgba(255,255,255,0.3)";
-        ctx.font = "10px sans-serif";
-        ctx.textAlign = "center";
-        ctx.fillText(edge.label, midX, midY - 4);
-      });
-
-      // Draw nodes
-      data.nodes.forEach((node) => {
-        const pos = positions.get(node.id);
-        if (!pos) return;
-
-        const radius = 8 + (node.size || 1) * 3;
-        const color = getColor(node.type);
-
-        // Node circle
-        ctx.beginPath();
-        ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
-        ctx.fillStyle = color;
-        ctx.fill();
-        ctx.strokeStyle = "rgba(255,255,255,0.1)";
-        ctx.lineWidth = 2;
-        ctx.stroke();
-
-        // Node label
-        ctx.fillStyle = "#f9fafb";
-        ctx.font = "12px sans-serif";
-        ctx.textAlign = "center";
-        ctx.fillText(node.label, pos.x, pos.y + radius + 14);
-      });
-    }
-
-    // Run simulation
-    let frame: number;
-    let iterations = 0;
-    const maxIterations = 200;
-
-    function tick() {
-      simulate();
-      draw();
-      iterations++;
-      if (iterations < maxIterations) {
-        frame = requestAnimationFrame(tick);
-      }
-    }
-
-    tick();
-
-    return () => {
-      cancelAnimationFrame(frame);
+    const { tree, topLevelIds } = clusterTree;
+    return {
+      1: buildTierView(1, tree, topLevelIds, data.nodes, data.edges),
+      2: buildTierView(2, tree, topLevelIds, data.nodes, data.edges),
+      3: buildTierView(3, tree, topLevelIds, data.nodes, data.edges),
     };
-  }, [data]);
+  }, [clusterTree, data.nodes, data.edges]);
+
+  const graphData = tierViews[tier];
+
+  // Zoom handler — switch tiers
+  const onZoom = useCallback(
+    ({ k }: { k: number }) => {
+      if (skipNextZoomRef.current) {
+        skipNextZoomRef.current = false;
+        return;
+      }
+      if (!hasClusters) return;
+      const newTier = getTier(k);
+      if (newTier !== tier) {
+        skipNextZoomRef.current = true;
+        setTier(newTier);
+      }
+    },
+    [tier, hasClusters]
+  );
+
+  // Custom node rendering
+  const nodeCanvasObject = useCallback(
+    (node: any, ctx: CanvasRenderingContext2D, globalScale: number) => {
+      const { x = 0, y = 0 } = node;
+      const isCluster = (node as FGNode).isCluster ?? false;
+      const radius = isCluster
+        ? 6 + ((node as FGNode).clusterCount ?? 3) * 0.8
+        : 4 + ((node as FGNode).size ?? 1) * 1.5;
+      const color = getColor((node as FGNode).type ?? "Default");
+      const label = (node as FGNode).label ?? node.id ?? "";
+      const fontSize = Math.min(12 / globalScale, 5);
+
+      ctx.beginPath();
+      ctx.arc(x, y, radius, 0, 2 * Math.PI);
+      ctx.fillStyle = isCluster ? color + "cc" : color;
+      ctx.fill();
+
+      if (isCluster) {
+        ctx.setLineDash([3 / globalScale, 2 / globalScale]);
+        ctx.strokeStyle = "rgba(255,255,255,0.5)";
+        ctx.lineWidth = 1.5 / globalScale;
+        ctx.stroke();
+        ctx.setLineDash([]);
+      } else {
+        ctx.strokeStyle = "rgba(255,255,255,0.15)";
+        ctx.lineWidth = 0.5 / globalScale;
+        ctx.stroke();
+      }
+
+      ctx.font = `${isCluster ? "bold " : ""}${fontSize}px sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      ctx.fillStyle = "rgba(255,255,255,0.85)";
+      ctx.fillText(label, x, y + radius + 2 / globalScale);
+    },
+    []
+  );
+
+  // Hit area
+  const nodePointerAreaPaint = useCallback(
+    (node: any, color: string, ctx: CanvasRenderingContext2D) => {
+      const { x = 0, y = 0 } = node;
+      const isCluster = (node as FGNode).isCluster ?? false;
+      const radius = isCluster
+        ? 6 + ((node as FGNode).clusterCount ?? 3) * 0.8
+        : 4 + ((node as FGNode).size ?? 1) * 1.5;
+      ctx.beginPath();
+      ctx.arc(x, y, radius + 2, 0, 2 * Math.PI);
+      ctx.fillStyle = color;
+      ctx.fill();
+    },
+    []
+  );
 
   if (data.nodes.length === 0) {
     return (
       <div className="flex items-center justify-center h-full">
         <div className="text-center">
-          <p className="text-lg font-medium" style={{ color: "rgba(255,255,255,0.4)" }}>No graph data</p>
-          <p className="text-sm" style={{ color: "rgba(255,255,255,0.3)" }}>Upload and process documents to build the knowledge graph</p>
+          <p className="text-lg font-medium" style={{ color: "rgba(255,255,255,0.4)" }}>
+            No graph data
+          </p>
+          <p className="text-sm" style={{ color: "rgba(255,255,255,0.3)" }}>
+            Upload and process documents to build the knowledge graph
+          </p>
         </div>
       </div>
     );
   }
 
   return (
-    <canvas
-      ref={canvasRef}
-      className={`w-full h-full ${className || ""}`}
-      style={{ display: "block" }}
-    />
+    <div ref={containerRef} className={`relative w-full h-full ${className || ""}`}>
+      <ForceGraph2D
+        ref={fgRef}
+        graphData={graphData}
+        width={dimensions.width}
+        height={dimensions.height}
+        backgroundColor="rgba(0,0,0,0)"
+        nodeCanvasObjectMode={() => "replace"}
+        nodeCanvasObject={nodeCanvasObject}
+        nodePointerAreaPaint={nodePointerAreaPaint}
+        nodeVal={(node: any) =>
+          (node as FGNode).isCluster ? ((node as FGNode).clusterCount ?? 3) * 2 : ((node as FGNode).size ?? 1)
+        }
+        linkColor={() => "#888"}
+        linkWidth={1.5}
+        linkLabel={(link: any) => link.label}
+        linkDirectionalArrowLength={3}
+        linkDirectionalArrowRelPos={1}
+        onNodeClick={onExpandNode ? (node: any) => {
+          if (!(node as FGNode).isCluster && node.id) onExpandNode(node.id);
+        } : undefined}
+        onZoom={hasClusters ? onZoom : undefined}
+        minZoom={0.05}
+        maxZoom={12}
+        cooldownTicks={100}
+        onEngineStop={() => fgRef.current?.zoomToFit(400, 40)}
+      />
+
+      {hasClusters && tier < 3 && (
+        <div
+          className="absolute bottom-3 left-3 rounded-lg px-2.5 py-1 text-[11px]"
+          style={{
+            background: "rgba(139,92,246,0.15)",
+            border: "1px solid rgba(139,92,246,0.3)",
+            color: "rgba(139,92,246,0.9)",
+          }}
+        >
+          {tier === 1 ? "Top-level clusters" : "Sub-clusters"} ({graphData.nodes.length} groups, {data.nodes.length} nodes) — zoom in to expand
+        </div>
+      )}
+    </div>
   );
 }

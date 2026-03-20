@@ -3,12 +3,12 @@
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { useAuth } from "@/hooks/use-auth";
-import { AppSidebar } from "@/components/layout/app-sidebar";
+import { AppTopNav } from "@/components/layout/app-top-nav";
 import { PageLoader } from "@/components/ui/page-loader";
 
 /**
  * Dashboard layout -- requires authentication.
- * Shows sidebar + main content area.
+ * Top navigation bar + full-width main content area.
  */
 export default function DashboardLayout({
   children,
@@ -33,14 +33,9 @@ export default function DashboardLayout({
   }
 
   return (
-    <div className="flex h-dvh overflow-hidden" style={{ background: "#0A0A0F" }}>
-      <AppSidebar />
-      {/*
-       * h-full flex flex-col so flex children (pages) can use flex-1 to fill the exact
-       * remaining height. overflow-y-auto lets non-chat pages scroll their own content.
-       * pt-14 clears the fixed mobile header; md:pt-0 on desktop (sidebar does it).
-       */}
-      <main className="flex-1 min-w-0 h-full flex flex-col overflow-y-auto pt-14 md:pt-0">
+    <div className="flex flex-col h-dvh overflow-hidden" style={{ background: "var(--background)" }}>
+      <AppTopNav />
+      <main className="flex-1 min-w-0 flex flex-col overflow-y-auto">
         {children}
       </main>
     </div>

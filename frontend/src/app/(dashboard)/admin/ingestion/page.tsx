@@ -2,21 +2,21 @@
 
 import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { RefreshCw, ChevronDown, ChevronUp, DollarSign, FileText, CheckCircle2, Clock, XCircle, SkipForward } from "lucide-react";
+import { RefreshCw, ChevronDown, ChevronUp, ChevronRight, DollarSign, FileText, CheckCircle2, Clock, XCircle, SkipForward, FolderOpen, Folder, Check, Save, Loader2 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
-import { useIngestion } from "@/hooks/use-ingestion";
-import type { FileEvent, FileEvents, IngestionJob, IngestionStatus, LLMCostSummary } from "@/types/ingestion";
+import { useIngestion, useDriveFolders, useDefaultFolder } from "@/hooks/use-ingestion";
+import type { DriveFolderEntry, FileEvent, FileEvents, IngestionJob, IngestionStatus, LLMCostSummary } from "@/types/ingestion";
 import { Skeleton } from "@/components/ui/skeleton";
 
 // ── Status config ────────────────────────────────────────────────────────────
 
 const STATUS_STYLES: Record<IngestionStatus, { bg: string; color: string; label: string }> = {
-  pending:    { bg: "rgba(245,158,11,0.15)", color: "#FBBF24", label: "Queued" },
-  scanning:   { bg: "rgba(59,130,246,0.15)", color: "#60A5FA", label: "Scanning" },
-  processing: { bg: "rgba(99,102,241,0.15)", color: "#818CF8", label: "Processing" },
-  completed:  { bg: "rgba(34,197,94,0.15)",  color: "#4ADE80", label: "Completed" },
-  failed:     { bg: "rgba(239,68,68,0.15)",  color: "#FCA5A5", label: "Failed" },
-  cancelled:  { bg: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.4)", label: "Cancelled" },
+  pending:    { bg: "#fff3e0", color: "#e65100", label: "Queued" },
+  scanning:   { bg: "#e3f2fd", color: "#1565c0", label: "Scanning" },
+  processing: { bg: "#dce1ff", color: "#3557bc", label: "Processing" },
+  completed:  { bg: "#e8f5e9", color: "#2e7d32", label: "Completed" },
+  failed:     { bg: "#fce4ec", color: "#9e3f4e", label: "Failed" },
+  cancelled:  { bg: "#f0edef", color: "#7b7a7d", label: "Cancelled" },
 };
 
 function StatusBadge({ status }: { status: IngestionStatus }) {
@@ -47,22 +47,22 @@ function ProgressBar({ job }: { job: IngestionJob }) {
 
   return (
     <div className="mt-3 space-y-1">
-      <div className="flex justify-between text-xs" style={{ color: "rgba(255,255,255,0.4)" }}>
+      <div className="flex justify-between text-xs" style={{ color: "var(--muted-foreground)" }}>
         <span>
-          <span style={{ color: "#4ADE80" }}>{job.processed_files}</span> processed
+          <span style={{ color: "var(--success)" }}>{job.processed_files}</span> processed
           {job.failed_files > 0 && (
-            <> · <span style={{ color: "#FCA5A5" }}>{job.failed_files}</span> failed</>
+            <> · <span style={{ color: "var(--destructive)" }}>{job.failed_files}</span> failed</>
           )}
           {job.skipped_files > 0 && (
-            <> · <span style={{ color: "#FBBF24" }}>{job.skipped_files}</span> skipped</>
+            <> · <span style={{ color: "var(--warning)" }}>{job.skipped_files}</span> skipped</>
           )}
         </span>
         <span>{job.total_files} total</span>
       </div>
-      <div className="h-2 overflow-hidden rounded-full" style={{ background: "rgba(255,255,255,0.06)" }}>
+      <div className="h-2 overflow-hidden rounded-full" style={{ background: "var(--surface-container-high)" }}>
         <div
           className="h-full rounded-full transition-all duration-500"
-          style={{ width: `${pct}%`, background: "linear-gradient(90deg, #6366F1, #A855F7)" }}
+          style={{ width: `${pct}%`, background: "linear-gradient(90deg, var(--primary), var(--chart-3))" }}
         />
       </div>
     </div>
@@ -72,10 +72,10 @@ function ProgressBar({ job }: { job: IngestionJob }) {
 // ── File list ─────────────────────────────────────────────────────────────────
 
 const FILE_STATE_STYLES: Record<FileEvent["state"], { icon: React.JSX.Element; color: string; label: string }> = {
-  started:   { icon: <Clock className="size-3" />,         color: "#818CF8", label: "Ingesting" },
-  completed: { icon: <CheckCircle2 className="size-3" />,  color: "#4ADE80", label: "Done" },
-  skipped:   { icon: <SkipForward className="size-3" />,   color: "#FBBF24", label: "Skipped" },
-  failed:    { icon: <XCircle className="size-3" />,       color: "#FCA5A5", label: "Failed" },
+  started:   { icon: <Clock className="size-3" />,         color: "#3557bc", label: "Ingesting" },
+  completed: { icon: <CheckCircle2 className="size-3" />,  color: "#2e7d32", label: "Done" },
+  skipped:   { icon: <SkipForward className="size-3" />,   color: "#e65100", label: "Skipped" },
+  failed:    { icon: <XCircle className="size-3" />,       color: "#9e3f4e", label: "Failed" },
 };
 
 function FileList({ fileEvents }: { fileEvents: FileEvents }) {
@@ -92,19 +92,19 @@ function FileList({ fileEvents }: { fileEvents: FileEvents }) {
   return (
     <div
       className="mt-3 rounded-xl overflow-hidden"
-      style={{ background: "rgba(0,0,0,0.3)", border: "1px solid rgba(255,255,255,0.05)" }}
+      style={{ background: "rgba(0,0,0,0.08)", border: "1px solid var(--border)" }}
     >
       <div
         className="px-3 py-2 text-xs font-medium flex items-center gap-1.5"
-        style={{ color: "rgba(255,255,255,0.5)", borderBottom: "1px solid rgba(255,255,255,0.05)" }}
+        style={{ color: "var(--muted-foreground)", borderBottom: "1px solid var(--border)" }}
       >
         <FileText className="size-3" />
         Files
-        <span className="ml-auto" style={{ color: "rgba(255,255,255,0.3)" }}>
+        <span className="ml-auto" style={{ color: "var(--outline)" }}>
           {entries.filter(([, e]) => e.state === "completed").length}/{entries.length}
         </span>
       </div>
-      <div className="max-h-52 overflow-y-auto divide-y" style={{ borderColor: "rgba(255,255,255,0.04)" }}>
+      <div className="max-h-52 overflow-y-auto divide-y" style={{ borderColor: "var(--border)" }}>
         {sorted.map(([fileId, ev]) => {
           const style = FILE_STATE_STYLES[ev.state];
           const shortFolder = ev.folder?.split("/").slice(-2).join(" › ") ?? "";
@@ -114,12 +114,12 @@ function FileList({ fileEvents }: { fileEvents: FileEvents }) {
               <div className="flex-1 min-w-0">
                 <p
                   className="text-xs font-medium truncate"
-                  style={{ color: ev.state === "started" ? "white" : "rgba(255,255,255,0.6)" }}
+                  style={{ color: ev.state === "started" ? "#1a1a1a" : "var(--on-surface-variant)" }}
                 >
                   {ev.name}
                 </p>
                 {shortFolder && (
-                  <p className="text-[10px] truncate" style={{ color: "rgba(255,255,255,0.25)" }}>
+                  <p className="text-[10px] truncate" style={{ color: "var(--outline-variant)" }}>
                     {shortFolder}
                   </p>
                 )}
@@ -127,7 +127,7 @@ function FileList({ fileEvents }: { fileEvents: FileEvents }) {
               <div className="shrink-0 text-right">
                 <span className="text-[10px] font-medium" style={{ color: style.color }}>{style.label}</span>
                 {ev.state === "completed" && ev.chunks != null && (
-                  <p className="text-[10px]" style={{ color: "rgba(255,255,255,0.25)" }}>
+                  <p className="text-[10px]" style={{ color: "var(--outline-variant)" }}>
                     {ev.chunks} chunks
                   </p>
                 )}
@@ -157,7 +157,7 @@ function JobCard({ job, onCancel }: { job: IngestionJob; onCancel: (id: string) 
   return (
     <div
       className="rounded-2xl overflow-hidden"
-      style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}
+      style={{ background: "var(--card)", border: "1px solid var(--border)" }}
     >
       {/* Header row */}
       <div className="p-5">
@@ -165,20 +165,20 @@ function JobCard({ job, onCancel }: { job: IngestionJob; onCancel: (id: string) 
           <div className="min-w-0 flex-1 space-y-1.5">
             <div className="flex items-center gap-2 flex-wrap">
               <StatusBadge status={job.status} />
-              <span className="text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>
+              <span className="text-xs" style={{ color: "var(--outline)" }}>
                 {new Date(job.started_at).toLocaleString()}
               </span>
               {job.completed_at && (
-                <span className="text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>
+                <span className="text-xs" style={{ color: "var(--outline)" }}>
                   · {Math.round((new Date(job.completed_at).getTime() - new Date(job.started_at).getTime()) / 1000)}s
                 </span>
               )}
             </div>
 
-            <p className="text-sm font-medium text-white">
+            <p className="text-sm font-medium">
               {job.source === "google_drive" ? "Google Drive" : job.source}
               {job.folder_id && (
-                <span className="ml-1 font-mono text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>
+                <span className="ml-1 font-mono text-xs" style={{ color: "var(--outline)" }}>
                   ({job.folder_id.slice(0, 16)}…)
                 </span>
               )}
@@ -186,14 +186,14 @@ function JobCard({ job, onCancel }: { job: IngestionJob; onCancel: (id: string) 
 
             {/* Currently ingesting file */}
             {isActive && activeFile && (
-              <p className="text-xs flex items-center gap-1.5" style={{ color: "#818CF8" }}>
+              <p className="text-xs flex items-center gap-1.5" style={{ color: "var(--primary)" }}>
                 <Clock className="size-3 shrink-0" />
                 <span className="truncate">{activeFile.name}</span>
               </p>
             )}
             {/* Pending: waiting for worker */}
             {job.status === "pending" && (
-              <p className="text-xs flex items-center gap-1.5" style={{ color: "#FBBF24" }}>
+              <p className="text-xs flex items-center gap-1.5" style={{ color: "var(--warning)" }}>
                 <Clock className="size-3 shrink-0" />
                 Waiting for worker to become available…
               </p>
@@ -205,7 +205,7 @@ function JobCard({ job, onCancel }: { job: IngestionJob; onCancel: (id: string) 
               <button
                 onClick={() => onCancel(job.id)}
                 className="h-8 px-3 rounded-xl text-xs font-medium transition-all hover:opacity-80"
-                style={{ border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.5)" }}
+                style={{ border: "1px solid var(--outline-variant)", color: "var(--muted-foreground)" }}
               >
                 Cancel
               </button>
@@ -213,8 +213,8 @@ function JobCard({ job, onCancel }: { job: IngestionJob; onCancel: (id: string) 
             {hasExpandable && (
               <button
                 onClick={() => setExpanded((v) => !v)}
-                className="h-8 w-8 rounded-xl flex items-center justify-center transition-all hover:bg-white/5"
-                style={{ color: "rgba(255,255,255,0.4)" }}
+                className="h-8 w-8 rounded-xl flex items-center justify-center transition-all hover:bg-black/5"
+                style={{ color: "var(--muted-foreground)" }}
               >
                 {expanded ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
               </button>
@@ -225,7 +225,7 @@ function JobCard({ job, onCancel }: { job: IngestionJob; onCancel: (id: string) 
         <ProgressBar job={job} />
 
         {job.error_message && (
-          <p className="mt-2 text-xs" style={{ color: "#FCA5A5" }}>
+          <p className="mt-2 text-xs" style={{ color: "var(--destructive)" }}>
             {job.error_message}
           </p>
         )}
@@ -235,16 +235,16 @@ function JobCard({ job, onCancel }: { job: IngestionJob; onCancel: (id: string) 
       {expanded && (
         <div
           className="px-5 pb-5 space-y-3"
-          style={{ borderTop: "1px solid rgba(255,255,255,0.05)" }}
+          style={{ borderTop: "1px solid var(--border)" }}
         >
           {fileCount > 0 && <FileList fileEvents={fileEvents} />}
 
           {hasSummary && (
             <div
               className="rounded-xl p-3 text-xs"
-              style={{ background: "rgba(99,102,241,0.08)", color: "rgba(255,255,255,0.65)" }}
+              style={{ background: "color-mix(in srgb, var(--accent) 50%, transparent)", color: "var(--on-surface-variant)" }}
             >
-              <p className="font-medium mb-1" style={{ color: "#818CF8" }}>Orchestrator Summary</p>
+              <p className="font-medium mb-1" style={{ color: "var(--primary)" }}>Orchestrator Summary</p>
               <p className="whitespace-pre-wrap">{meta.orchestrator_summary}</p>
             </div>
           )}
@@ -252,7 +252,7 @@ function JobCard({ job, onCancel }: { job: IngestionJob; onCancel: (id: string) 
           {meta.orchestrator_warning && (
             <div
               className="rounded-xl p-3 text-xs"
-              style={{ background: "rgba(245,158,11,0.08)", color: "#FBBF24" }}
+              style={{ background: "color-mix(in srgb, var(--warning-container) 50%, transparent)", color: "var(--warning)" }}
             >
               <p className="font-medium">Warning</p>
               <p>{meta.orchestrator_warning}</p>
@@ -279,21 +279,21 @@ function CostSummaryCard({ cost }: { cost: LLMCostSummary }) {
   return (
     <div
       className="rounded-2xl overflow-hidden"
-      style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}
+      style={{ background: "var(--card)", border: "1px solid var(--border)" }}
     >
       <div className="p-4 flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <div
             className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
-            style={{ background: "rgba(99,102,241,0.15)" }}
+            style={{ background: "var(--accent)" }}
           >
-            <DollarSign className="size-4" style={{ color: "#818CF8" }} />
+            <DollarSign className="size-4" style={{ color: "var(--primary)" }} />
           </div>
           <div>
-            <p className="text-xs font-medium" style={{ color: "rgba(255,255,255,0.5)" }}>
+            <p className="text-xs font-medium" style={{ color: "var(--muted-foreground)" }}>
               LLM Cost (session)
             </p>
-            <p className="text-xl font-bold text-white">
+            <p className="text-xl font-bold">
               ${cost.total_cost_usd < 0.0001 && cost.total_cost_usd > 0
                 ? "<$0.0001"
                 : `$${cost.total_cost_usd.toFixed(4)}`}
@@ -303,23 +303,23 @@ function CostSummaryCard({ cost }: { cost: LLMCostSummary }) {
 
         <div className="flex items-center gap-6">
           <div className="text-right hidden sm:block">
-            <p className="text-xs" style={{ color: "rgba(255,255,255,0.35)" }}>Tokens in</p>
-            <p className="text-sm font-semibold text-white">{formatTokens(cost.total_input_tokens)}</p>
+            <p className="text-xs" style={{ color: "var(--outline)" }}>Tokens in</p>
+            <p className="text-sm font-semibold">{formatTokens(cost.total_input_tokens)}</p>
           </div>
           <div className="text-right hidden sm:block">
-            <p className="text-xs" style={{ color: "rgba(255,255,255,0.35)" }}>Tokens out</p>
-            <p className="text-sm font-semibold text-white">{formatTokens(cost.total_output_tokens)}</p>
+            <p className="text-xs" style={{ color: "var(--outline)" }}>Tokens out</p>
+            <p className="text-sm font-semibold">{formatTokens(cost.total_output_tokens)}</p>
           </div>
           <div className="text-right hidden sm:block">
-            <p className="text-xs" style={{ color: "rgba(255,255,255,0.35)" }}>Calls</p>
-            <p className="text-sm font-semibold text-white">{cost.total_calls.toLocaleString()}</p>
+            <p className="text-xs" style={{ color: "var(--outline)" }}>Calls</p>
+            <p className="text-sm font-semibold">{cost.total_calls.toLocaleString()}</p>
           </div>
 
           {hasModels && (
             <button
               onClick={() => setExpanded((v) => !v)}
-              className="h-8 w-8 rounded-xl flex items-center justify-center transition-all hover:bg-white/5"
-              style={{ color: "rgba(255,255,255,0.4)" }}
+              className="h-8 w-8 rounded-xl flex items-center justify-center transition-all hover:bg-black/5"
+              style={{ color: "var(--muted-foreground)" }}
             >
               {expanded ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
             </button>
@@ -330,28 +330,28 @@ function CostSummaryCard({ cost }: { cost: LLMCostSummary }) {
       {expanded && hasModels && (
         <div
           className="px-4 pb-4 space-y-2"
-          style={{ borderTop: "1px solid rgba(255,255,255,0.05)" }}
+          style={{ borderTop: "1px solid var(--border)" }}
         >
-          <p className="pt-3 text-xs font-medium" style={{ color: "rgba(255,255,255,0.4)" }}>By model</p>
+          <p className="pt-3 text-xs font-medium" style={{ color: "var(--muted-foreground)" }}>By model</p>
           {Object.entries(cost.by_model).map(([model, s]) => (
             <div
               key={model}
               className="flex items-center justify-between rounded-xl px-3 py-2 text-xs"
-              style={{ background: "rgba(255,255,255,0.03)" }}
+              style={{ background: "var(--card)" }}
             >
-              <span className="font-mono truncate max-w-[180px]" style={{ color: "#818CF8" }}>{model}</span>
+              <span className="font-mono truncate max-w-[180px]" style={{ color: "var(--primary)" }}>{model}</span>
               <div className="flex gap-4 shrink-0">
-                <span style={{ color: "rgba(255,255,255,0.5)" }}>
+                <span style={{ color: "var(--muted-foreground)" }}>
                   {s.calls} call{s.calls !== 1 ? "s" : ""}
                 </span>
-                <span style={{ color: "rgba(255,255,255,0.5)" }}>
+                <span style={{ color: "var(--muted-foreground)" }}>
                   {formatTokens(s.input_tokens + s.output_tokens)} tok
                 </span>
-                <span className="font-semibold text-white">${s.cost_usd.toFixed(4)}</span>
+                <span className="font-semibold">${s.cost_usd.toFixed(4)}</span>
               </div>
             </div>
           ))}
-          <p className="text-xs pt-1" style={{ color: "rgba(255,255,255,0.2)" }}>
+          <p className="text-xs pt-1" style={{ color: "var(--outline-variant)" }}>
             {cost.source === "redis" ? "Aggregated across all workers" : cost.note || ""}
           </p>
         </div>
@@ -365,9 +365,9 @@ function CostSummaryCard({ cost }: { cost: LLMCostSummary }) {
 function StatsBar({ stats }: { stats: NonNullable<ReturnType<typeof useIngestion>["stats"]> }) {
   const items = [
     { label: "Total Jobs",     value: stats.total_jobs },
-    { label: "Files Processed", value: stats.total_files_processed, color: "#4ADE80" },
-    { label: "Files Failed",   value: stats.total_files_failed, color: stats.total_files_failed > 0 ? "#FCA5A5" : undefined },
-    { label: "Files Skipped",  value: stats.total_files_skipped, color: stats.total_files_skipped > 0 ? "#FBBF24" : undefined },
+    { label: "Files Processed", value: stats.total_files_processed, color: "var(--success)" },
+    { label: "Files Failed",   value: stats.total_files_failed, color: stats.total_files_failed > 0 ? "var(--destructive)" : undefined },
+    { label: "Files Skipped",  value: stats.total_files_skipped, color: stats.total_files_skipped > 0 ? "var(--warning)" : undefined },
   ];
 
   return (
@@ -378,12 +378,12 @@ function StatsBar({ stats }: { stats: NonNullable<ReturnType<typeof useIngestion
         <div
           key={item.label}
           className="rounded-2xl p-4"
-          style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}
+          style={{ background: "var(--card)", border: "1px solid var(--border)" }}
         >
-          <p className="text-2xl font-bold" style={{ color: item.color ?? "white" }}>
+          <p className="text-2xl font-bold" style={item.color ? { color: item.color } : undefined}>
             {item.value.toLocaleString()}
           </p>
-          <p className="text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.4)" }}>{item.label}</p>
+          <p className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>{item.label}</p>
         </div>
       ))}
     </div>
@@ -398,9 +398,9 @@ function WorkerState({ stats }: { stats: NonNullable<ReturnType<typeof useIngest
   return (
     <div
       className="rounded-2xl p-5"
-      style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}
+      style={{ background: "var(--card)", border: "1px solid var(--border)" }}
     >
-      <p className="text-sm font-semibold text-white mb-3">Job Distribution</p>
+      <p className="text-sm font-semibold mb-3">Job Distribution</p>
       <div className="flex flex-wrap gap-2">
         {statusOrder.map((s) => {
           const count = stats.jobs_by_status[s] ?? 0;
@@ -415,7 +415,7 @@ function WorkerState({ stats }: { stats: NonNullable<ReturnType<typeof useIngest
               {style.label}
               <span
                 className="rounded-full px-1.5 py-px text-[10px] font-bold"
-                style={{ background: "rgba(0,0,0,0.3)" }}
+                style={{ background: "rgba(0,0,0,0.08)" }}
               >
                 {count}
               </span>
@@ -426,20 +426,205 @@ function WorkerState({ stats }: { stats: NonNullable<ReturnType<typeof useIngest
 
       {/* Active job mini-view */}
       {stats.active_job && (
-        <div className="mt-4 pt-4" style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
-          <p className="text-xs font-medium mb-2" style={{ color: "rgba(255,255,255,0.5)" }}>Active Job</p>
+        <div className="mt-4 pt-4" style={{ borderTop: "1px solid var(--border)" }}>
+          <p className="text-xs font-medium mb-2" style={{ color: "var(--muted-foreground)" }}>Active Job</p>
           <div className="flex items-center justify-between gap-2">
             <StatusBadge status={stats.active_job.status} />
-            <span className="text-xs text-white truncate flex-1 text-right">
+            <span className="text-xs truncate flex-1 text-right">
               {stats.active_job.processed_files}/{stats.active_job.total_files} files
             </span>
           </div>
           {stats.active_job.metadata?.current_action && (
-            <p className="mt-1.5 text-xs" style={{ color: "#818CF8" }}>
+            <p className="mt-1.5 text-xs" style={{ color: "var(--primary)" }}>
               {stats.active_job.metadata.current_action}
             </p>
           )}
           {stats.active_job.total_files > 0 && <ProgressBar job={stats.active_job} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Folder tree node ──────────────────────────────────────────────────────────
+
+function FolderNode({
+  folder,
+  selectedId,
+  onSelect,
+  depth = 0,
+}: {
+  folder: DriveFolderEntry;
+  selectedId: string | null;
+  onSelect: (id: string, name: string) => void;
+  depth?: number;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const { data: children, isLoading } = useDriveFolders(folder.file_id, expanded);
+  const isSelected = selectedId === folder.file_id;
+  const subfolders = children?.filter((c) => c.is_folder) ?? [];
+
+  return (
+    <div>
+      <div
+        className="flex items-center gap-1 py-1.5 px-2 rounded-lg cursor-pointer transition-colors hover:bg-black/5 group"
+        style={{
+          paddingLeft: `${depth * 20 + 8}px`,
+          background: isSelected ? "var(--accent)" : undefined,
+        }}
+      >
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setExpanded((v) => !v);
+          }}
+          className="w-5 h-5 flex items-center justify-center shrink-0 rounded transition-colors hover:bg-black/10"
+        >
+          {isLoading ? (
+            <Loader2 className="size-3 animate-spin" style={{ color: "var(--muted-foreground)" }} />
+          ) : expanded ? (
+            <ChevronDown className="size-3.5" style={{ color: "var(--muted-foreground)" }} />
+          ) : (
+            <ChevronRight className="size-3.5" style={{ color: "var(--muted-foreground)" }} />
+          )}
+        </button>
+
+        <div
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(folder.file_id, folder.name); } }}
+          className="flex items-center gap-2 flex-1 min-w-0"
+          onClick={() => onSelect(folder.file_id, folder.name)}
+        >
+          {expanded ? (
+            <FolderOpen className="size-4 shrink-0" style={{ color: isSelected ? "var(--primary)" : "var(--warning)" }} />
+          ) : (
+            <Folder className="size-4 shrink-0" style={{ color: isSelected ? "var(--primary)" : "var(--warning)" }} />
+          )}
+          <span
+            className="text-sm truncate"
+            style={{ fontWeight: isSelected ? 600 : 400, color: isSelected ? "var(--primary)" : undefined }}
+          >
+            {folder.name}
+          </span>
+        </div>
+
+        {isSelected && (
+          <Check className="size-4 shrink-0" style={{ color: "var(--primary)" }} />
+        )}
+      </div>
+
+      {expanded && subfolders.length > 0 && (
+        <div>
+          {subfolders.map((child) => (
+            <FolderNode
+              key={child.file_id}
+              folder={child}
+              selectedId={selectedId}
+              onSelect={onSelect}
+              depth={depth + 1}
+            />
+          ))}
+        </div>
+      )}
+
+      {expanded && !isLoading && subfolders.length === 0 && (
+        <p
+          className="text-xs py-1"
+          style={{ paddingLeft: `${(depth + 1) * 20 + 8}px`, color: "var(--outline-variant)" }}
+        >
+          No subfolders
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ── Folder picker ─────────────────────────────────────────────────────────────
+
+function FolderPicker({
+  selectedFolderId,
+  selectedFolderName,
+  onSelect,
+}: {
+  selectedFolderId: string | null;
+  selectedFolderName: string | null;
+  onSelect: (id: string, name: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const { data: rootFolders, isLoading, error } = useDriveFolders("root", open);
+  const folders = rootFolders?.filter((f) => f.is_folder) ?? [];
+
+  return (
+    <div
+      className="rounded-2xl overflow-hidden"
+      style={{ background: "var(--card)", border: "1px solid var(--border)" }}
+    >
+      {/* Header */}
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full p-4 flex items-center justify-between gap-3 transition-colors hover:bg-black/[0.02]"
+      >
+        <div className="flex items-center gap-3 min-w-0">
+          <div
+            className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
+            style={{ background: "var(--accent)" }}
+          >
+            <FolderOpen className="size-4" style={{ color: "var(--primary)" }} />
+          </div>
+          <div className="text-left min-w-0">
+            <p className="text-sm font-medium">Drive Folder</p>
+            {selectedFolderName ? (
+              <p className="text-xs truncate" style={{ color: "var(--primary)" }}>
+                {selectedFolderName}
+              </p>
+            ) : (
+              <p className="text-xs" style={{ color: "var(--outline)" }}>
+                No folder selected — will scan entire Drive
+              </p>
+            )}
+          </div>
+        </div>
+        {open ? (
+          <ChevronUp className="size-4 shrink-0" style={{ color: "var(--muted-foreground)" }} />
+        ) : (
+          <ChevronDown className="size-4 shrink-0" style={{ color: "var(--muted-foreground)" }} />
+        )}
+      </button>
+
+      {/* Tree */}
+      {open && (
+        <div
+          className="px-2 pb-3 max-h-80 overflow-y-auto"
+          style={{ borderTop: "1px solid var(--border)" }}
+        >
+          {isLoading && (
+            <div className="py-4 flex items-center justify-center gap-2">
+              <Loader2 className="size-4 animate-spin" style={{ color: "var(--primary)" }} />
+              <span className="text-xs" style={{ color: "var(--muted-foreground)" }}>Loading folders...</span>
+            </div>
+          )}
+
+          {error && (
+            <p className="py-3 px-2 text-xs" style={{ color: "var(--destructive)" }}>
+              Failed to load folders: {error.message}
+            </p>
+          )}
+
+          {!isLoading && !error && folders.length === 0 && (
+            <p className="py-3 px-2 text-xs" style={{ color: "var(--outline-variant)" }}>
+              No folders found in Drive root
+            </p>
+          )}
+
+          {folders.map((folder) => (
+            <FolderNode
+              key={folder.file_id}
+              folder={folder}
+              selectedId={selectedFolderId}
+              onSelect={onSelect}
+            />
+          ))}
         </div>
       )}
     </div>
@@ -455,6 +640,7 @@ export default function IngestionPage() {
     jobs,
     stats,
     costSummary,
+    costError,
     isLoading,
     isTriggering,
     error,
@@ -463,6 +649,35 @@ export default function IngestionPage() {
     cancelJob,
     setError,
   } = useIngestion();
+
+  const { defaultFolder, saveDefaultFolder, isSaving } = useDefaultFolder();
+
+  // Local selection state (may differ from saved default)
+  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
+  const [selectedFolderName, setSelectedFolderName] = useState<string | null>(null);
+
+  // Sync selection with saved default on load
+  useEffect(() => {
+    if (defaultFolder && selectedFolderId === null) {
+      setSelectedFolderId(defaultFolder.folder_id);
+      setSelectedFolderName(defaultFolder.folder_name);
+    }
+  }, [defaultFolder, selectedFolderId]);
+
+  const handleFolderSelect = (id: string, name: string) => {
+    setSelectedFolderId(id);
+    setSelectedFolderName(name);
+  };
+
+  const handleSaveDefault = async () => {
+    if (selectedFolderId && selectedFolderName) {
+      await saveDefaultFolder(selectedFolderId, selectedFolderName);
+    }
+  };
+
+  const isDirty =
+    selectedFolderId !== (defaultFolder?.folder_id ?? null) ||
+    selectedFolderName !== (defaultFolder?.folder_name ?? null);
 
   // Admin guard
   useEffect(() => {
@@ -479,34 +694,52 @@ export default function IngestionPage() {
     <div className="flex-1 p-6 lg:p-8 space-y-6 max-w-4xl">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold text-white tracking-tight">Base Knowledge Ingestion</h1>
-        <p className="mt-1 text-sm" style={{ color: "rgba(255,255,255,0.4)" }}>
+        <h1 className="text-3xl font-bold tracking-tight">Base Knowledge Ingestion</h1>
+        <p className="mt-1 text-sm" style={{ color: "var(--muted-foreground)" }}>
           Agent orchestrator that recursively explores Google Drive, classifies documents, and builds the Knowledge Graph.
         </p>
       </div>
 
+      {/* Folder picker */}
+      <FolderPicker
+        selectedFolderId={selectedFolderId}
+        selectedFolderName={selectedFolderName}
+        onSelect={handleFolderSelect}
+      />
+
       {/* Actions */}
-      <div className="flex gap-3 flex-wrap">
+      <div className="flex gap-3 flex-wrap items-center">
         <button
-          onClick={() => triggerIngestion()}
+          onClick={() => triggerIngestion({ folder_id: selectedFolderId })}
           disabled={isTriggering}
           className="h-10 px-5 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90 disabled:opacity-50"
-          style={{ background: "linear-gradient(135deg, #6366F1, #A855F7)" }}
+          style={{ background: "var(--primary)" }}
         >
           {isTriggering ? "Starting..." : "Ingest from Drive"}
         </button>
         <button
-          onClick={() => triggerIngestion({ force: true })}
+          onClick={() => triggerIngestion({ folder_id: selectedFolderId, force: true })}
           disabled={isTriggering}
           className="h-10 px-5 rounded-xl text-sm font-medium transition-all hover:opacity-80"
-          style={{ border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.6)" }}
+          style={{ border: "1px solid var(--outline-variant)", color: "var(--on-surface-variant)" }}
         >
           Force Re-ingest All
         </button>
+        {isDirty && selectedFolderId && (
+          <button
+            onClick={handleSaveDefault}
+            disabled={isSaving}
+            className="h-10 px-4 rounded-xl flex items-center gap-2 text-sm font-medium transition-all hover:opacity-80"
+            style={{ border: "1px solid var(--primary)", color: "var(--primary)" }}
+          >
+            {isSaving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
+            Save as Default
+          </button>
+        )}
         <button
           onClick={() => refresh()}
-          className="h-10 px-4 rounded-xl flex items-center gap-2 text-sm font-medium transition-all hover:bg-white/5"
-          style={{ color: "rgba(255,255,255,0.5)" }}
+          className="h-10 px-4 rounded-xl flex items-center gap-2 text-sm font-medium transition-all hover:bg-black/5"
+          style={{ color: "var(--muted-foreground)" }}
         >
           <RefreshCw className="size-4" />
           Refresh
@@ -517,7 +750,7 @@ export default function IngestionPage() {
       {error && (
         <div
           className="flex items-center justify-between rounded-xl px-4 py-3 text-sm"
-          style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.2)", color: "#FCA5A5" }}
+          style={{ background: "var(--error-container)", border: "1px solid color-mix(in srgb, var(--destructive) 20%, transparent)", color: "var(--destructive)" }}
         >
           <span>{error}</span>
           <button onClick={() => setError(null)} className="ml-2 hover:opacity-70">Dismiss</button>
@@ -528,15 +761,24 @@ export default function IngestionPage() {
       {stats && <StatsBar stats={stats} />}
 
       {/* Cost summary */}
-      {costSummary && <CostSummaryCard cost={costSummary} />}
+      {costSummary ? (
+        <CostSummaryCard cost={costSummary} />
+      ) : costError ? (
+        <div
+          className="rounded-2xl p-4 text-sm"
+          style={{ background: "color-mix(in srgb, var(--error-container) 50%, transparent)", border: "1px solid color-mix(in srgb, var(--destructive) 15%, transparent)", color: "var(--destructive)" }}
+        >
+          Cost data error: {costError}
+        </div>
+      ) : null}
 
       {/* Two-column: job list + worker state */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Job list (2/3) */}
         <div className="lg:col-span-2 space-y-3">
-          <h2 className="text-sm font-medium text-white">
+          <h2 className="text-sm font-medium">
             Ingestion Jobs
-            <span className="ml-2 text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>({jobs.length})</span>
+            <span className="ml-2 text-xs" style={{ color: "var(--outline)" }}>({jobs.length})</span>
           </h2>
 
           {isLoading && jobs.length === 0 ? (
@@ -548,9 +790,9 @@ export default function IngestionPage() {
           ) : jobs.length === 0 ? (
             <div
               className="rounded-2xl py-12 text-center"
-              style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}
+              style={{ background: "var(--card)", border: "1px solid var(--border)" }}
             >
-              <p className="text-sm" style={{ color: "rgba(255,255,255,0.4)" }}>
+              <p className="text-sm" style={{ color: "var(--muted-foreground)" }}>
                 No ingestion jobs yet. Click &ldquo;Ingest from Drive&rdquo; to start.
               </p>
             </div>
@@ -563,7 +805,7 @@ export default function IngestionPage() {
 
         {/* Worker state (1/3) */}
         <div className="space-y-3">
-          <h2 className="text-sm font-medium text-white">Worker Summary</h2>
+          <h2 className="text-sm font-medium">Worker Summary</h2>
           {stats ? (
             <WorkerState stats={stats} />
           ) : (

@@ -28,25 +28,25 @@ const STAT_CONFIG = [
     key: "total_documents" as const,
     label: "Documents",
     icon: FileText,
-    color: "#6366F1",
+    color: "var(--primary)",
   },
   {
     key: "total_entities" as const,
     label: "Knowledge Nodes",
     icon: Network,
-    color: "#A855F7",
+    color: "var(--tertiary)",
   },
   {
     key: "total_chunks" as const,
     label: "Chunks",
     icon: MessageSquare,
-    color: "#22D3EE",
+    color: "var(--chart-3)",
   },
   {
     key: "total_embeddings" as const,
     label: "Embeddings",
     icon: BarChart3,
-    color: "#EC4899",
+    color: "var(--destructive)",
   },
 ];
 
@@ -56,28 +56,28 @@ const QUICK_ACTIONS = [
     description: "Add PDF or DOCX files to your knowledge base",
     href: "/documents",
     icon: Upload,
-    gradient: "linear-gradient(135deg, #6366F1, #818CF8)",
+    gradient: "var(--primary)",
   },
   {
     title: "Start Chat",
     description: "Ask questions about your documents",
     href: "/chat",
     icon: MessageSquare,
-    gradient: "linear-gradient(135deg, #A855F7, #C084FC)",
+    gradient: "var(--primary)",
   },
   {
     title: "Knowledge Graph",
     description: "Visualize connections between concepts",
     href: "/knowledge",
     icon: Network,
-    gradient: "linear-gradient(135deg, #22D3EE, #67E8F9)",
+    gradient: "var(--primary)",
   },
   {
     title: "View Documents",
     description: "Manage your uploaded documents",
     href: "/documents",
     icon: FileText,
-    gradient: "linear-gradient(135deg, #F59E0B, #FCD34D)",
+    gradient: "var(--primary)",
   },
 ];
 
@@ -99,10 +99,10 @@ export default function DashboardPage() {
     <div className="flex-1 p-6 lg:p-8 space-y-8">
       {/* Greeting */}
       <div>
-        <h1 className="text-3xl font-bold text-white tracking-tight">
+        <h1 className="text-3xl font-bold tracking-tight">
           Welcome back{user?.full_name ? `, ${user.full_name}` : ""}
         </h1>
-        <p className="mt-1 text-sm" style={{ color: "rgba(255,255,255,0.4)" }}>
+        <p className="mt-1 text-sm" style={{ color: "var(--muted-foreground)" }}>
           Your intelligent knowledge assistant is ready.
         </p>
       </div>
@@ -116,22 +116,23 @@ export default function DashboardPage() {
               key={stat.label}
               className="rounded-2xl p-5"
               style={{
-                background: "rgba(255,255,255,0.03)",
-                border: "1px solid rgba(255,255,255,0.06)",
+                background: "var(--card)",
+                border: "1px solid var(--border)",
+                boxShadow: "var(--shadow-card)",
               }}
             >
               <div className="flex items-center justify-between mb-4">
                 <div
                   className="w-10 h-10 rounded-xl flex items-center justify-center"
-                  style={{ background: `${stat.color}20` }}
+                  style={{ background: "var(--accent)" }}
                 >
                   <stat.icon className="size-5" style={{ color: stat.color }} />
                 </div>
               </div>
-              <div className="text-3xl font-bold text-white mb-1">
+              <div className="text-3xl font-bold mb-1">
                 {value !== null ? formatNumber(value) : "--"}
               </div>
-              <div className="text-xs" style={{ color: "rgba(255,255,255,0.4)" }}>
+              <div className="text-xs" style={{ color: "var(--muted-foreground)" }}>
                 {stat.label}
               </div>
             </div>
@@ -141,15 +142,16 @@ export default function DashboardPage() {
 
       {/* Quick Actions */}
       <div>
-        <h2 className="text-lg font-semibold text-white mb-4">Quick Actions</h2>
+        <h2 className="text-lg font-semibold mb-4">Quick Actions</h2>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {QUICK_ACTIONS.map((action) => (
             <Link key={action.title} href={action.href}>
               <div
                 className="rounded-2xl p-5 transition-all hover:scale-[1.02] cursor-pointer"
                 style={{
-                  background: "rgba(255,255,255,0.03)",
-                  border: "1px solid rgba(255,255,255,0.06)",
+                  background: "var(--card)",
+                  border: "1px solid var(--border)",
+                  boxShadow: "var(--shadow-card)",
                 }}
               >
                 <div
@@ -158,13 +160,13 @@ export default function DashboardPage() {
                 >
                   <action.icon className="size-5 text-white" />
                 </div>
-                <div className="text-sm font-semibold text-white mb-1">
+                <div className="text-sm font-semibold mb-1">
                   {action.title}
                 </div>
-                <div className="text-xs" style={{ color: "rgba(255,255,255,0.4)" }}>
+                <div className="text-xs" style={{ color: "var(--muted-foreground)" }}>
                   {action.description}
                 </div>
-                <div className="flex items-center gap-1 mt-3 text-xs font-medium" style={{ color: "#818CF8" }}>
+                <div className="flex items-center gap-1 mt-3 text-xs font-medium" style={{ color: "var(--primary)" }}>
                   <Zap className="size-3" />
                   Get started
                 </div>

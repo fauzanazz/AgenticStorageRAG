@@ -5,6 +5,7 @@ import { MessageBubble } from "@/components/chat/message-bubble";
 import { ChatInput } from "@/components/chat/chat-input";
 import { ConversationList } from "@/components/chat/conversation-list";
 import { useChat } from "@/hooks/use-chat";
+import { useModelSettings } from "@/hooks/use-model-settings";
 
 export default function ChatPage() {
   const {
@@ -22,8 +23,18 @@ export default function ChatPage() {
     setError,
   } = useChat();
 
+  const { settings, availableModels } = useModelSettings();
+
   const [showSidebar, setShowSidebar] = useState(false);
+  const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Default to the user's chat_model setting once loaded
+  useEffect(() => {
+    if (settings?.chat_model && !selectedModel) {
+      setSelectedModel(settings.chat_model);
+    }
+  }, [settings?.chat_model, selectedModel]);
 
   useEffect(() => {
     fetchConversations();
@@ -37,7 +48,7 @@ export default function ChatPage() {
     if (!activeConversation) {
       await createConversation();
     }
-    sendMessage(content);
+    sendMessage(content, undefined, selectedModel ?? undefined);
   };
 
   const handleNewChat = async () => {
@@ -47,14 +58,14 @@ export default function ChatPage() {
 
   return (
     <div className="flex flex-1 min-h-0 overflow-hidden">
-      {/* Conversation sidebar — on mobile: fixed below the 56px header; on desktop: relative */}
+      {/* Conversation sidebar — on mobile: fixed below the 64px top nav; on desktop: relative */}
       <div
-        className={`fixed top-14 bottom-0 left-0 z-40 w-72 md:relative md:top-auto md:bottom-auto md:z-auto transition-transform duration-200 ${
+        className={`fixed top-16 bottom-0 left-0 z-40 w-72 md:relative md:top-auto md:bottom-auto md:z-auto transition-transform duration-200 ${
           showSidebar ? "translate-x-0" : "-translate-x-full md:translate-x-0"
         }`}
         style={{
-          background: "rgba(255,255,255,0.02)",
-          borderRight: "1px solid rgba(255,255,255,0.06)",
+          background: "var(--card)",
+          borderRight: "1px solid var(--border)",
         }}
       >
         <ConversationList
@@ -69,10 +80,13 @@ export default function ChatPage() {
         />
       </div>
 
-      {/* Overlay for mobile sidebar — sits below header (top-14) */}
+      {/* Overlay for mobile sidebar — sits below top nav (top-16) */}
       {showSidebar && (
         <div
-          className="fixed top-14 inset-x-0 bottom-0 z-30 md:hidden"
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " " || e.key === "Escape") { e.preventDefault(); setShowSidebar(false); } }}
+          className="fixed top-16 inset-x-0 bottom-0 z-30 md:hidden"
           style={{ background: "rgba(0,0,0,0.6)" }}
           onClick={() => setShowSidebar(false)}
         />
@@ -83,11 +97,11 @@ export default function ChatPage() {
         {/* Chat header */}
         <div
           className="flex items-center gap-3 px-4 py-3"
-          style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}
+          style={{ borderBottom: "1px solid var(--border)" }}
         >
           <button
-            className="md:hidden rounded-lg p-1.5 hover:bg-white/5"
-            style={{ color: "rgba(255,255,255,0.5)" }}
+            className="md:hidden rounded-lg p-1.5 hover:bg-black/5"
+            style={{ color: "var(--muted-foreground)" }}
             onClick={() => setShowSidebar(true)}
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -95,7 +109,7 @@ export default function ChatPage() {
               <path d="M9 3v18" />
             </svg>
           </button>
-          <h2 className="text-sm font-medium text-white">
+          <h2 className="text-sm font-medium">
             {activeConversation?.title || "New Chat"}
           </h2>
         </div>
@@ -106,13 +120,13 @@ export default function ChatPage() {
             <div className="flex h-full flex-col items-center justify-center gap-4">
               <div
                 className="flex h-16 w-16 items-center justify-center rounded-2xl text-2xl font-bold text-white"
-                style={{ background: "linear-gradient(135deg, #6366F1, #A855F7)" }}
+                style={{ background: "var(--primary)" }}
               >
                 D
               </div>
               <div className="text-center">
-                <h3 className="text-lg font-semibold text-white">DingDong RAG</h3>
-                <p className="mt-1 text-sm" style={{ color: "rgba(255,255,255,0.4)" }}>
+                <h3 className="text-lg font-semibold">DingDong RAG</h3>
+                <p className="mt-1 text-sm" style={{ color: "var(--muted-foreground)" }}>
                   Ask questions about your knowledge base.
                   <br />
                   I&apos;ll search the graph and documents to find answers.
@@ -128,10 +142,10 @@ export default function ChatPage() {
                   <button
                     key={suggestion}
                     onClick={() => handleSend(suggestion)}
-                    className="rounded-xl px-4 py-3 text-left text-sm transition-all hover:bg-white/[0.04]"
+                    className="rounded-xl px-4 py-3 text-left text-sm transition-all hover:bg-black/[0.04]"
                     style={{
-                      border: "1px solid rgba(255,255,255,0.08)",
-                      color: "rgba(255,255,255,0.6)",
+                      border: "1px solid var(--outline-variant)",
+                      color: "var(--on-surface-variant)",
                     }}
                   >
                     {suggestion}
@@ -141,8 +155,16 @@ export default function ChatPage() {
             </div>
           ) : (
             <div className="mx-auto max-w-3xl space-y-4">
-              {messages.map((msg) => (
-                <MessageBubble key={msg.id} message={msg} />
+              {messages.map((msg, i) => (
+                <MessageBubble
+                  key={msg.id}
+                  message={msg}
+                  isStreaming={
+                    isStreaming &&
+                    i === messages.length - 1 &&
+                    msg.role === "assistant"
+                  }
+                />
               ))}
               <div ref={messagesEndRef} />
             </div>
@@ -154,9 +176,9 @@ export default function ChatPage() {
           <div
             className="mx-4 mb-2 flex items-center justify-between rounded-xl px-4 py-3 text-sm"
             style={{
-              background: "rgba(239,68,68,0.1)",
-              border: "1px solid rgba(239,68,68,0.2)",
-              color: "#FCA5A5",
+              background: "var(--error-container)",
+              border: "1px solid color-mix(in srgb, var(--destructive) 20%, transparent)",
+              color: "var(--destructive)",
             }}
           >
             <span>{error}</span>
@@ -174,6 +196,9 @@ export default function ChatPage() {
           onSend={handleSend}
           onStop={stopStreaming}
           isStreaming={isStreaming}
+          models={availableModels}
+          selectedModel={selectedModel}
+          onModelChange={setSelectedModel}
         />
       </div>
     </div>

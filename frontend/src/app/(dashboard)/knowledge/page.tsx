@@ -1,13 +1,23 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { Search } from "lucide-react";
 import { GraphCanvas } from "@/components/knowledge/graph-canvas";
 import { StatsCard } from "@/components/knowledge/stats-card";
 import { useKnowledge } from "@/hooks/use-knowledge";
 import { Skeleton } from "@/components/ui/skeleton";
+import type { GraphVisualization } from "@/types/knowledge";
+
+type SourceTab = "all" | "upload" | "google_drive";
 
 export default function KnowledgePage() {
+  const [sourceTab, setSourceTab] = useState<SourceTab>("all");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [expandedGraph, setExpandedGraph] = useState<GraphVisualization | null>(null);
+  const [nodeLimit, setNodeLimit] = useState(500);
+
+  const graphSource = sourceTab === "all" ? undefined : sourceTab;
+
   const {
     graph,
     stats,
@@ -15,185 +25,274 @@ export default function KnowledgePage() {
     loading,
     error,
     search,
-  } = useKnowledge();
+    fetchNeighbors,
+  } = useKnowledge({
+    graphParams: {
+      ...(graphSource ? { source: graphSource } : {}),
+      limit: nodeLimit,
+    },
+  });
 
-  const [searchQuery, setSearchQuery] = useState("");
-  const [activeTab, setActiveTab] = useState<"graph" | "search">("graph");
-
-  // No useEffect needed — graph and stats are fetched automatically by
-  // the useQuery calls inside useKnowledge on component mount.
+  // Merge base graph with any expanded neighbor data
+  const displayGraph = expandedGraph
+    ? mergeGraphs(graph, expandedGraph)
+    : graph;
 
   const handleSearch = () => {
     if (searchQuery.trim()) {
       search({ query: searchQuery });
-      setActiveTab("search");
     }
   };
 
-  const SOURCE_COLORS: Record<string, { bg: string; color: string }> = {
-    vector: { bg: "rgba(59,130,246,0.15)", color: "#60A5FA" },
-    graph: { bg: "rgba(34,197,94,0.15)", color: "#4ADE80" },
-    hybrid: { bg: "rgba(168,85,247,0.15)", color: "#C084FC" },
+  const handleExpandNode = useCallback(
+    async (nodeId: string): Promise<GraphVisualization | null> => {
+      try {
+        const neighbors = await fetchNeighbors(nodeId, 1, 50);
+        if (neighbors && neighbors.nodes.length > 0) {
+          setExpandedGraph((prev) =>
+            prev ? mergeGraphs(prev, neighbors) : neighbors
+          );
+        }
+        return neighbors;
+      } catch {
+        return null;
+      }
+    },
+    [fetchNeighbors]
+  );
+
+  // Reset expanded graph when source tab changes
+  const handleSourceChange = (tab: SourceTab) => {
+    setSourceTab(tab);
+    setExpandedGraph(null);
   };
+
+  const SOURCE_COLORS: Record<string, { bg: string; color: string }> = {
+    vector: { bg: "#e3f2fd", color: "#1565c0" },
+    graph: { bg: "#e8f5e9", color: "#2e7d32" },
+    hybrid: { bg: "#f3e5f5", color: "#625b77" },
+  };
+
+  const sourceTabs: { key: SourceTab; label: string }[] = [
+    { key: "all", label: "All Sources" },
+    { key: "upload", label: "Uploads KG" },
+    { key: "google_drive", label: "Drive KG" },
+  ];
 
   return (
     <div className="flex-1 p-6 lg:p-8 space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold text-white tracking-tight">Knowledge Graph</h1>
-        <p className="mt-1 text-sm" style={{ color: "rgba(255,255,255,0.4)" }}>
+        <h1 className="text-3xl font-bold tracking-tight">Knowledge Graph</h1>
+        <p className="mt-1 text-sm" style={{ color: "var(--muted-foreground)" }}>
           Explore entities, relationships, and search across your knowledge base
         </p>
-      </div>
-
-      {/* Stats */}
-      <StatsCard stats={stats} />
-
-      {/* Search */}
-      <div
-        className="flex gap-3 rounded-2xl p-4"
-        style={{
-          background: "rgba(255,255,255,0.03)",
-          border: "1px solid rgba(255,255,255,0.06)",
-        }}
-      >
-        <div className="flex-1 relative">
-          <Search
-            className="absolute left-4 top-1/2 -translate-y-1/2 size-4"
-            style={{ color: "rgba(255,255,255,0.3)" }}
-          />
-          <input
-            placeholder="Search knowledge graph..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-            className="w-full h-12 rounded-xl pl-11 pr-4 text-sm text-white placeholder:text-white/30 outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all"
-            style={{
-              background: "rgba(255,255,255,0.06)",
-              border: "1px solid rgba(255,255,255,0.08)",
-            }}
-          />
-        </div>
-        <button
-          onClick={handleSearch}
-          disabled={loading}
-          className="h-12 px-6 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90 disabled:opacity-50"
-          style={{ background: "linear-gradient(135deg, #6366F1, #A855F7)" }}
-        >
-          {loading ? "Searching..." : "Search"}
-        </button>
-      </div>
-
-      {/* Tabs */}
-      <div className="flex gap-2">
-        {(["graph", "search"] as const).map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            className="px-4 py-2 rounded-xl text-sm font-medium transition-all"
-            style={{
-              background: activeTab === tab ? "rgba(99,102,241,0.12)" : "rgba(255,255,255,0.04)",
-              color: activeTab === tab ? "#818CF8" : "rgba(255,255,255,0.5)",
-              border: activeTab === tab
-                ? "1px solid rgba(99,102,241,0.2)"
-                : "1px solid rgba(255,255,255,0.06)",
-            }}
-          >
-            {tab === "graph" ? "Graph View" : `Search Results (${searchResults.length})`}
-          </button>
-        ))}
       </div>
 
       {error && (
         <div
           className="rounded-xl px-4 py-3 text-sm"
           style={{
-            background: "rgba(239,68,68,0.1)",
-            border: "1px solid rgba(239,68,68,0.2)",
-            color: "#FCA5A5",
+            background: "var(--error-container)",
+            border: "1px solid color-mix(in srgb, var(--destructive) 20%, transparent)",
+            color: "var(--destructive)",
           }}
         >
           {error}
         </div>
       )}
 
-      {/* Content */}
-      {activeTab === "graph" && (
-        <div
-          className="rounded-2xl min-h-[400px] md:min-h-[600px] overflow-hidden"
-          style={{
-            background: "rgba(255,255,255,0.03)",
-            border: "1px solid rgba(255,255,255,0.06)",
-          }}
-        >
-          <div className="h-[400px] md:h-[600px]">
-            {graph ? (
-              <GraphCanvas data={graph} />
-            ) : loading ? (
-              <Skeleton className="h-full w-full rounded-none" />
-            ) : (
-              <div className="flex items-center justify-center h-full">
-                <p style={{ color: "rgba(255,255,255,0.4)" }}>No graph data available</p>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      {/* Split layout */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Left sidebar */}
+        <div className="lg:col-span-1 space-y-6">
+          {/* Stats */}
+          <StatsCard stats={stats} />
 
-      {activeTab === "search" && (
-        <div className="space-y-2">
-          {searchResults.length === 0 ? (
-            <div
-              className="rounded-2xl py-12 text-center"
-              style={{
-                background: "rgba(255,255,255,0.03)",
-                border: "1px solid rgba(255,255,255,0.06)",
-              }}
-            >
-              <p className="text-sm" style={{ color: "rgba(255,255,255,0.4)" }}>
-                {searchQuery
-                  ? "No results found. Try a different query."
-                  : "Enter a query to search your knowledge base."}
-              </p>
-            </div>
-          ) : (
-            searchResults.map((result, index) => (
-              <div
-                key={index}
-                className="rounded-2xl p-4"
+          {/* Source filter */}
+          <div className="flex flex-wrap gap-2">
+            {sourceTabs.map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => handleSourceChange(tab.key)}
+                className="px-4 py-2 rounded-xl text-sm font-medium transition-all"
                 style={{
-                  background: "rgba(255,255,255,0.03)",
-                  border: "1px solid rgba(255,255,255,0.06)",
+                  background: sourceTab === tab.key ? "var(--accent)" : "var(--muted)",
+                  color: sourceTab === tab.key ? "var(--primary)" : "var(--muted-foreground)",
+                  border: sourceTab === tab.key
+                    ? "1px solid color-mix(in srgb, var(--primary) 20%, transparent)"
+                    : "1px solid var(--border)",
                 }}
               >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-white/80 whitespace-pre-wrap">
-                      {result.content}
-                    </p>
-                    {result.metadata && (
-                      <p className="text-xs mt-2" style={{ color: "rgba(255,255,255,0.3)" }}>
-                        {JSON.stringify(result.metadata)}
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Node limit slider */}
+          <div
+            className="rounded-2xl px-4 py-3 space-y-2"
+            style={{
+              background: "var(--card)",
+              border: "1px solid var(--border)",
+            }}
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium" style={{ color: "var(--muted-foreground)" }}>
+                Nodes to load
+              </span>
+              <span className="text-xs tabular-nums" style={{ color: "var(--on-surface-variant)" }}>
+                {nodeLimit}
+              </span>
+            </div>
+            <input
+              type="range"
+              min={100}
+              max={5000}
+              step={100}
+              value={nodeLimit}
+              onChange={(e) => setNodeLimit(Number(e.target.value))}
+              className="w-full accent-primary"
+            />
+          </div>
+
+          {/* Search */}
+          <div
+            className="rounded-2xl p-4 space-y-3"
+            style={{
+              background: "var(--card)",
+              border: "1px solid var(--border)",
+            }}
+          >
+            <div className="relative">
+              <Search
+                className="absolute left-4 top-1/2 -translate-y-1/2 size-4"
+                style={{ color: "var(--outline)" }}
+              />
+              <input
+                placeholder="Search knowledge graph..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+                className="w-full h-12 rounded-xl pl-11 pr-4 text-sm placeholder:text-outline-variant outline-none focus:ring-2 focus:ring-primary/50 transition-all"
+                style={{
+                  background: "var(--surface-container-high)",
+                  border: "1px solid var(--outline-variant)",
+                }}
+              />
+            </div>
+            <button
+              onClick={handleSearch}
+              disabled={loading}
+              className="w-full h-12 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90 disabled:opacity-50"
+              style={{ background: "var(--primary)" }}
+            >
+              {loading ? "Searching..." : "Search"}
+            </button>
+          </div>
+        </div>
+
+        {/* Right column — graph + search results */}
+        <div className="lg:col-span-2 space-y-6">
+          {/* Graph canvas */}
+          <div
+            className="rounded-2xl overflow-hidden"
+            style={{
+              background: "var(--card)",
+              border: "1px solid var(--border)",
+            }}
+          >
+            <div className="h-[400px] lg:h-[calc(100dvh-14rem)]">
+              {displayGraph ? (
+                <GraphCanvas data={displayGraph} onExpandNode={handleExpandNode} />
+              ) : loading ? (
+                <Skeleton className="h-full w-full rounded-none" />
+              ) : (
+                <div className="flex items-center justify-center h-full">
+                  <p style={{ color: "var(--muted-foreground)" }}>No graph data available</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Search results — shown below graph when present */}
+          {searchResults.length > 0 && (
+            <div className="space-y-2">
+              <h3 className="text-sm font-semibold" style={{ color: "var(--muted-foreground)" }}>
+                Search Results ({searchResults.length})
+              </h3>
+              {searchResults.map((result, index) => (
+                <div
+                  key={`${result.source}-${index}-${result.score}`}
+                  className="rounded-2xl p-4"
+                  style={{
+                    background: "var(--card)",
+                    border: "1px solid var(--border)",
+                  }}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-[#323235cc] whitespace-pre-wrap">
+                        {result.content}
                       </p>
-                    )}
-                  </div>
-                  <div className="flex flex-col items-end gap-1.5 shrink-0">
-                    <span
-                      className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium"
-                      style={SOURCE_COLORS[result.source] || SOURCE_COLORS.hybrid}
-                    >
-                      {result.source}
-                    </span>
-                    <span className="text-xs" style={{ color: "rgba(255,255,255,0.4)" }}>
-                      {(result.score * 100).toFixed(1)}%
-                    </span>
+                      {result.metadata && (
+                        <p className="text-xs mt-2" style={{ color: "var(--outline)" }}>
+                          {JSON.stringify(result.metadata)}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex flex-col items-end gap-1.5 shrink-0">
+                      <span
+                        className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium"
+                        style={SOURCE_COLORS[result.source] || SOURCE_COLORS.hybrid}
+                      >
+                        {result.source}
+                      </span>
+                      <span className="text-xs" style={{ color: "var(--muted-foreground)" }}>
+                        {(result.score * 100).toFixed(1)}%
+                      </span>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))
+              ))}
+            </div>
           )}
         </div>
-      )}
+      </div>
     </div>
   );
+}
+
+/**
+ * Merge two graph visualizations, deduplicating nodes and edges.
+ */
+function mergeGraphs(
+  base: GraphVisualization | null,
+  overlay: GraphVisualization
+): GraphVisualization {
+  if (!base) return overlay;
+
+  const nodeMap = new Map(base.nodes.map((n) => [n.id, n]));
+  for (const n of overlay.nodes) {
+    if (!nodeMap.has(n.id)) nodeMap.set(n.id, n);
+  }
+
+  const edgeSet = new Set(
+    base.edges.map((e) => `${e.source}:${e.target}:${e.label}`)
+  );
+  const mergedEdges = [...base.edges];
+  for (const e of overlay.edges) {
+    const key = `${e.source}:${e.target}:${e.label}`;
+    if (!edgeSet.has(key)) {
+      edgeSet.add(key);
+      mergedEdges.push(e);
+    }
+  }
+
+  return {
+    nodes: Array.from(nodeMap.values()),
+    edges: mergedEdges,
+    total_nodes: Math.max(base.total_nodes, overlay.total_nodes),
+    total_edges: Math.max(base.total_edges, overlay.total_edges),
+  };
 }

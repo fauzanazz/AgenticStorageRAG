@@ -8,17 +8,18 @@ interface DocumentListProps {
   documents: Document[];
   isLoading: boolean;
   onDelete: (id: string) => void;
+  showSource?: boolean;
 }
 
 const STATUS_CONFIG: Record<
   DocumentStatus,
   { label: string; bg: string; color: string }
 > = {
-  uploading: { label: "Uploading", bg: "rgba(59,130,246,0.15)", color: "#60A5FA" },
-  processing: { label: "Processing", bg: "rgba(245,158,11,0.15)", color: "#FBBF24" },
-  ready: { label: "Ready", bg: "rgba(34,197,94,0.15)", color: "#4ADE80" },
-  failed: { label: "Failed", bg: "rgba(239,68,68,0.15)", color: "#FCA5A5" },
-  expired: { label: "Expired", bg: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.4)" },
+  uploading: { label: "Uploading", bg: "#e3f2fd", color: "#1565c0" },
+  processing: { label: "Processing", bg: "#fff3e0", color: "#e65100" },
+  ready: { label: "Ready", bg: "#e8f5e9", color: "#2e7d32" },
+  failed: { label: "Failed", bg: "#fce4ec", color: "#9e3f4e" },
+  expired: { label: "Expired", bg: "#f0edef", color: "#7b7a7d" },
 };
 
 function StatusBadge({ status }: { status: DocumentStatus }) {
@@ -52,6 +53,7 @@ export function DocumentList({
   documents,
   isLoading,
   onDelete,
+  showSource = false,
 }: DocumentListProps) {
   if (isLoading) {
     return (
@@ -67,13 +69,13 @@ export function DocumentList({
     return (
       <div
         className="flex flex-col items-center justify-center rounded-2xl py-12 text-center"
-        style={{ border: "2px dashed rgba(255,255,255,0.08)" }}
+        style={{ border: "2px dashed var(--outline-variant)" }}
       >
-        <FileText className="mb-3 size-10" style={{ color: "rgba(255,255,255,0.2)" }} />
-        <p className="text-sm font-medium" style={{ color: "rgba(255,255,255,0.4)" }}>
+        <FileText className="mb-3 size-10" style={{ color: "var(--outline-variant)" }} />
+        <p className="text-sm font-medium" style={{ color: "var(--muted-foreground)" }}>
           No documents yet
         </p>
-        <p className="mt-1 text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>
+        <p className="mt-1 text-xs" style={{ color: "var(--outline)" }}>
           Upload a PDF or DOCX to get started
         </p>
       </div>
@@ -85,24 +87,24 @@ export function DocumentList({
       {documents.map((doc) => (
         <div
           key={doc.id}
-          className="flex items-center justify-between rounded-2xl px-4 py-3 transition-all hover:bg-white/[0.02]"
+          className="flex items-center justify-between rounded-2xl px-4 py-3 transition-all hover:bg-black/[0.03]"
           style={{
-            background: "rgba(255,255,255,0.03)",
-            border: "1px solid rgba(255,255,255,0.06)",
+            background: "var(--card)",
+            border: "1px solid var(--border)",
           }}
         >
           <div className="flex items-center gap-3 min-w-0">
             <div
               className="flex size-10 shrink-0 items-center justify-center rounded-xl"
-              style={{ background: "rgba(99,102,241,0.12)" }}
+              style={{ background: "var(--accent)" }}
             >
-              <FileText className="size-5" style={{ color: "#818CF8" }} />
+              <FileText className="size-5" style={{ color: "var(--primary)" }} />
             </div>
             <div className="min-w-0">
-              <p className="truncate text-sm font-medium text-white">
+              <p className="truncate text-sm font-medium">
                 {doc.filename}
               </p>
-              <p className="flex items-center gap-2 text-xs" style={{ color: "rgba(255,255,255,0.4)" }}>
+              <p className="flex items-center gap-2 text-xs" style={{ color: "var(--muted-foreground)" }}>
                 <span>{formatFileSize(doc.file_size)}</span>
                 <span>-</span>
                 <span>{formatDate(doc.uploaded_at)}</span>
@@ -120,8 +122,8 @@ export function DocumentList({
             <button
               onClick={() => onDelete(doc.id)}
               title="Delete document"
-              className="rounded-lg p-1.5 transition-colors hover:bg-white/5"
-              style={{ color: "rgba(255,255,255,0.3)" }}
+              className="rounded-lg p-1.5 transition-colors hover:bg-black/5"
+              style={{ color: "var(--outline)" }}
             >
               <Trash2 className="size-4" />
             </button>
