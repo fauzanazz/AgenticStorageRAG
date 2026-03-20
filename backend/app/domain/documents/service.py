@@ -28,6 +28,9 @@ from app.domain.documents.schemas import (
     DocumentListResponse,
     DocumentResponse,
     DocumentUploadResponse,
+    DriveFileNode,
+    DriveFolderNode,
+    DriveTreeResponse,
     ProcessingResult,
 )
 from app.infra.storage import StorageClient
@@ -323,20 +326,30 @@ class DocumentService:
         user_id: uuid.UUID,
         page: int = 1,
         page_size: int = 20,
+        source: str | None = None,
     ) -> DocumentListResponse:
-        """List documents for a user with pagination."""
+        """List documents for a user with pagination.
+
+        Args:
+            source: Optional filter — 'upload' or 'google_drive'.
+        """
         offset = (page - 1) * page_size
+
+        # Build base filters
+        filters = [Document.user_id == user_id]
+        if source:
+            filters.append(Document.source == source)
 
         # Count total
         count_result = await self._db.execute(
-            select(func.count()).where(Document.user_id == user_id)
+            select(func.count()).where(*filters)
         )
         total = count_result.scalar() or 0
 
         # Fetch page
         result = await self._db.execute(
             select(Document)
-            .where(Document.user_id == user_id)
+            .where(*filters)
             .order_by(Document.uploaded_at.desc())
             .offset(offset)
             .limit(page_size)
@@ -484,4 +497,93 @@ class DocumentService:
             total_relationships=total_relationships,
             total_embeddings=total_embeddings,
             processing_documents=processing_docs,
+        )
+
+    async def get_drive_tree(self) -> DriveTreeResponse:
+        """Build a folder tree from indexed Drive files.
+
+        Deduplicates by drive_file_id (latest record wins) and organises
+        files into a nested folder structure based on folder_path.
+        """
+        from app.domain.ingestion.models import IndexedFile
+
+        # Deduplicate: latest record per drive_file_id
+        subq = (
+            select(
+                IndexedFile,
+                func.row_number()
+                .over(
+                    partition_by=IndexedFile.drive_file_id,
+                    order_by=IndexedFile.created_at.desc(),
+                )
+                .label("rn"),
+            )
+            .subquery()
+        )
+        result = await self._db.execute(
+            select(subq).where(subq.c.rn == 1)
+        )
+        rows = result.all()
+
+        # Build lookup of folders
+        folder_lookup: dict[str, DriveFolderNode] = {}
+        root = DriveFolderNode(name="Root", path="")
+        folder_lookup[""] = root
+
+        def get_or_create_folder(path: str) -> DriveFolderNode:
+            if path in folder_lookup:
+                return folder_lookup[path]
+            parts = path.split("/")
+            parent_path = "/".join(parts[:-1])
+            parent = get_or_create_folder(parent_path)
+            folder = DriveFolderNode(name=parts[-1], path=path)
+            parent.folders.append(folder)
+            folder_lookup[path] = folder
+            return folder
+
+        total_files = 0
+        processed_files = 0
+        scanned_files = 0
+
+        for row in rows:
+            folder = get_or_create_folder(row.folder_path)
+            file_node = DriveFileNode(
+                id=row.id,
+                drive_file_id=row.drive_file_id,
+                file_name=row.file_name,
+                mime_type=row.mime_type,
+                size_bytes=row.size_bytes,
+                folder_path=row.folder_path,
+                status=row.status,
+                document_id=row.document_id,
+                created_at=row.created_at,
+                processed_at=row.processed_at,
+            )
+            folder.files.append(file_node)
+            total_files += 1
+            if row.status == "completed":
+                processed_files += 1
+            scanned_files += 1
+
+        # Sort folders and files alphabetically, compute counts
+        def sort_and_count(node: DriveFolderNode) -> tuple[int, int]:
+            node.folders.sort(key=lambda f: f.name.lower())
+            node.files.sort(key=lambda f: f.file_name.lower())
+            t = len(node.files)
+            p = sum(1 for f in node.files if f.status == "completed")
+            for child in node.folders:
+                ct, cp = sort_and_count(child)
+                t += ct
+                p += cp
+            node.total_files = t
+            node.processed_files = p
+            return t, p
+
+        sort_and_count(root)
+
+        return DriveTreeResponse(
+            root=root,
+            total_files=total_files,
+            processed_files=processed_files,
+            scanned_files=scanned_files,
         )

@@ -22,6 +22,7 @@ from app.domain.documents.schemas import (
     DocumentListResponse,
     DocumentResponse,
     DocumentUploadResponse,
+    DriveTreeResponse,
 )
 from app.domain.documents.service import DocumentService
 from app.infra.storage import StorageClient
@@ -99,6 +100,7 @@ async def upload_document(
 async def list_documents(
     page: int = Query(1, ge=1, description="Page number (1-based)"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page (max 100)"),
+    source: str | None = Query(None, description="Filter by source: 'upload' or 'google_drive'"),
     user_id: uuid.UUID = Depends(get_current_user_id),
     service: DocumentService = Depends(_get_document_service),
 ) -> DocumentListResponse:
@@ -107,7 +109,20 @@ async def list_documents(
         user_id=user_id,
         page=page,
         page_size=page_size,
+        source=source,
     )
+
+
+@router.get(
+    "/drive-tree",
+    response_model=DriveTreeResponse,
+    summary="Get Drive documents as a folder tree",
+)
+async def get_drive_tree(
+    service: DocumentService = Depends(_get_document_service),
+) -> DriveTreeResponse:
+    """Return all indexed Drive files organised into a folder tree."""
+    return await service.get_drive_tree()
 
 
 @router.get(

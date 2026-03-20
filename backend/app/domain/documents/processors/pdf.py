@@ -1,54 +1,112 @@
-"""PDF document processor.
+"""PDF document processor — child-process-isolated extraction.
 
-Extracts text from PDF files using pymupdf4llm, which produces structured
-Markdown output — preserving headings, bold/italic, tables, and image
-references — making it significantly easier for LLMs to comprehend document
-structure and understand what images depict.
+The entire PDF text extraction pipeline (qpdf split + pdftotext) runs in
+a **separate Python child process** (`_pdf_worker.py`).  When the child
+exits, the OS reclaims ALL its memory — including CPython arena
+fragmentation from multi-GB text buffers.  The parent (Celery worker)
+only reads the final JSON result and stays lightweight (~350 MB).
 """
 
 from __future__ import annotations
 
 import asyncio
-import io
+import json
 import logging
+import os
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
 
-import fitz  # PyMuPDF
-import pymupdf4llm
-
-from app.domain.documents.processors.base import BaseProcessor
-from app.domain.documents.schemas import ChunkData, ProcessingResult
+from .base import BaseProcessor
+from app.domain.documents.schemas import ProcessingResult
 
 logger = logging.getLogger(__name__)
 
+# Path to the child worker script (same directory as this file)
+_WORKER_SCRIPT = str(Path(__file__).with_name("_pdf_worker.py"))
+
+# Maximum time (seconds) for the entire child process to finish.
+# 462-page PDFs with qpdf batching take ~2-3 min; give generous headroom.
+_CHILD_TIMEOUT = 600  # 10 minutes
+
+# Maximum extracted text size (characters) to load into the parent process.
+# The child worker also enforces this limit, but we double-check here.
+# 200K chars ≈ 50-70 pages of dense text — safe for chunking + embedding.
+_MAX_TEXT_CHARS = 200_000
+
 
 class PdfProcessor(BaseProcessor):
-    """Processor for PDF files.
-
-    Uses pymupdf4llm to convert each page to Markdown, preserving document
-    structure (headings, tables, bold/italic) and inserting image references
-    with alt-text so the LLM understands what images contain.
-
-    Chunking is done per page so every chunk's page_number is exact.
-    """
+    """Process PDF files by spawning an isolated child Python process."""
 
     @property
     def supported_types(self) -> list[str]:
         return ["application/pdf", "pdf", ".pdf"]
 
-    async def extract_text(self, file_content: bytes) -> str:
-        """Extract all pages as a single Markdown string.
+    def _run_worker(self, file_content: bytes) -> dict:
+        """Spawn the child worker and return the parsed JSON result.
 
-        Args:
-            file_content: Raw PDF bytes.
-
-        Returns:
-            Full document text in Markdown format.
+        Raises on timeout or non-zero exit. Returns the parsed dict on success.
         """
-        doc = fitz.open(stream=io.BytesIO(file_content), filetype="pdf")
+        tmp_pdf = None
+        result_file = None
         try:
-            return await asyncio.to_thread(pymupdf4llm.to_markdown, doc)
+            # Write PDF bytes to a temp file
+            fd, tmp_pdf = tempfile.mkstemp(suffix=".pdf")
+            os.write(fd, file_content)
+            os.close(fd)
+
+            # Prepare a temp file for the child to write its JSON result
+            fd2, result_file = tempfile.mkstemp(suffix=".json")
+            os.close(fd2)
+
+            logger.info(
+                "PDF processor: spawning child process for %s (%s)",
+                tmp_pdf,
+                _format_size(os.path.getsize(tmp_pdf)),
+            )
+            proc = subprocess.run(
+                [sys.executable, _WORKER_SCRIPT, tmp_pdf, result_file],
+                capture_output=True,
+                timeout=_CHILD_TIMEOUT,
+            )
+
+            if proc.returncode != 0:
+                stderr = proc.stderr.decode(errors="replace")[:2000]
+                raise RuntimeError(f"PDF extraction failed (rc={proc.returncode}): {stderr[:500]}")
+
+            with open(result_file, "r") as f:
+                data = json.load(f)
+
+            # Truncate text immediately to prevent OOM in the parent process.
+            # Large PDFs (500+ pages) can produce multi-MB text strings that
+            # explode memory during chunking and embedding.
+            text = data.get("text", "")
+            if len(text) > _MAX_TEXT_CHARS:
+                logger.warning(
+                    "PDF text truncated from %d to %d chars (%d pages)",
+                    len(text), _MAX_TEXT_CHARS, data.get("page_count", 0),
+                )
+                data["text"] = text[:_MAX_TEXT_CHARS]
+                del text  # free the original large string
+
+            return data
         finally:
-            doc.close()
+            for path in (tmp_pdf, result_file):
+                if path:
+                    try:
+                        os.unlink(path)
+                    except OSError:
+                        pass
+
+    async def extract_text(self, file_content: bytes) -> str:
+        """Extract raw text from a PDF via child process."""
+        try:
+            data = await asyncio.to_thread(self._run_worker, file_content)
+            return data.get("text", "")
+        except Exception as exc:
+            logger.exception("PDF text extraction failed: %s", exc)
+            return ""
 
     async def process(
         self,
@@ -56,65 +114,63 @@ class PdfProcessor(BaseProcessor):
         chunk_size: int = 1000,
         chunk_overlap: int = 200,
     ) -> ProcessingResult:
-        """Process a PDF into Markdown chunks with per-page tracking.
+        """Extract text from a PDF in a memory-isolated child process."""
+        try:
+            data = await asyncio.to_thread(self._run_worker, file_content)
 
-        Each page is converted to Markdown independently by pymupdf4llm
-        (page_chunks=True), then chunked so that page_number on every
-        chunk is exact and citations are accurate.
-        """
-        def _parse_pdf() -> tuple[list[dict], int]:
-            doc = fitz.open(stream=io.BytesIO(file_content), filetype="pdf")
-            try:
-                page_dicts: list[dict] = pymupdf4llm.to_markdown(doc, page_chunks=True)  # type: ignore[assignment]
-                return page_dicts, len(doc)
-            finally:
-                doc.close()
+            text = data.get("text", "")
+            page_count = data.get("page_count", 0)
+            title = data.get("title", "")
+            author = data.get("author", "")
 
-        page_dicts, page_count = await asyncio.to_thread(_parse_pdf)
+            if not text.strip():
+                logger.warning("PDF child process produced empty text")
+                return ProcessingResult(
+                    chunks=[],
+                    metadata={"page_count": page_count},
+                    page_count=page_count,
+                )
 
-        all_chunks: list[ChunkData] = []
-        total_chars = 0
+            chunks = self._split_text(text, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+            metadata: dict = {"page_count": page_count}
+            if title:
+                metadata["title"] = title
+            if author:
+                metadata["author"] = author
 
-        # Pull document-level metadata from the first page's metadata block
-        metadata: dict = {"format": "pdf", "page_count": page_count}
-        if page_dicts:
-            first_meta = page_dicts[0].get("metadata", {})
-            if first_meta.get("title"):
-                metadata["title"] = first_meta["title"]
-            if first_meta.get("author"):
-                metadata["author"] = first_meta["author"]
-
-        for page_dict in page_dicts:
-            page_md: str = page_dict.get("text", "")
-            if not page_md.strip():
-                continue
-
-            # page index in metadata is 0-based; we store 1-based for humans
-            page_number: int = page_dict.get("metadata", {}).get("page", 0) + 1
-
-            total_chars += len(page_md)
-            page_chunks = self._split_text(
-                page_md,
-                chunk_size=chunk_size,
-                chunk_overlap=chunk_overlap,
-                page_number=page_number,
+            logger.info(
+                "PDF processed: %d pages, %d chars, %d chunks",
+                page_count,
+                len(text),
+                len(chunks),
             )
-            all_chunks.extend(page_chunks)
+            return ProcessingResult(
+                chunks=chunks,
+                metadata=metadata,
+                page_count=page_count,
+                total_characters=len(text),
+            )
 
-        # Re-index chunks globally across all pages
-        for i, chunk in enumerate(all_chunks):
-            chunk.chunk_index = i
+        except subprocess.TimeoutExpired:
+            logger.error(
+                "PDF child process timed out after %ds", _CHILD_TIMEOUT
+            )
+            return ProcessingResult(
+                chunks=[],
+                metadata={"error": f"PDF extraction timed out after {_CHILD_TIMEOUT}s"},
+            )
+        except Exception as exc:
+            logger.exception("PDF processing failed: %s", exc)
+            return ProcessingResult(
+                chunks=[],
+                metadata={"error": str(exc)[:500]},
+            )
 
-        logger.info(
-            "PDF processed: %d pages, %d chunks, %d chars",
-            page_count,
-            len(all_chunks),
-            total_chars,
-        )
 
-        return ProcessingResult(
-            chunks=all_chunks,
-            metadata=metadata,
-            page_count=page_count,
-            total_characters=total_chars,
-        )
+def _format_size(size_bytes: int | float) -> str:
+    """Human-readable file size."""
+    for unit in ("B", "KB", "MB", "GB"):
+        if size_bytes < 1024:
+            return f"{size_bytes:.1f} {unit}"
+        size_bytes /= 1024
+    return f"{size_bytes:.1f} TB"

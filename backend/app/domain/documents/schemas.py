@@ -100,3 +100,44 @@ class DashboardStatsResponse(BaseModel):
     total_relationships: int = 0
     total_embeddings: int = 0
     processing_documents: int = 0
+
+
+class DriveFileNode(BaseModel):
+    """A single indexed file from Google Drive."""
+
+    id: uuid.UUID
+    drive_file_id: str
+    file_name: str
+    mime_type: str
+    size_bytes: int | None
+    folder_path: str
+    status: str  # pending | processing | completed | failed | skipped
+    document_id: uuid.UUID | None
+    created_at: datetime
+    processed_at: datetime | None
+
+    model_config = {"from_attributes": True}
+
+
+class DriveFolderNode(BaseModel):
+    """A folder node in the Drive tree."""
+
+    name: str
+    path: str  # full path e.g. "Informatika/Semester 3"
+    folders: list[DriveFolderNode] = []
+    files: list[DriveFileNode] = []
+    total_files: int = 0
+    processed_files: int = 0
+
+
+class DriveTreeResponse(BaseModel):
+    """Full Drive folder tree with file status info."""
+
+    root: DriveFolderNode
+    total_files: int
+    processed_files: int
+    scanned_files: int
+
+
+# Fix forward reference for DriveFolderNode
+DriveFolderNode.model_rebuild()
