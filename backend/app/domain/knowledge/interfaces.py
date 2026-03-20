@@ -80,6 +80,46 @@ class IGraphService(ABC):
         """Delete all entities and relationships for a document."""
         ...
 
+    async def batch_create_entities(
+        self,
+        entities: list[EntityCreate],
+    ) -> tuple[int, dict[str, uuid.UUID]]:
+        """Bulk-create entities. Returns (count, name_lower -> entity_id map)."""
+        # Default: sequential fallback
+        entity_map: dict[str, uuid.UUID] = {}
+        for entity in entities:
+            try:
+                resp = await self.create_entity(entity)
+                entity_map[entity.name.lower()] = resp.id
+            except Exception:
+                pass
+        return len(entity_map), entity_map
+
+    async def batch_create_relationships(
+        self,
+        raw_relationships: list[dict[str, str]],
+        entity_map: dict[str, uuid.UUID],
+        document_id: uuid.UUID,
+    ) -> int:
+        """Bulk-create relationships. Returns count created."""
+        count = 0
+        for rel in raw_relationships:
+            source_id = entity_map.get(rel.get("source", "").lower())
+            target_id = entity_map.get(rel.get("target", "").lower())
+            if source_id and target_id and source_id != target_id:
+                try:
+                    await self.create_relationship(RelationshipCreate(
+                        source_entity_id=source_id,
+                        target_entity_id=target_id,
+                        relationship_type=rel.get("type", "RELATED_TO"),
+                        properties={"description": rel["description"]} if rel.get("description") else None,
+                        source_document_id=document_id,
+                    ))
+                    count += 1
+                except Exception:
+                    pass
+        return count
+
 
 class IVectorService(ABC):
     """Interface for vector embedding operations (pgvector)."""

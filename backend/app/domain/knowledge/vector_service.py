@@ -6,6 +6,7 @@ search using PostgreSQL with pgvector extension.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -128,19 +129,23 @@ class VectorService(IVectorService):
 
             embedding_vector = query_embedding[0]
 
+            # Format as pgvector literal: '[0.1,0.2,...]'
+            vec_literal = "[" + ",".join(str(v) for v in embedding_vector) + "]"
+
             # Build pgvector similarity query
             # Uses cosine distance: 1 - (a <=> b) gives cosine similarity
+            # The embedding column is ARRAY(Float) so we cast both sides to vector
             query_parts = [
-                """
+                r"""
                 SELECT
                     id, chunk_id, document_id, content, metadata_json,
-                    1 - (embedding <=> :query_vec::vector) AS similarity
+                    1 - (embedding\:\:vector <=> :query_vec\:\:vector) AS similarity
                 FROM document_embeddings
                 WHERE embedding IS NOT NULL
                 """
             ]
             params: dict[str, Any] = {
-                "query_vec": str(embedding_vector),
+                "query_vec": vec_literal,
                 "top_k": request.top_k,
                 "threshold": request.similarity_threshold,
             }
@@ -149,8 +154,8 @@ class VectorService(IVectorService):
                 query_parts.append("AND document_id = :doc_id")
                 params["doc_id"] = str(request.document_id)
 
-            query_parts.append("AND 1 - (embedding <=> :query_vec::vector) >= :threshold")
-            query_parts.append("ORDER BY embedding <=> :query_vec::vector")
+            query_parts.append(r"AND 1 - (embedding\:\:vector <=> :query_vec\:\:vector) >= :threshold")
+            query_parts.append(r"ORDER BY embedding\:\:vector <=> :query_vec\:\:vector")
             query_parts.append("LIMIT :top_k")
 
             full_query = "\n".join(query_parts)
@@ -174,6 +179,7 @@ class VectorService(IVectorService):
 
         except Exception as e:
             logger.error("Vector search failed: %s", e)
+            await self._db.rollback()
             raise EmbeddingError(f"Vector search failed: {e}") from e
 
     async def delete_document_embeddings(
@@ -201,20 +207,42 @@ class VectorService(IVectorService):
         Uses the model configured by the EMBEDDING_MODEL setting.
         Supports any provider that LiteLLM supports, including OpenAI,
         Google Gemini (``gemini/text-embedding-004``), and DashScope.
+
+        Retries up to 3 times with exponential backoff (1s, 2s) on failure.
         """
-        try:
-            response = await litellm.aembedding(
-                model=self._embedding_model,
-                input=texts,
-            )
+        max_attempts = 3
+        last_exc: Exception | None = None
 
-            return [item["embedding"] for item in response.data]
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = await litellm.aembedding(
+                    model=self._embedding_model,
+                    input=texts,
+                )
+                return [item["embedding"] for item in response.data]
 
-        except Exception as e:
-            logger.error("Embedding generation failed: %s", e)
-            raise EmbeddingError(
-                f"Failed to generate embeddings: {e}"
-            ) from e
+            except Exception as e:
+                last_exc = e
+                if attempt < max_attempts:
+                    wait = 2 ** (attempt - 1)  # 1s, 2s
+                    logger.warning(
+                        "Embedding generation attempt %d/%d failed: %s. "
+                        "Retrying in %ds...",
+                        attempt,
+                        max_attempts,
+                        e,
+                        wait,
+                    )
+                    await asyncio.sleep(wait)
+
+        logger.error(
+            "Embedding generation failed after %d attempts: %s",
+            max_attempts,
+            last_exc,
+        )
+        raise EmbeddingError(
+            f"Failed to generate embeddings after {max_attempts} attempts: {last_exc}"
+        ) from last_exc
 
 
 def _estimate_tokens(text: str) -> int:

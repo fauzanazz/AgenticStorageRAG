@@ -145,7 +145,8 @@ async def hybrid_search(
 async def get_graph(
     document_id: uuid.UUID | None = Query(None),
     entity_types: str | None = Query(None, description="Comma-separated entity types"),
-    limit: int = Query(100, ge=1, le=500),
+    limit: int = Query(500, ge=1, le=5000),
+    source: str | None = Query(None, description="Filter by document source: 'upload' or 'google_drive'"),
     user: User = Depends(get_current_user),
     graph: GraphService = Depends(_get_graph_service),
 ) -> GraphVisualization:
@@ -156,7 +157,25 @@ async def get_graph(
             document_id=document_id,
             entity_types=types_list,
             limit=limit,
+            source=source,
         )
+    except KnowledgeBaseError as e:
+        raise HTTPException(status_code=500, detail=e.message) from e
+
+
+@router.get("/entities/{entity_id}/neighbors", response_model=GraphVisualization)
+async def get_entity_neighbors(
+    entity_id: uuid.UUID,
+    depth: int = Query(1, ge=1, le=3),
+    limit: int = Query(50, ge=1, le=200),
+    user: User = Depends(get_current_user),
+    graph: GraphService = Depends(_get_graph_service),
+) -> GraphVisualization:
+    """Get neighboring nodes and edges for a given entity (for graph expansion)."""
+    try:
+        return await graph.get_entity_neighbors(entity_id, depth=depth, limit=limit)
+    except EntityNotFoundError as e:
+        raise HTTPException(status_code=404, detail=e.message) from e
     except KnowledgeBaseError as e:
         raise HTTPException(status_code=500, detail=e.message) from e
 

@@ -140,14 +140,14 @@ class GraphService(IGraphService):
                 labels = " OR ".join(
                     f"n:{_sanitize_label(t)}" for t in request.entity_types
                 )
-                type_filter = f"WHERE ({labels})"
+                type_filter = f"AND ({labels})"
 
-            query = f"""
+            cypher = f"""
                 MATCH (n)
+                WHERE (n.name CONTAINS $search_term OR n.description CONTAINS $search_term)
                 {type_filter}
-                WHERE n.name CONTAINS $query OR n.description CONTAINS $query
-                WITH n, 
-                     CASE WHEN n.name CONTAINS $query THEN 2 ELSE 1 END AS score
+                WITH n,
+                     CASE WHEN n.name CONTAINS $search_term THEN 2 ELSE 1 END AS score
                 ORDER BY score DESC
                 LIMIT $limit
                 OPTIONAL MATCH (n)-[r]-(m)
@@ -155,8 +155,8 @@ class GraphService(IGraphService):
             """
 
             records = await self._neo4j.execute_read(
-                query,
-                {"query": request.query, "limit": request.top_k},
+                cypher,
+                {"search_term": request.query, "limit": request.top_k},
             )
 
             results = []
@@ -296,18 +296,187 @@ class GraphService(IGraphService):
             logger.error("Failed to create relationship: %s", e)
             raise GraphBuildError(f"Failed to create relationship: {e}") from e
 
+    async def batch_create_entities(
+        self,
+        entities: list[EntityCreate],
+    ) -> tuple[int, dict[str, uuid.UUID]]:
+        """Create entities in bulk: single Neo4j transaction + batched PG inserts.
+
+        Returns (count_created, name_lower -> entity_id map).
+        """
+        if not entities:
+            return 0, {}
+
+        entity_map: dict[str, uuid.UUID] = {}
+        neo4j_queries: list[tuple[str, dict[str, Any]]] = []
+        pg_objects: list[KnowledgeEntity] = []
+
+        for entity in entities:
+            neo4j_id = str(uuid.uuid4())
+            properties: dict[str, Any] = {
+                "neo4j_id": neo4j_id,
+                "name": entity.name,
+                "entity_type": entity.entity_type,
+            }
+            if entity.description:
+                properties["description"] = entity.description
+            if entity.properties:
+                properties["properties_json"] = json.dumps(entity.properties)
+
+            label = _sanitize_label(entity.entity_type)
+            neo4j_queries.append((
+                f"CREATE (n:Entity:{label} $props) RETURN n",
+                {"props": properties},
+            ))
+
+            db_entity = KnowledgeEntity(
+                neo4j_id=neo4j_id,
+                entity_type=entity.entity_type,
+                name=entity.name,
+                description=entity.description,
+                properties_json=json.dumps(entity.properties) if entity.properties else None,
+                source_document_id=entity.source_document_id,
+            )
+            pg_objects.append(db_entity)
+
+        # Batch Neo4j write (single transaction)
+        try:
+            await self._neo4j.execute_write_batch(neo4j_queries)
+        except Exception as e:
+            logger.error("Batch Neo4j entity creation failed: %s", e)
+            return 0, {}
+
+        # Batch PG insert
+        for obj in pg_objects:
+            self._db.add(obj)
+        await self._db.flush()
+
+        # Build map from flushed objects (now have IDs)
+        for obj in pg_objects:
+            entity_map[obj.name.lower()] = obj.id
+
+        logger.info("Batch-created %d entities", len(pg_objects))
+        return len(pg_objects), entity_map
+
+    async def batch_create_relationships(
+        self,
+        raw_relationships: list[dict[str, str]],
+        entity_map: dict[str, uuid.UUID],
+        document_id: uuid.UUID,
+    ) -> int:
+        """Create relationships in bulk: single Neo4j transaction + batched PG inserts.
+
+        Returns count of relationships created.
+        """
+        if not raw_relationships or not entity_map:
+            return 0
+
+        # Resolve entity names to IDs and neo4j_ids, filtering unresolvable
+        # We need the neo4j_id for each entity to create Neo4j relationships
+        entity_ids = list(set(entity_map.values()))
+        if not entity_ids:
+            return 0
+
+        # Fetch neo4j_ids for all entities in one query
+        from sqlalchemy import select as sa_select
+        result = await self._db.execute(
+            sa_select(KnowledgeEntity.id, KnowledgeEntity.neo4j_id, KnowledgeEntity.name)
+            .where(KnowledgeEntity.id.in_(entity_ids))
+        )
+        rows = result.all()
+        id_to_neo4j: dict[uuid.UUID, str] = {r[0]: r[1] for r in rows}
+
+        neo4j_queries: list[tuple[str, dict[str, Any]]] = []
+        pg_objects: list[KnowledgeRelationship] = []
+
+        for rel in raw_relationships:
+            source_name = rel.get("source", "").lower()
+            target_name = rel.get("target", "").lower()
+
+            source_id = entity_map.get(source_name)
+            target_id = entity_map.get(target_name)
+
+            if not source_id or not target_id or source_id == target_id:
+                continue
+
+            source_neo4j = id_to_neo4j.get(source_id)
+            target_neo4j = id_to_neo4j.get(target_id)
+            if not source_neo4j or not target_neo4j:
+                continue
+
+            neo4j_id = str(uuid.uuid4())
+            rel_type = _sanitize_label(rel.get("type", "RELATED_TO"))
+            props: dict[str, Any] = {"neo4j_id": neo4j_id, "weight": 1.0}
+            if rel.get("description"):
+                props["properties_json"] = json.dumps({"description": rel["description"]})
+
+            neo4j_queries.append((
+                f"""
+                MATCH (a {{neo4j_id: $source_id}}), (b {{neo4j_id: $target_id}})
+                CREATE (a)-[r:{rel_type} $props]->(b)
+                RETURN r
+                """,
+                {
+                    "source_id": source_neo4j,
+                    "target_id": target_neo4j,
+                    "props": props,
+                },
+            ))
+
+            rel_properties = {"description": rel["description"]} if rel.get("description") else None
+            db_rel = KnowledgeRelationship(
+                neo4j_id=neo4j_id,
+                relationship_type=rel.get("type", "RELATED_TO"),
+                source_entity_id=source_id,
+                target_entity_id=target_id,
+                properties_json=json.dumps(rel_properties) if rel_properties else None,
+                weight=1.0,
+                source_document_id=document_id,
+            )
+            pg_objects.append(db_rel)
+
+        if not neo4j_queries:
+            return 0
+
+        # Batch Neo4j write (single transaction)
+        try:
+            await self._neo4j.execute_write_batch(neo4j_queries)
+        except Exception as e:
+            logger.error("Batch Neo4j relationship creation failed: %s", e)
+            return 0
+
+        # Batch PG insert
+        for obj in pg_objects:
+            self._db.add(obj)
+        await self._db.flush()
+
+        logger.info("Batch-created %d relationships", len(pg_objects))
+        return len(pg_objects)
+
     async def get_graph_visualization(
         self,
         document_id: uuid.UUID | None = None,
         entity_types: list[str] | None = None,
         limit: int = 100,
+        source: str | None = None,
     ) -> GraphVisualization:
-        """Get graph data formatted for visualization."""
+        """Get graph data formatted for visualization.
+
+        Args:
+            source: Optional filter — 'upload' or 'google_drive'. Filters
+                    entities by the source of their parent document.
+        """
         try:
             # Build entity query
             stmt = select(KnowledgeEntity)
             if document_id:
                 stmt = stmt.where(KnowledgeEntity.source_document_id == document_id)
+            if source:
+                from app.domain.documents.models import Document
+                stmt = stmt.join(
+                    Document,
+                    KnowledgeEntity.source_document_id == Document.id,
+                ).where(Document.source == source)
             if entity_types:
                 stmt = stmt.where(KnowledgeEntity.entity_type.in_(entity_types))
             stmt = stmt.limit(limit)
@@ -362,6 +531,114 @@ class GraphService(IGraphService):
         except Exception as e:
             logger.error("Failed to get graph visualization: %s", e)
             raise GraphQueryError(f"Failed to get visualization: {e}") from e
+
+    async def get_entity_neighbors(
+        self,
+        entity_id: uuid.UUID,
+        depth: int = 1,
+        limit: int = 50,
+    ) -> GraphVisualization:
+        """Get neighboring entities and relationships for graph expansion."""
+        try:
+            entity = await self._db.get(KnowledgeEntity, entity_id)
+            if not entity:
+                raise EntityNotFoundError(str(entity_id))
+
+            # Find neighbors via Neo4j traversal
+            records = await self._neo4j.execute_read(
+                """
+                MATCH path = (start {neo4j_id: $neo4j_id})-[*1..""" + str(depth) + """]->(neighbor)
+                WITH DISTINCT neighbor
+                LIMIT $limit
+                RETURN collect(neighbor.neo4j_id) AS neighbor_ids
+                """,
+                {"neo4j_id": entity.neo4j_id, "limit": limit},
+            )
+
+            # Collect all neighbor neo4j_ids
+            neighbor_neo4j_ids: list[str] = []
+            if records:
+                neighbor_neo4j_ids = records[0].get("neighbor_ids", [])
+
+            # Also get undirected neighbors
+            records2 = await self._neo4j.execute_read(
+                """
+                MATCH (start {neo4j_id: $neo4j_id})<-[*1..""" + str(depth) + """]-(neighbor)
+                WITH DISTINCT neighbor
+                LIMIT $limit
+                RETURN collect(neighbor.neo4j_id) AS neighbor_ids
+                """,
+                {"neo4j_id": entity.neo4j_id, "limit": limit},
+            )
+            if records2:
+                neighbor_neo4j_ids.extend(records2[0].get("neighbor_ids", []))
+
+            # Deduplicate
+            neighbor_neo4j_ids = list(set(neighbor_neo4j_ids))
+
+            if not neighbor_neo4j_ids:
+                return GraphVisualization(
+                    nodes=[GraphNode(
+                        id=str(entity.id),
+                        label=entity.name,
+                        type=entity.entity_type,
+                        description=entity.description,
+                    )],
+                    edges=[],
+                    total_nodes=1,
+                    total_edges=0,
+                )
+
+            # Resolve neighbors from PostgreSQL
+            stmt = select(KnowledgeEntity).where(
+                KnowledgeEntity.neo4j_id.in_(neighbor_neo4j_ids)
+            )
+            result = await self._db.execute(stmt)
+            neighbors = result.scalars().all()
+
+            all_entities = [entity] + list(neighbors)
+            all_entity_ids = [e.id for e in all_entities]
+
+            # Get relationships between all these entities
+            rel_stmt = select(KnowledgeRelationship).where(
+                KnowledgeRelationship.source_entity_id.in_(all_entity_ids),
+                KnowledgeRelationship.target_entity_id.in_(all_entity_ids),
+            )
+            rel_result = await self._db.execute(rel_stmt)
+            relationships = rel_result.scalars().all()
+
+            nodes = [
+                GraphNode(
+                    id=str(e.id),
+                    label=e.name,
+                    type=e.entity_type,
+                    description=e.description,
+                )
+                for e in all_entities
+            ]
+
+            edges = [
+                GraphEdge(
+                    source=str(r.source_entity_id),
+                    target=str(r.target_entity_id),
+                    label=r.relationship_type,
+                    weight=r.weight,
+                )
+                for r in relationships
+            ]
+
+            return GraphVisualization(
+                nodes=nodes,
+                edges=edges,
+                total_nodes=len(nodes),
+                total_edges=len(edges),
+            )
+
+        except EntityNotFoundError:
+            raise
+        except Exception as e:
+            logger.error("Failed to get entity neighbors: %s", e)
+            raise GraphQueryError(f"Failed to get entity neighbors: {e}") from e
 
     async def get_stats(self) -> KnowledgeStats:
         """Get knowledge graph statistics."""

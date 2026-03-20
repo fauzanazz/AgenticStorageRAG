@@ -98,39 +98,22 @@ class TestBuildFromChunks:
         mock_response.choices[0].message.content = extraction_json
         mock_llm.complete.return_value = mock_response
 
-        now = datetime.now(timezone.utc)
-
-        # Mock entity creation returning proper IDs
         entity_id_1 = uuid.uuid4()
         entity_id_2 = uuid.uuid4()
 
-        mock_graph.create_entity.side_effect = [
-            EntityResponse(
-                id=entity_id_1,
-                neo4j_id="neo-1",
-                entity_type="Person",
-                name="John",
-                description="Employee",
-                created_at=now,
-                updated_at=now,
-            ),
-            EntityResponse(
-                id=entity_id_2,
-                neo4j_id="neo-2",
-                entity_type="Organization",
-                name="Acme Corp",
-                description="Company",
-                created_at=now,
-                updated_at=now,
-            ),
-        ]
+        # Mock batch_create_entities returning entity map
+        mock_graph.batch_create_entities.return_value = (
+            2,
+            {"john": entity_id_1, "acme corp": entity_id_2},
+        )
+        mock_graph.batch_create_relationships.return_value = 1
 
         result = await builder.build_from_chunks(chunks, doc_id)
 
         assert result["entities_created"] == 2
         assert result["relationships_created"] == 1
-        assert mock_graph.create_entity.call_count == 2
-        assert mock_graph.create_relationship.call_count == 1
+        mock_graph.batch_create_entities.assert_awaited_once()
+        mock_graph.batch_create_relationships.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_build_deduplicates_entities(
@@ -155,31 +138,31 @@ class TestBuildFromChunks:
         mock_response.choices[0].message.content = extraction
         mock_llm.complete.return_value = mock_response
 
-        now = datetime.now(timezone.utc)
-        mock_graph.create_entity.return_value = EntityResponse(
-            id=uuid.uuid4(),
-            neo4j_id="neo-1",
-            entity_type="Person",
-            name="John",
-            created_at=now,
-            updated_at=now,
+        mock_graph.batch_create_entities.return_value = (
+            1,
+            {"john": uuid.uuid4()},
         )
+        mock_graph.batch_create_relationships.return_value = 0
 
         result = await builder.build_from_chunks(chunks, doc_id)
 
-        # Entity "John:Person" should only be created once despite appearing in 2 chunks
+        # Entity "John:Person" should only appear once in the batch
         assert result["entities_created"] == 1
-        assert mock_graph.create_entity.call_count == 1
+        entities_arg = mock_graph.batch_create_entities.call_args[0][0]
+        assert len(entities_arg) == 1
 
     @pytest.mark.asyncio
     async def test_build_handles_llm_failure(
-        self, builder: KGBuilder, mock_llm: AsyncMock
+        self, builder: KGBuilder, mock_graph: AsyncMock, mock_llm: AsyncMock
     ) -> None:
         chunks = [
             {"id": uuid.uuid4(), "content": "Test content", "metadata": {}},
         ]
 
         mock_llm.complete.side_effect = Exception("LLM timeout")
+
+        mock_graph.batch_create_entities.return_value = (0, {})
+        mock_graph.batch_create_relationships.return_value = 0
 
         result = await builder.build_from_chunks(chunks, uuid.uuid4())
         assert result["entities_created"] == 0

@@ -7,6 +7,7 @@ then populates the Neo4j graph and PostgreSQL shadow records.
 from __future__ import annotations
 
 import asyncio
+import gc
 import json
 import logging
 import uuid
@@ -20,7 +21,11 @@ from app.infra.llm import LLMProvider
 logger = logging.getLogger(__name__)
 
 # Concurrent chunk extraction limit (avoid overwhelming the LLM API)
-_KG_CONCURRENCY = 5
+_KG_CONCURRENCY = 2
+
+# Process chunks in batches of this size to limit memory accumulation
+# from LiteLLM HTTP response caching and asyncio coroutine frames.
+_KG_BATCH_SIZE = 20
 
 # Prompt for entity/relationship extraction
 EXTRACTION_SYSTEM_PROMPT = """You are a knowledge graph extraction expert. Given a text chunk, extract entities and relationships.
@@ -59,8 +64,8 @@ class KGBuilder(IKGBuilder):
     Flow:
     1. Send each chunk to LLM for entity/relationship extraction
     2. Deduplicate entities by name + type
-    3. Create entities in graph
-    4. Create relationships between entities
+    3. Create entities in graph (batch Neo4j + bulk PG)
+    4. Create relationships between entities (batch Neo4j + bulk PG)
     """
 
     def __init__(
@@ -83,8 +88,11 @@ class KGBuilder(IKGBuilder):
         all_entities: dict[str, EntityCreate] = {}  # name:type -> entity
         all_relationships: list[dict[str, str]] = []
 
-        # Extract from all chunks concurrently (bounded by semaphore)
+        # Extract from chunks in batches to limit memory accumulation.
+        # LiteLLM HTTP response objects and asyncio coroutine frames
+        # grow unbounded with asyncio.gather(*all_500_coroutines).
         semaphore = asyncio.Semaphore(_KG_CONCURRENCY)
+        total = len(chunks)
 
         async def _extract_one(i: int, chunk: dict[str, Any]) -> dict[str, Any] | None:
             async with semaphore:
@@ -94,89 +102,66 @@ class KGBuilder(IKGBuilder):
                     logger.warning("Failed to extract from chunk %d: %s", i, e)
                     return None
 
-        extractions = await asyncio.gather(
-            *[_extract_one(i, chunk) for i, chunk in enumerate(chunks)],
-            return_exceptions=False,
-        )
+        for batch_start in range(0, total, _KG_BATCH_SIZE):
+            batch_end = min(batch_start + _KG_BATCH_SIZE, total)
+            batch = chunks[batch_start:batch_end]
 
-        for i, extraction in enumerate(extractions):
-            if not extraction:
-                continue
-
-            # Collect entities (deduplicate by name:type key)
-            for ent in extraction.get("entities", []):
-                try:
-                    key = f"{ent['name'].lower()}:{ent['type'].lower()}"
-                    if key not in all_entities:
-                        all_entities[key] = EntityCreate(
-                            name=ent["name"],
-                            entity_type=ent["type"],
-                            description=ent.get("description"),
-                            source_document_id=document_id,
-                        )
-                except (KeyError, AttributeError) as e:
-                    logger.warning("Malformed entity in chunk %d: %s", i, e)
-
-            # Collect relationships
-            for rel in extraction.get("relationships", []):
-                all_relationships.append(rel)
-
-            logger.debug(
-                "Extracted from chunk %d/%d: %d entities, %d relationships",
-                i + 1,
-                len(chunks),
-                len(extraction.get("entities", [])),
-                len(extraction.get("relationships", [])),
+            extractions = await asyncio.gather(
+                *[
+                    _extract_one(batch_start + j, chunk)
+                    for j, chunk in enumerate(batch)
+                ],
+                return_exceptions=False,
             )
 
-        # Create entities in graph
-        entity_map: dict[str, uuid.UUID] = {}  # name_lower -> entity ID
-        entities_created = 0
+            for j, extraction in enumerate(extractions):
+                if not extraction:
+                    continue
+                chunk_idx = batch_start + j
 
-        for entity_create in all_entities.values():
-            try:
-                entity_resp = await self._graph.create_entity(entity_create)
-                entity_map[entity_create.name.lower()] = entity_resp.id
-                entities_created += 1
-            except Exception as e:
-                logger.warning(
-                    "Failed to create entity '%s': %s",
-                    entity_create.name,
-                    e,
+                # Collect entities (deduplicate by name:type key)
+                for ent in extraction.get("entities", []):
+                    try:
+                        key = f"{ent['name'].lower()}:{ent['type'].lower()}"
+                        if key not in all_entities:
+                            all_entities[key] = EntityCreate(
+                                name=ent["name"],
+                                entity_type=ent["type"],
+                                description=ent.get("description"),
+                                source_document_id=document_id,
+                            )
+                    except (KeyError, AttributeError) as e:
+                        logger.warning("Malformed entity in chunk %d: %s", chunk_idx, e)
+
+                # Collect relationships
+                for rel in extraction.get("relationships", []):
+                    all_relationships.append(rel)
+
+                logger.debug(
+                    "Extracted from chunk %d/%d: %d entities, %d relationships",
+                    chunk_idx + 1,
+                    total,
+                    len(extraction.get("entities", [])),
+                    len(extraction.get("relationships", [])),
                 )
 
-        # Create relationships
-        relationships_created = 0
-        for rel in all_relationships:
-            source_name = rel.get("source", "").lower()
-            target_name = rel.get("target", "").lower()
+            # Free LLM response objects accumulated during this batch
+            del extractions
+            gc.collect()
 
-            source_id = entity_map.get(source_name)
-            target_id = entity_map.get(target_name)
+            logger.debug(
+                "KG extraction batch %d-%d/%d complete",
+                batch_start + 1, batch_end, total,
+            )
 
-            if source_id and target_id and source_id != target_id:
-                try:
-                    await self._graph.create_relationship(
-                        RelationshipCreate(
-                            source_entity_id=source_id,
-                            target_entity_id=target_id,
-                            relationship_type=rel.get("type", "RELATED_TO"),
-                            properties=(
-                                {"description": rel["description"]}
-                                if rel.get("description")
-                                else None
-                            ),
-                            source_document_id=document_id,
-                        )
-                    )
-                    relationships_created += 1
-                except Exception as e:
-                    logger.warning(
-                        "Failed to create relationship %s->%s: %s",
-                        rel.get("source"),
-                        rel.get("target"),
-                        e,
-                    )
+        # Batch-create entities and relationships
+        entities_created, entity_map = await self._graph.batch_create_entities(
+            list(all_entities.values()),
+        )
+
+        relationships_created = await self._graph.batch_create_relationships(
+            all_relationships, entity_map, document_id,
+        )
 
         logger.info(
             "KG built for document %s: %d entities, %d relationships",
