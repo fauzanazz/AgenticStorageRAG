@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { NarrativeStep } from "@/types/chat";
+import type { NarrativeStep, ToolResultItem } from "@/types/chat";
 
 interface ToolCallBlockProps {
   step: NarrativeStep;
@@ -53,12 +53,93 @@ function StatusIcon({ status }: { status: string | undefined }) {
   return null;
 }
 
+function ResultItem({ item }: { item: ToolResultItem }) {
+  const isGraph = !!item.entity_name;
+  const score = item.similarity ?? item.score ?? item.relevance;
+
+  if (isGraph) {
+    return (
+      <div
+        className="rounded-md border px-2.5 py-2"
+        style={{ borderColor: "var(--border)", background: "var(--surface-container-low)" }}
+      >
+        <div className="flex items-center gap-1.5">
+          <span className="font-medium" style={{ color: "var(--foreground)" }}>
+            {item.entity_name}
+          </span>
+          {item.entity_type && (
+            <span
+              className="rounded px-1 py-0.5 text-[10px]"
+              style={{ background: "var(--muted)", color: "var(--muted-foreground)" }}
+            >
+              {item.entity_type}
+            </span>
+          )}
+          {score != null && (
+            <span className="ml-auto text-[10px] tabular-nums" style={{ color: "var(--muted-foreground)" }}>
+              {score.toFixed(2)}
+            </span>
+          )}
+        </div>
+        {item.description && (
+          <p className="mt-1 leading-snug" style={{ color: "var(--muted-foreground)" }}>
+            {item.description}
+          </p>
+        )}
+        {item.relationships && item.relationships.length > 0 && (
+          <div className="mt-1 flex flex-wrap gap-1">
+            {item.relationships.map((rel, i) => (
+              <span
+                key={i}
+                className="rounded px-1 py-0.5 text-[10px]"
+                style={{ background: "var(--muted)", color: "var(--muted-foreground)" }}
+              >
+                {rel.type} → {rel.target}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Vector / hybrid search result
+  return (
+    <div
+      className="rounded-md border px-2.5 py-2"
+      style={{ borderColor: "var(--border)", background: "var(--surface-container-low)" }}
+    >
+      <div className="flex items-center gap-1.5 mb-1">
+        {item.source && (
+          <span
+            className="rounded px-1 py-0.5 text-[10px]"
+            style={{ background: "var(--muted)", color: "var(--muted-foreground)" }}
+          >
+            {item.source}
+          </span>
+        )}
+        {score != null && (
+          <span className="ml-auto text-[10px] tabular-nums" style={{ color: "var(--muted-foreground)" }}>
+            {score.toFixed(2)}
+          </span>
+        )}
+      </div>
+      {item.content && (
+        <p className="leading-snug" style={{ color: "var(--muted-foreground)" }}>
+          {item.content}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function ToolCallBlock({ step }: ToolCallBlockProps) {
   const [expanded, setExpanded] = useState(false);
 
   const label = step.tool_label || step.tool_name || "Tool call";
   const isRunning = step.tool_status === "running";
   const isDone = step.tool_status === "done";
+  const hasResults = step.tool_results && step.tool_results.length > 0;
 
   return (
     <div
@@ -115,13 +196,13 @@ export function ToolCallBlock({ step }: ToolCallBlockProps) {
       <div
         className="overflow-hidden transition-all duration-200 ease-out"
         style={{
-          maxHeight: expanded ? "300px" : "0",
+          maxHeight: expanded ? "500px" : "0",
           opacity: expanded ? 1 : 0,
         }}
       >
         <div
-          className="border-t px-3 py-2 text-xs"
-          style={{ borderColor: "var(--border)", color: "var(--muted-foreground)" }}
+          className="border-t px-3 py-2 text-xs overflow-y-auto"
+          style={{ borderColor: "var(--border)", color: "var(--muted-foreground)", maxHeight: "480px" }}
         >
           {step.tool_args && Object.keys(step.tool_args).length > 0 && (
             <div className="mb-1.5">
@@ -129,12 +210,18 @@ export function ToolCallBlock({ step }: ToolCallBlockProps) {
               {String(step.tool_args.query || step.tool_args.search_query || JSON.stringify(step.tool_args))}
             </div>
           )}
-          {step.tool_count != null && (
+          {hasResults ? (
+            <div className="mt-2 space-y-2">
+              {step.tool_results!.map((item, idx) => (
+                <ResultItem key={idx} item={item} />
+              ))}
+            </div>
+          ) : step.tool_count != null ? (
             <div>
               <span className="font-medium">Results: </span>
               {step.tool_count} items found
             </div>
-          )}
+          ) : null}
         </div>
       </div>
     </div>

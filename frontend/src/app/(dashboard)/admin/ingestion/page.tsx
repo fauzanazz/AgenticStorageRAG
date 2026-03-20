@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import React, { useState } from "react";
+import { redirect } from "next/navigation";
 import { RefreshCw, ChevronDown, ChevronUp, ChevronRight, DollarSign, FileText, CheckCircle2, Clock, XCircle, SkipForward, FolderOpen, Folder, Check, Save, Loader2 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useIngestion, useDriveFolders, useDefaultFolder } from "@/hooks/use-ingestion";
@@ -635,7 +635,6 @@ function FolderPicker({
 
 export default function IngestionPage() {
   const { user } = useAuth();
-  const router = useRouter();
   const {
     jobs,
     stats,
@@ -656,13 +655,11 @@ export default function IngestionPage() {
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   const [selectedFolderName, setSelectedFolderName] = useState<string | null>(null);
 
-  // Sync selection with saved default on load
-  useEffect(() => {
-    if (defaultFolder && selectedFolderId === null) {
-      setSelectedFolderId(defaultFolder.folder_id);
-      setSelectedFolderName(defaultFolder.folder_name);
-    }
-  }, [defaultFolder, selectedFolderId]);
+  // Sync selection with saved default (render-time init, no useEffect needed)
+  if (defaultFolder && selectedFolderId === null) {
+    setSelectedFolderId(defaultFolder.folder_id);
+    setSelectedFolderName(defaultFolder.folder_name);
+  }
 
   const handleFolderSelect = (id: string, name: string) => {
     setSelectedFolderId(id);
@@ -679,16 +676,10 @@ export default function IngestionPage() {
     selectedFolderId !== (defaultFolder?.folder_id ?? null) ||
     selectedFolderName !== (defaultFolder?.folder_name ?? null);
 
-  // Admin guard
-  useEffect(() => {
-    if (user && !user.is_admin) {
-      router.replace("/");
-    }
-  }, [user, router]);
-
-  // Initial load, polling while active, and error handling are all managed
-  // by TanStack Query (refetchInterval) inside useIngestion. No additional
-  // useEffect is needed here.
+  // Admin guard — redirect during render (no useEffect needed)
+  if (user && !user.is_admin) {
+    redirect("/");
+  }
 
   return (
     <div className="flex-1 p-6 lg:p-8 space-y-6 max-w-4xl">

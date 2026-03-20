@@ -1,10 +1,10 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { redirect } from "next/navigation";
 import { useAuth } from "@/hooks/use-auth";
 import { AppTopNav } from "@/components/layout/app-top-nav";
 import { PageLoader } from "@/components/ui/page-loader";
+import { Toaster } from "@/components/ui/sonner";
 
 /**
  * Dashboard layout -- requires authentication.
@@ -16,20 +16,13 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const { isAuthenticated, isLoading } = useAuth();
-  const router = useRouter();
-
-  useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
-      router.replace("/login");
-    }
-  }, [isAuthenticated, isLoading, router]);
 
   if (isLoading) {
     return <PageLoader />;
   }
 
   if (!isAuthenticated) {
-    return null;
+    redirect("/login");
   }
 
   return (
@@ -38,6 +31,7 @@ export default function DashboardLayout({
       <main className="flex-1 min-w-0 flex flex-col overflow-y-auto">
         {children}
       </main>
+      <Toaster />
     </div>
   );
 }

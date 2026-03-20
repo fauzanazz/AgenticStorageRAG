@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useRef } from "react";
 import {
   ChevronRight,
   ChevronDown,
@@ -147,12 +147,14 @@ export function DriveTree({ data, isLoading }: DriveTreeProps) {
 
   const [expanded, setExpanded] = useState<Set<string>>(initialExpanded);
 
-  // Re-sync when data loads for the first time
-  useEffect(() => {
+  // Re-sync when data loads for the first time (render-time init)
+  const prevInitialRef = useRef(initialExpanded);
+  if (initialExpanded !== prevInitialRef.current) {
+    prevInitialRef.current = initialExpanded;
     if (initialExpanded.size > 0) {
       setExpanded(initialExpanded);
     }
-  }, [initialExpanded]);
+  }
 
   const toggle = (path: string) => {
     setExpanded((prev) => {

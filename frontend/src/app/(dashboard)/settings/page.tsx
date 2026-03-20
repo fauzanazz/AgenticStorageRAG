@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth, type User } from "@/hooks/use-auth";
 import { useModelSettings } from "@/hooks/use-model-settings";
 import { apiClient } from "@/lib/api-client";
@@ -224,16 +224,14 @@ export default function SettingsPage() {
     return typeof keyStatus === "object" && keyStatus.has_key === true;
   };
 
-  // ── LLM cost (admin only) — direct fetch to debug query issues ──
-  const [costSummary, setCostSummary] = useState<LLMCostSummary | null>(null);
-  const [costError, setCostError] = useState<string | null>(null);
-  useEffect(() => {
-    if (!user?.is_admin) return;
-    apiClient
-      .get<LLMCostSummary>("/admin/ingestion/cost")
-      .then(setCostSummary)
-      .catch((e: Error) => setCostError(e.message));
-  }, [user?.is_admin]);
+  // ── LLM cost (admin only) ──
+  const costQuery = useQuery<LLMCostSummary>({
+    queryKey: queryKeys.ingestion.cost(),
+    queryFn: () => apiClient.get<LLMCostSummary>("/admin/ingestion/cost"),
+    enabled: !!user?.is_admin,
+  });
+  const costSummary = costQuery.data ?? null;
+  const costError = costQuery.error ? (costQuery.error as Error).message : null;
 
   const hasChanges = fullName.trim() !== (user?.full_name || "");
   const isSavingProfile = updateProfileMutation.isPending;
@@ -265,7 +263,7 @@ export default function SettingsPage() {
   ] as const;
 
   return (
-    <div className="flex-1 p-6 lg:p-8 space-y-8 max-w-2xl">
+    <div className="flex-1 p-6 lg:p-8 space-y-8 max-w-2xl mx-auto">
       {/* Header */}
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Settings</h1>

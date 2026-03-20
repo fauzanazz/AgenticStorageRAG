@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -16,6 +16,13 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 const NAV_ITEMS = [
   { title: "Dashboard", href: "/", icon: LayoutDashboard },
@@ -32,21 +39,6 @@ export function AppTopNav() {
   const pathname = usePathname();
   const { user, logout } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const userMenuRef = useRef<HTMLDivElement>(null);
-
-  // Close user menu on outside click
-  useEffect(() => {
-    function handleClick(e: MouseEvent) {
-      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
-        setUserMenuOpen(false);
-      }
-    }
-    if (userMenuOpen) {
-      document.addEventListener("mousedown", handleClick);
-      return () => document.removeEventListener("mousedown", handleClick);
-    }
-  }, [userMenuOpen]);
 
   const allNavItems = [
     ...NAV_ITEMS,
@@ -117,10 +109,9 @@ export function AppTopNav() {
           </Link>
 
           {/* User menu */}
-          <div className="relative" ref={userMenuRef}>
-            <button
-              onClick={() => setUserMenuOpen((v) => !v)}
-              className="flex items-center gap-2 rounded-lg px-2 py-1.5 transition-colors hover:bg-black/5"
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              className="flex items-center gap-2 rounded-lg px-2 py-1.5 transition-colors hover:bg-black/5 outline-none"
             >
               <div
                 className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold text-white shrink-0"
@@ -132,48 +123,27 @@ export function AppTopNav() {
                 {user?.full_name || "User"}
               </span>
               <ChevronDown className="size-3.5" style={{ color: "var(--muted-foreground)" }} />
-            </button>
-
-            {userMenuOpen && (
-              <div
-                className="absolute right-0 top-full mt-1 w-56 rounded-xl py-1 z-50"
-                style={{
-                  background: "var(--card)",
-                  border: "1px solid var(--border)",
-                  boxShadow: "var(--shadow-popover)",
-                }}
-              >
-                <div className="px-3 py-2" style={{ borderBottom: "1px solid var(--border)" }}>
-                  <p className="text-sm font-medium truncate" style={{ color: "var(--foreground)" }}>
-                    {user?.full_name || "User"}
-                  </p>
-                  <p className="text-xs truncate" style={{ color: "var(--muted-foreground)" }}>
-                    {user?.email || ""}
-                  </p>
-                </div>
-                <Link
-                  href="/settings"
-                  onClick={() => setUserMenuOpen(false)}
-                  className="flex items-center gap-2.5 px-3 py-2 text-sm transition-colors hover:bg-black/5"
-                  style={{ color: "var(--muted-foreground)" }}
-                >
-                  <Settings className="size-4" />
-                  Settings
-                </Link>
-                <button
-                  onClick={() => {
-                    setUserMenuOpen(false);
-                    logout();
-                  }}
-                  className="flex w-full items-center gap-2.5 px-3 py-2 text-sm transition-colors hover:bg-black/5"
-                  style={{ color: "var(--destructive)" }}
-                >
-                  <LogOut className="size-4" />
-                  Sign out
-                </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" sideOffset={8} className="w-56">
+              <div className="px-3 py-2">
+                <p className="text-sm font-medium truncate">
+                  {user?.full_name || "User"}
+                </p>
+                <p className="text-xs truncate text-muted-foreground">
+                  {user?.email || ""}
+                </p>
               </div>
-            )}
-          </div>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem render={<Link href="/settings" />}>
+                <Settings className="size-4" />
+                Settings
+              </DropdownMenuItem>
+              <DropdownMenuItem variant="destructive" onClick={logout}>
+                <LogOut className="size-4" />
+                Sign out
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
         {/* Mobile hamburger */}
