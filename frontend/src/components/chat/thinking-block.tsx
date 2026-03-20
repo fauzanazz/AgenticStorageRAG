@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 interface ThinkingBlockProps {
   content: string;
@@ -9,6 +9,19 @@ interface ThinkingBlockProps {
 
 export function ThinkingBlock({ content, isActive }: ThinkingBlockProps) {
   const [expanded, setExpanded] = useState(true);
+  const wasActive = useRef(false);
+
+  // Auto-collapse 3s after thinking finishes (active → inactive)
+  useEffect(() => {
+    if (isActive) {
+      wasActive.current = true;
+      return;
+    }
+    if (!wasActive.current) return;
+    wasActive.current = false;
+    const timer = setTimeout(() => setExpanded(false), 3000);
+    return () => clearTimeout(timer);
+  }, [isActive]);
 
   if (!content) return null;
 

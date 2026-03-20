@@ -71,13 +71,13 @@ export default function RegisterPage() {
           D
         </div>
         <span className="text-xl font-semibold tracking-tight" style={{ color: "var(--foreground)" }}>
-          DingDong RAG
+          OpenRAG
         </span>
       </div>
 
       <h2 className="text-3xl font-bold mb-2" style={{ color: "var(--foreground)" }}>Create Account</h2>
       <p className="text-sm mb-8" style={{ color: "var(--muted-foreground)" }}>
-        Get started with DingDong RAG
+        Get started with OpenRAG
       </p>
 
       <form onSubmit={handleSubmit} className="space-y-5">

@@ -54,6 +54,7 @@ export const queryKeys = {
     jobs: (page: number) => ["ingestion", "jobs", { page }] as const,
     stats: () => ["ingestion", "stats"] as const,
     cost: () => ["ingestion", "cost"] as const,
+    providers: () => ["ingestion", "providers"] as const,
     driveFolders: (parentId: string) =>
       ["ingestion", "drive-folders", { parentId }] as const,
     defaultFolder: () => ["ingestion", "default-folder"] as const,

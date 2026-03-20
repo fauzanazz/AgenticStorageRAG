@@ -4,7 +4,7 @@
 Display the actual results returned by tool calls (vector search, hybrid search, graph search) in the chat UI as collapsible sections, so end users can see what the AI found before it synthesized its answer.
 
 ## Who is this for?
-End users of the DingDong RAG chat app who want transparency into what sources/results the AI retrieved.
+End users of the OpenRAG chat app who want transparency into what sources/results the AI retrieved.
 
 ## What does success look like?
 - When a tool call completes, the collapsible ToolCallBlock shows the actual result items (document snippets, entity names, relevance scores) — not just "Found 5 results"

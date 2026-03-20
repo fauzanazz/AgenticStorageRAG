@@ -10,6 +10,11 @@ import { toast } from "sonner";
 import { apiClient } from "@/lib/api-client";
 import { queryKeys } from "@/lib/query-keys";
 import type {
+  Artifact,
+  ArtifactStartPayload,
+  ArtifactDeltaPayload,
+  ArtifactEndPayload,
+  ChatAttachment,
   ChatSession,
   ChatMessage,
   Citation,
@@ -44,6 +49,7 @@ const TOOL_FRIENDLY_NAMES: Record<string, string> = {
   hybrid_search: "Searching documents and knowledge graph",
   vector_search: "Searching documents",
   graph_search: "Searching knowledge graph",
+  generate_document: "Generating document",
 };
 
 function friendlyToolName(name: string): string {
@@ -108,6 +114,15 @@ export function useChat(conversationId?: string) {
   const abortRef = useRef<AbortController | null>(null);
   const pendingContentRef = useRef("");
   const rafIdRef = useRef<number | null>(null);
+
+  // Artifact state
+  const [artifacts, setArtifacts] = useState<Map<string, Artifact>>(new Map());
+  const [activeArtifactId, setActiveArtifactId] = useState<string | null>(null);
+  const pendingArtifactContentRef = useRef<Map<string, string>>(new Map());
+  const artifactRafIdRef = useRef<number | null>(null);
+
+  // Attachment state
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
 
   // ── Conversations query ──────────────────────────────────────────────────
   const conversationsQuery = useQuery({
@@ -203,9 +218,105 @@ export function useChat(conversationId?: string) {
     },
   });
 
+  // ── Attachment helpers ────────────────────────────────────────────────────
+  const addAttachment = useCallback(async (file: File) => {
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const pending: ChatAttachment = {
+      id: tempId,
+      filename: file.name,
+      size: file.size,
+      mime_type: file.type || "application/octet-stream",
+      status: "uploading",
+    };
+    setAttachments((prev) => [...prev, pending]);
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const result = await apiClient.upload<{
+        id: string;
+        filename: string;
+        size: number;
+        mime_type: string;
+      }>("/chat/attachments", formData);
+
+      setAttachments((prev) =>
+        prev.map((a) =>
+          a.id === tempId
+            ? { ...a, id: result.id, status: "ready" as const }
+            : a
+        )
+      );
+    } catch (err) {
+      setAttachments((prev) =>
+        prev.map((a) =>
+          a.id === tempId
+            ? {
+                ...a,
+                status: "error" as const,
+                error: err instanceof Error ? err.message : "Upload failed",
+              }
+            : a
+        )
+      );
+    }
+  }, []);
+
+  const addDriveAttachments = useCallback(async (fileIds: string[]) => {
+    const tempEntries: ChatAttachment[] = fileIds.map((fid) => ({
+      id: `temp-drive-${fid}`,
+      filename: `Drive file...`,
+      size: 0,
+      mime_type: "application/octet-stream",
+      status: "uploading" as const,
+    }));
+    setAttachments((prev) => [...prev, ...tempEntries]);
+
+    try {
+      const results = await apiClient.post<
+        { id: string; filename: string; size: number; mime_type: string }[]
+      >("/chat/attachments/from-drive", { file_ids: fileIds });
+
+      setAttachments((prev) => {
+        const withoutTemp = prev.filter(
+          (a) => !fileIds.some((fid) => a.id === `temp-drive-${fid}`)
+        );
+        return [
+          ...withoutTemp,
+          ...results.map((r) => ({
+            ...r,
+            status: "ready" as const,
+          })),
+        ];
+      });
+    } catch (err) {
+      const tempIds = new Set(fileIds.map((fid) => `temp-drive-${fid}`));
+      setAttachments((prev) =>
+        prev.map((a) =>
+          tempIds.has(a.id)
+            ? {
+                ...a,
+                status: "error" as const,
+                error:
+                  err instanceof Error ? err.message : "Drive import failed",
+              }
+            : a
+        )
+      );
+    }
+  }, []);
+
+  const removeAttachment = useCallback((id: string) => {
+    setAttachments((prev) => prev.filter((a) => a.id !== id));
+  }, []);
+
+  const clearAttachments = useCallback(() => {
+    setAttachments([]);
+  }, []);
+
   // ── SSE streaming (remains imperative — TanStack Query doesn't model SSE) ─
   const sendMessage = useCallback(
-    async (content: string, conversationId?: string, model?: string) => {
+    async (content: string, conversationId?: string, model?: string, enableThinking?: boolean) => {
       setIsStreaming(true);
       setError(null);
 
@@ -233,6 +344,10 @@ export function useChat(conversationId?: string) {
       };
       setMessages((prev) => [...prev, userMessage, assistantMessage]);
 
+      const readyAttachmentIds = attachments
+        .filter((a) => a.status === "ready")
+        .map((a) => a.id);
+
       let streamedContent = "";
       try {
         const citations: Citation[] = [];
@@ -243,12 +358,15 @@ export function useChat(conversationId?: string) {
             message: content,
             conversation_id: conversationId ?? activeConversation?.id,
             ...(model ? { model } : {}),
+            ...(enableThinking ? { enable_thinking: true } : {}),
+            ...(readyAttachmentIds.length > 0
+              ? { attachment_ids: readyAttachmentIds }
+              : {}),
           },
           (sseEvent) => {
             switch (sseEvent.event) {
               case "thinking": {
-                // Full thinking text for this iteration (emitted after
-                // the backend confirms tool_calls are present).
+                // Real extended thinking from the API (e.g. Anthropic reasoning_content).
                 const text = sseEvent.data;
                 if (!text) break;
                 setMessages((prev) => {
@@ -322,7 +440,9 @@ export function useChat(conversationId?: string) {
               }
 
               case "token": {
-                // Final answer content — set directly on message.content
+                // Content tokens — streamed in real-time.
+                // Could be final answer OR narration (determined later
+                // when narration_end arrives).
                 streamedContent += sseEvent.data;
                 pendingContentRef.current = streamedContent;
                 if (rafIdRef.current === null) {
@@ -339,6 +459,31 @@ export function useChat(conversationId?: string) {
                     });
                   });
                 }
+                break;
+              }
+
+              case "narration_end": {
+                // The previously streamed tokens were narration, not the
+                // final answer. Move them into a narration step and reset
+                // content so tool calls render after the narration.
+                const narrationText = sseEvent.data;
+                streamedContent = "";
+                pendingContentRef.current = "";
+                setMessages((prev) => {
+                  const updated = [...prev];
+                  const last = updated[updated.length - 1];
+                  if (last.role !== "assistant") return prev;
+                  const step: NarrativeStep = {
+                    type: "narration",
+                    content: narrationText,
+                  };
+                  updated[updated.length - 1] = {
+                    ...last,
+                    content: "",
+                    steps: [...last.steps, step],
+                  };
+                  return updated;
+                });
                 break;
               }
 
@@ -417,6 +562,84 @@ export function useChat(conversationId?: string) {
                 break;
               }
 
+              case "artifact_start": {
+                try {
+                  const data: ArtifactStartPayload = JSON.parse(sseEvent.data);
+                  const newArtifact: Artifact = {
+                    id: data.artifact_id,
+                    conversation_id: activeConversation?.id ?? "",
+                    user_id: "",
+                    type: data.type,
+                    title: data.title,
+                    content: "",
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString(),
+                  };
+                  setArtifacts((prev) => {
+                    const next = new Map(prev);
+                    next.set(data.artifact_id, newArtifact);
+                    return next;
+                  });
+                  setActiveArtifactId(data.artifact_id);
+                  pendingArtifactContentRef.current.set(data.artifact_id, "");
+                } catch {
+                  // Ignore parse errors
+                }
+                break;
+              }
+
+              case "artifact_delta": {
+                try {
+                  const data: ArtifactDeltaPayload = JSON.parse(sseEvent.data);
+                  const current = pendingArtifactContentRef.current.get(data.artifact_id) ?? "";
+                  pendingArtifactContentRef.current.set(data.artifact_id, current + data.content);
+
+                  if (artifactRafIdRef.current === null) {
+                    artifactRafIdRef.current = requestAnimationFrame(() => {
+                      artifactRafIdRef.current = null;
+                      setArtifacts((prev) => {
+                        const next = new Map(prev);
+                        for (const [id, content] of pendingArtifactContentRef.current) {
+                          const existing = next.get(id);
+                          if (existing) {
+                            next.set(id, { ...existing, content });
+                          }
+                        }
+                        return next;
+                      });
+                    });
+                  }
+                } catch {
+                  // Ignore parse errors
+                }
+                break;
+              }
+
+              case "artifact_end": {
+                try {
+                  const data: ArtifactEndPayload = JSON.parse(sseEvent.data);
+                  // Final flush of content
+                  const finalContent = pendingArtifactContentRef.current.get(data.artifact_id) ?? "";
+                  pendingArtifactContentRef.current.delete(data.artifact_id);
+                  setArtifacts((prev) => {
+                    const next = new Map(prev);
+                    const existing = next.get(data.artifact_id);
+                    if (existing) {
+                      next.set(data.artifact_id, {
+                        ...existing,
+                        content: finalContent,
+                        title: data.title,
+                        updated_at: new Date().toISOString(),
+                      });
+                    }
+                    return next;
+                  });
+                } catch {
+                  // Ignore parse errors
+                }
+                break;
+              }
+
               case "done": {
                 queryClient.invalidateQueries({
                   queryKey: queryKeys.conversations.lists(),
@@ -448,6 +671,10 @@ export function useChat(conversationId?: string) {
           cancelAnimationFrame(rafIdRef.current);
           rafIdRef.current = null;
         }
+        if (artifactRafIdRef.current !== null) {
+          cancelAnimationFrame(artifactRafIdRef.current);
+          artifactRafIdRef.current = null;
+        }
         // Final flush — ensure content is set from streamed data
         if (streamedContent) {
           setMessages((prev) => {
@@ -465,9 +692,12 @@ export function useChat(conversationId?: string) {
         pendingContentRef.current = "";
         abortRef.current = null;
         setIsStreaming(false);
+        // Only clear attachments that were actually sent — keep in-flight uploads
+        const sentIds = new Set(readyAttachmentIds);
+        setAttachments((prev) => prev.filter((a) => !sentIds.has(a.id)));
       }
     },
-    [activeConversation, queryClient]
+    [activeConversation, attachments, queryClient]
   );
 
   const stopStreaming = useCallback(() => {
@@ -491,6 +721,18 @@ export function useChat(conversationId?: string) {
     messages,
     isStreaming,
     error,
+
+    // artifacts
+    artifacts,
+    activeArtifactId,
+    setActiveArtifactId,
+
+    // attachments
+    attachments,
+    addAttachment,
+    addDriveAttachments,
+    removeAttachment,
+    clearAttachments,
 
     // mutations
     createConversation: (title?: string) => createMutation.mutateAsync(title),

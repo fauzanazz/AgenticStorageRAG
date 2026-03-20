@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from app.domain.agents.interfaces import IAgentTool
+from app.domain.agents.interfaces import EventEmitter, IAgentTool
 from app.domain.knowledge.interfaces import IVectorService
 from app.domain.knowledge.schemas import VectorSearchRequest
 
@@ -59,7 +59,7 @@ class VectorSearchTool(IAgentTool):
             "required": ["query"],
         }
 
-    async def execute(self, **kwargs: Any) -> dict[str, Any]:
+    async def execute(self, emit_event: EventEmitter = None, **kwargs: Any) -> dict[str, Any]:
         """Execute vector similarity search.
 
         Args:

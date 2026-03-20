@@ -22,7 +22,7 @@ class SourceConnector(ABC):
     1. Create `your_source_connector.py`
     2. Subclass `SourceConnector`
     3. Implement all abstract methods
-    4. Register in the swarm orchestrator
+    4. Register in `registry.py`
     5. Write tests in `tests/`
     """
 
@@ -30,6 +30,18 @@ class SourceConnector(ABC):
     @abstractmethod
     def source_name(self) -> str:
         """Return the unique name of this source (e.g., 'google_drive')."""
+        ...
+
+    @property
+    @abstractmethod
+    def label(self) -> str:
+        """Human-readable label for the UI (e.g., 'Google Drive')."""
+        ...
+
+    @classmethod
+    @abstractmethod
+    def is_configured(cls) -> bool:
+        """Check whether the required credentials/config are present."""
         ...
 
     @abstractmethod

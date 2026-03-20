@@ -10,6 +10,7 @@ import type {
   IngestionJobList,
   IngestionStatsResponse,
   LLMCostSummary,
+  ProviderInfo,
   TriggerIngestionRequest,
 } from "@/types/ingestion";
 
@@ -39,6 +40,12 @@ function cancelJobRequest(jobId: string): Promise<IngestionJob> {
   );
 }
 
+function retryJobRequest(jobId: string): Promise<IngestionJob> {
+  return apiClient.post<IngestionJob>(
+    `/admin/ingestion/jobs/${jobId}/retry`
+  );
+}
+
 function fetchDriveFolders(parentId: string): Promise<DriveFolderEntry[]> {
   return apiClient.get<DriveFolderEntry[]>(
     `/admin/ingestion/drive/browse?parent_id=${encodeURIComponent(parentId)}`
@@ -57,6 +64,10 @@ function saveDefaultFolderRequest(data: {
     "/admin/ingestion/drive/default-folder",
     data
   );
+}
+
+function fetchProviders(): Promise<ProviderInfo[]> {
+  return apiClient.get<ProviderInfo[]>("/admin/ingestion/providers");
 }
 
 // ── Active-job detector (drives polling interval) ─────────────────────────
@@ -134,6 +145,14 @@ export function useIngestion(page = 1) {
     },
   });
 
+  // ── Retry mutation ───────────────────────────────────────────────────
+  const retryMutation = useMutation({
+    mutationFn: (jobId: string) => retryJobRequest(jobId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.ingestion.all });
+    },
+  });
+
   return {
     // data
     jobs: jobsQuery.data?.items ?? [],
@@ -149,12 +168,15 @@ export function useIngestion(page = 1) {
       jobsQuery.error?.message ??
       triggerMutation.error?.message ??
       cancelMutation.error?.message ??
+      retryMutation.error?.message ??
       null,
 
     // mutations
     triggerIngestion: (req: TriggerIngestionRequest = {}) =>
       triggerMutation.mutateAsync(req),
     cancelJob: (jobId: string) => cancelMutation.mutateAsync(jobId),
+    retryJob: (jobId: string) => retryMutation.mutateAsync(jobId),
+    isRetrying: retryMutation.isPending,
 
     // manual refresh — invalidates the whole ingestion namespace
     refresh: () =>
@@ -174,6 +196,16 @@ export function useIngestion(page = 1) {
       // Kept for backward-compat; errors are now managed by TanStack Query.
     },
   };
+}
+
+// ── Providers hook ──────────────────────────────────────────────────────
+
+export function useProviders() {
+  return useQuery({
+    queryKey: queryKeys.ingestion.providers(),
+    queryFn: fetchProviders,
+    staleTime: 300_000,
+  });
 }
 
 // ── Drive folder browsing hooks ─────────────────────────────────────────

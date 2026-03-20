@@ -102,9 +102,16 @@ class ChatRequest(BaseModel):
     model: str | None = Field(
         None, description="Model override for this request (e.g. 'anthropic/claude-sonnet-4-20250514')"
     )
+    enable_thinking: bool = Field(
+        False, description="Enable extended thinking (real API-level reasoning) for supported models"
+    )
     vector_weight: float = Field(
         0.5, ge=0.0, le=1.0,
         description="Weight for vector vs graph retrieval"
+    )
+    attachment_ids: list[str] = Field(
+        default_factory=list,
+        description="IDs of uploaded attachments to include as context",
     )
 
 
@@ -112,7 +119,7 @@ class ChatStreamEvent(BaseModel):
     """Server-sent event for streaming chat responses."""
 
     event: str = Field(
-        ..., description="Event type: thinking | tool_start | tool_result | token | citation | message_created | done | error"
+        ..., description="Event type: token | thinking | tool_start | tool_result | citation | message_created | artifact_start | artifact_delta | artifact_end | done | error"
     )
     data: str = Field("", description="Event payload")
 
@@ -135,12 +142,36 @@ TOOL_FRIENDLY_NAMES: dict[str, str] = {
     "hybrid_search": "Searching documents and knowledge graph",
     "vector_search": "Searching documents",
     "graph_search": "Searching knowledge graph",
+    "generate_document": "Generating document",
 }
 
 
 def friendly_tool_name(tool_name: str) -> str:
     """Return a user-friendly label for a tool name."""
     return TOOL_FRIENDLY_NAMES.get(tool_name, f"Using {tool_name}")
+
+
+# ---------------------------------------------------------------------------
+# Attachments
+# ---------------------------------------------------------------------------
+
+
+class AttachmentResponse(BaseModel):
+    """Response for an uploaded attachment."""
+
+    id: uuid.UUID
+    filename: str
+    size: int
+    mime_type: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class DriveAttachmentRequest(BaseModel):
+    """Request to attach files from Google Drive."""
+
+    file_ids: list[str] = Field(..., min_length=1, max_length=5)
 
 
 # ---------------------------------------------------------------------------
@@ -166,3 +197,49 @@ class ToolResultData(BaseModel):
     duration_ms: int = 0
     error: str | None = None
     results: list[dict] = []
+
+
+# ---------------------------------------------------------------------------
+# Artifact schemas
+# ---------------------------------------------------------------------------
+
+
+class ArtifactResponse(BaseModel):
+    """Artifact response."""
+
+    id: uuid.UUID
+    conversation_id: uuid.UUID
+    message_id: uuid.UUID | None = None
+    user_id: uuid.UUID
+    type: str = "markdown"
+    title: str
+    content: str
+    language: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ArtifactStartData(BaseModel):
+    """Payload for an ``artifact_start`` SSE event."""
+
+    artifact_id: str
+    title: str
+    type: str = "markdown"
+
+
+class ArtifactDeltaData(BaseModel):
+    """Payload for an ``artifact_delta`` SSE event."""
+
+    artifact_id: str
+    content: str
+
+
+class ArtifactEndData(BaseModel):
+    """Payload for an ``artifact_end`` SSE event."""
+
+    artifact_id: str
+    title: str
+    type: str = "markdown"
+    content_length: int = 0

@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { apiClient, ApiError } from "@/lib/api-client";
+import { setAccessToken } from "@/lib/token-store";
 
 /** Mirrors backend UserResponse schema */
 export interface User {
@@ -53,7 +54,6 @@ interface AuthContextValue extends AuthState {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-const TOKEN_KEY = "access_token";
 const REFRESH_KEY = "refresh_token";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -64,12 +64,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
 
   const setTokens = useCallback((tokens: AuthTokens) => {
-    localStorage.setItem(TOKEN_KEY, tokens.access_token);
+    setAccessToken(tokens.access_token);
     localStorage.setItem(REFRESH_KEY, tokens.refresh_token);
   }, []);
 
   const clearTokens = useCallback(() => {
-    localStorage.removeItem(TOKEN_KEY);
+    setAccessToken(null);
     localStorage.removeItem(REFRESH_KEY);
   }, []);
 
@@ -173,33 +173,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   apiClient.setOnUnauthorized(unauthorizedHandler);
 
-  // On mount: try to load user from stored token
+  // On mount: access_token lives only in memory (lost on reload),
+  // so always attempt a refresh if a refresh_token is stored.
   useEffect(() => {
-    const token = localStorage.getItem(TOKEN_KEY);
-    if (!token) {
-      // No token -- nothing to fetch.
-      // Initial state already has isLoading: true, so we need to flip it.
-      // We avoid direct setState by scheduling a microtask so the linter
-      // doesn't flag it as synchronous-setState-in-effect.
+    const refreshToken = localStorage.getItem(REFRESH_KEY);
+    if (!refreshToken) {
       queueMicrotask(() => {
         setState({ user: null, isLoading: false, isAuthenticated: false });
       });
       return;
     }
-    let cancelled = false;
-    fetchUser().then((user) => {
-      if (cancelled) return;
-      if (user) {
-        setState({ user, isLoading: false, isAuthenticated: true });
-      } else {
-        // Token expired -- try refresh
-        refreshAuth();
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [fetchUser, refreshAuth]);
+    refreshAuth();
+  }, [refreshAuth]);
 
   const value = useMemo(
     () => ({ ...state, login, register, loginWithOAuth, logout, refreshAuth }),

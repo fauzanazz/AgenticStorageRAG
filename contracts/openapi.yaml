@@ -1,6 +1,6 @@
 openapi: "3.1.0"
 info:
-  title: DingDong RAG API
+  title: OpenRAG API
   version: "0.2.0"
   description: |
     Agentic Knowledge Graph RAG system API.
@@ -550,6 +550,24 @@ paths:
           description: Conversation not found
 
   # ── Admin: Ingestion ──────────────────────────────────────────────────
+  /admin/ingestion/providers:
+    get:
+      operationId: listIngestionProviders
+      summary: List available ingestion providers
+      description: Returns all registered source connectors with their configuration status. Admin only.
+      tags: [Admin]
+      responses:
+        "200":
+          description: List of available providers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProviderInfo"
+        "403":
+          description: Admin access required
+
   /admin/ingestion/trigger:
     post:
       operationId: triggerIngestion
@@ -1392,9 +1410,27 @@ components:
           default: 0
 
     # ── Ingestion ─────────────────────────────────────────────────────
+    ProviderInfo:
+      type: object
+      required: [key, label, configured]
+      properties:
+        key:
+          type: string
+          description: Unique source connector key (e.g. 'google_drive').
+        label:
+          type: string
+          description: Human-readable label for the UI.
+        configured:
+          type: boolean
+          description: Whether the required credentials/config are present.
+
     TriggerIngestionRequest:
       type: object
       properties:
+        source:
+          type: string
+          default: google_drive
+          description: Source connector key. Defaults to 'google_drive' for backward compatibility.
         folder_id:
           type: string
           nullable: true

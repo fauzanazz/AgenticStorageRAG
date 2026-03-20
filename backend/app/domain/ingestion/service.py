@@ -120,15 +120,17 @@ class IngestionService:
         if running.scalar_one_or_none() is not None:
             raise IngestionAlreadyRunningError()
 
-        # Resolve folder ID: request > AppConfig > env > None (root)
-        saved_default = await self._get_config(_CFG_DRIVE_FOLDER_ID)
-        settings = get_settings()
-        folder_id = request.folder_id or saved_default or settings.google_drive_folder_id or None
+        # Resolve folder ID (drive-specific: request > AppConfig > env > None)
+        folder_id = request.folder_id
+        if request.source == "google_drive":
+            saved_default = await self._get_config(_CFG_DRIVE_FOLDER_ID)
+            settings = get_settings()
+            folder_id = request.folder_id or saved_default or settings.google_drive_folder_id or None
 
         # Create job
         job = IngestionJob(
             triggered_by=admin_user_id,
-            source="google_drive",
+            source=request.source,
             folder_id=folder_id,
             status=IngestionStatus.PENDING,
         )
@@ -144,8 +146,122 @@ class IngestionService:
             job_id=str(job.id),
             admin_user_id=str(admin_user_id),
             force=request.force,
+            source=request.source,
         )
         logger.info("Ingestion job %s dispatched to Celery worker", job.id)
+
+        return IngestionJobResponse.model_validate(job)
+
+    async def retry_job(
+        self,
+        job_id: uuid.UUID,
+        admin_user_id: uuid.UUID,
+    ) -> IngestionJobResponse:
+        """Retry a failed or cancelled job by resuming from where it left off.
+
+        Resets failed/pending IndexedFile rows back to PENDING so the pipeline
+        re-processes only the files that didn't complete. Reuses the same
+        IngestionJob record (same folder/source).
+
+        Raises:
+            IngestionJobNotFoundError: If job not found
+            IngestionAlreadyRunningError: If another job is already active
+            IngestionError: If job is not in a retryable state
+        """
+        from app.domain.ingestion.exceptions import IngestionError
+        from app.domain.ingestion.models import IndexedFile, IndexedFileStatus, IndexedFileStage
+
+        result = await self._db.execute(
+            select(IngestionJob).where(IngestionJob.id == job_id)
+        )
+        original = result.scalar_one_or_none()
+        if original is None:
+            raise IngestionJobNotFoundError(str(job_id))
+
+        if original.status not in (IngestionStatus.FAILED, IngestionStatus.CANCELLED):
+            raise IngestionError(
+                f"Only failed or cancelled jobs can be retried (current: {original.status.value})"
+            )
+
+        # Block if another job is already running
+        active_statuses = [
+            IngestionStatus.PENDING,
+            IngestionStatus.SCANNING,
+            IngestionStatus.PROCESSING,
+        ]
+        running = await self._db.execute(
+            select(IngestionJob).where(
+                IngestionJob.status.in_(active_statuses),
+                IngestionJob.id != job_id,
+            )
+        )
+        if running.scalar_one_or_none() is not None:
+            raise IngestionAlreadyRunningError()
+
+        # Count retryable files
+        retryable_statuses = [
+            IndexedFileStatus.FAILED.value,
+            IndexedFileStatus.PENDING.value,
+            IndexedFileStatus.PROCESSING.value,
+        ]
+        retryable_count_result = await self._db.execute(
+            select(func.count()).select_from(IndexedFile).where(
+                IndexedFile.job_id == job_id,
+                IndexedFile.status.in_(retryable_statuses),
+            )
+        )
+        retryable_count = retryable_count_result.scalar() or 0
+
+        if retryable_count == 0:
+            raise IngestionError("No retryable files found in this job")
+
+        # Reset retryable IndexedFile rows back to PENDING
+        await self._db.execute(
+            sa_update(IndexedFile)
+            .where(
+                IndexedFile.job_id == job_id,
+                IndexedFile.status.in_(retryable_statuses),
+            )
+            .values(
+                status=IndexedFileStatus.PENDING.value,
+                stage=IndexedFileStage.PENDING.value,
+                error_message=None,
+                processed_at=None,
+            )
+            .execution_options(synchronize_session=False)
+        )
+
+        # Reset the job to PROCESSING (scanning phase already complete)
+        await self._db.execute(
+            sa_update(IngestionJob)
+            .where(IngestionJob.id == job_id)
+            .values(
+                status=IngestionStatus.PROCESSING,
+                error_message=None,
+                completed_at=None,
+                failed_files=0,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        await self._db.commit()
+
+        # Refresh the job
+        await self._db.expire_all()
+        result = await self._db.execute(
+            select(IngestionJob).where(IngestionJob.id == job_id)
+        )
+        job = result.scalar_one()
+
+        logger.info("Retrying ingestion job %s (%d files to reprocess)", job_id, retryable_count)
+
+        # Dispatch to Celery worker (skip scanning, process only)
+        from app.domain.ingestion.tasks import run_ingestion_task
+        run_ingestion_task.delay(
+            job_id=str(job_id),
+            admin_user_id=str(admin_user_id),
+            source=job.source,
+            retry=True,
+        )
 
         return IngestionJobResponse.model_validate(job)
 
@@ -282,14 +398,85 @@ class IngestionService:
     # Drive folder browsing & default folder
     # ------------------------------------------------------------------
 
-    async def browse_drive_folders(self, parent_id: str = "root") -> list[DriveFolderEntry]:
-        """List subfolders of a Drive folder (no files)."""
+    async def browse_drive_folders(
+        self,
+        parent_id: str = "root",
+        user_id: uuid.UUID | None = None,
+    ) -> list[DriveFolderEntry]:
+        """List subfolders of a Drive folder (no files).
+
+        When ``user_id`` is provided the user's stored OAuth tokens are used
+        so they browse their own Drive.  Falls back to server-level
+        credentials (service account / env OAuth) when no per-user tokens
+        are available.
+        """
         from app.domain.ingestion.drive_connector import GoogleDriveConnector
 
-        connector = GoogleDriveConnector()
-        await connector.authenticate()
+        connector = await self._get_drive_connector(user_id)
         entries = await connector.list_folder_children(parent_id)
         return [e for e in entries if e.is_folder]
+
+    async def _get_drive_connector(
+        self,
+        user_id: uuid.UUID | None = None,
+    ) -> "GoogleDriveConnector":
+        """Build an authenticated GoogleDriveConnector.
+
+        Tries the logged-in user's stored OAuth tokens first, then falls
+        back to server-level credentials.
+        """
+        from app.domain.auth.models import OAuthAccount
+        from app.domain.ingestion.drive_connector import GoogleDriveConnector
+        from app.infra.encryption import decrypt_value
+
+        # --- Try per-user OAuth tokens ---
+        if user_id is not None:
+            result = await self._db.execute(
+                select(OAuthAccount).where(
+                    OAuthAccount.user_id == user_id,
+                    OAuthAccount.provider == "google",
+                )
+            )
+            account = result.scalar_one_or_none()
+            if account and account.access_token_enc:
+                access_token = decrypt_value(account.access_token_enc)
+                refresh_token = (
+                    decrypt_value(account.refresh_token_enc)
+                    if account.refresh_token_enc
+                    else None
+                )
+                connector = GoogleDriveConnector.from_user_tokens(
+                    access_token=access_token,
+                    refresh_token=refresh_token,
+                )
+                # Persist refreshed tokens if google-auth auto-refreshed them
+                await self._maybe_persist_refreshed_token(account, connector)
+                return connector
+
+        # --- Fallback: server-level credentials ---
+        connector = GoogleDriveConnector()
+        await connector.authenticate()
+        return connector
+
+    async def _maybe_persist_refreshed_token(
+        self,
+        account: "OAuthAccount",
+        connector: "GoogleDriveConnector",
+    ) -> None:
+        """If the google-auth library refreshed the access token, persist it."""
+        from app.infra.encryption import decrypt_value, encrypt_value
+
+        creds = connector._credentials
+        if creds is None or not creds.token:
+            return
+        # Compare decrypted stored token against current token
+        # (Fernet uses a random IV, so re-encrypting always produces a different ciphertext)
+        stored_token = decrypt_value(account.access_token_enc)
+        if creds.token != stored_token:
+            account.access_token_enc = encrypt_value(creds.token)
+            if creds.expiry:
+                account.token_expiry = creds.expiry
+            await self._db.commit()
 
     async def get_default_folder(self) -> DefaultFolderResponse:
         """Get the saved default Drive folder."""

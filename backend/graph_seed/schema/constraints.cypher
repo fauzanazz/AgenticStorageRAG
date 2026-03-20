@@ -1,4 +1,4 @@
--- Neo4j Schema Initialization for DingDong RAG
+-- Neo4j Schema Initialization for OpenRAG
 -- Idempotent: safe to run on every startup (uses IF NOT EXISTS)
 --
 -- All knowledge graph entities get a secondary :Entity label in addition

@@ -8,7 +8,12 @@ from __future__ import annotations
 import uuid
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator
+from collections.abc import Callable
 from typing import Any
+
+# Type alias for the SSE event emitter callback.
+# Signature: emit_event(event_type: str, data_json: str) -> None
+EventEmitter = Callable[[str, str], None] | None
 
 from app.domain.agents.schemas import (
     ChatRequest,
@@ -45,8 +50,13 @@ class IAgentTool(ABC):
         ...
 
     @abstractmethod
-    async def execute(self, **kwargs: Any) -> dict[str, Any]:
+    async def execute(self, emit_event: EventEmitter = None, **kwargs: Any) -> dict[str, Any]:
         """Execute the tool with given arguments.
+
+        Args:
+            emit_event: Optional callback to emit SSE events during execution.
+                        Signature: (event_type: str, data_json: str) -> None.
+                        Tools that don't need streaming can ignore this parameter.
 
         Returns:
             Dict with 'result' key containing the tool output.
@@ -136,4 +146,18 @@ class IChatService(ABC):
         self, conversation_id: uuid.UUID, user_id: uuid.UUID, limit: int = 100
     ) -> list[MessageResponse]:
         """Get message history for a conversation."""
+        ...
+
+    @abstractmethod
+    async def create_artifact(
+        self,
+        conversation_id: uuid.UUID,
+        user_id: uuid.UUID,
+        title: str,
+        content: str,
+        type: str = "markdown",
+        message_id: uuid.UUID | None = None,
+        language: str | None = None,
+    ) -> Any:
+        """Create and persist an artifact linked to a conversation."""
         ...

@@ -6,6 +6,7 @@ for local development. See .env.example for the full list.
 
 from functools import lru_cache
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -20,7 +21,7 @@ class Settings(BaseSettings):
     )
 
     # --- Application ---
-    app_name: str = "DingDong RAG"
+    app_name: str = "OpenRAG"
     app_version: str = "0.1.0"
     debug: bool = False
     environment: str = "development"  # development | staging | production
@@ -35,6 +36,7 @@ class Settings(BaseSettings):
     # --- Auth ---
     frontend_url: str = "http://localhost:3000"  # For OAuth callback redirects
     jwt_secret_key: str = "change-me-in-production"
+    encryption_key: str = ""  # Separate key for encrypting stored secrets; required in production
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 30
     jwt_refresh_token_expire_days: int = 7
@@ -60,12 +62,14 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""  # Google Gemini (via LiteLLM gemini/ prefix)
     openrouter_api_key: str = ""  # OpenRouter (via LiteLLM openrouter/ prefix)
     default_model: str = "dashscope/qwen3-max"
-    fallback_model: str = "anthropic/claude-sonnet-4-20250514"
+    fallback_model: str = "anthropic/claude-sonnet-4-6"
     # Dedicated model for ingestion/KG-extraction tasks.
     # These are pure JSON-structured-output tasks that do NOT need frontier
     # reasoning — a fast, cheap model with high throughput limits is optimal.
     # gpt-5-mini: cheaper than gpt-4o-mini, high rate limits.
     ingestion_model: str = "openai/gpt-5-mini"
+    # Cheap, fast model for auto-generating chat session titles.
+    title_model: str = "openrouter/openai/gpt-4.1-nano"
 
     # --- Embeddings ---
     # LiteLLM model string for embedding generation.
@@ -103,6 +107,21 @@ class Settings(BaseSettings):
     pipeline_embed_batch_size: int = 100  # Max chunks per embedding API call
     pipeline_embed_max_retries: int = 2
     pipeline_queue_multiplier: int = 2  # Queue maxsize = workers * multiplier
+
+    @model_validator(mode="after")
+    def _reject_weak_defaults(self) -> "Settings":
+        if self.environment in ("staging", "production"):
+            if self.jwt_secret_key == "change-me-in-production":
+                raise ValueError(
+                    "JWT_SECRET_KEY must be changed from its default in "
+                    f"{self.environment} environments"
+                )
+            if not self.encryption_key:
+                raise ValueError(
+                    "ENCRYPTION_KEY is required in "
+                    f"{self.environment} environments"
+                )
+        return self
 
 
 @lru_cache

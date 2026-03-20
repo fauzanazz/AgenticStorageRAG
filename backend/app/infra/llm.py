@@ -128,6 +128,11 @@ class LLMProvider:
         return get_settings().fallback_model
 
     @property
+    def title_model(self) -> str:
+        """Get the model used for generating chat session titles."""
+        return get_settings().title_model
+
+    @property
     def ingestion_model(self) -> str:
         """Get the dedicated ingestion model identifier.
 

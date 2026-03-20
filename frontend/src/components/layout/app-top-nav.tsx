@@ -70,7 +70,7 @@ export function AppTopNav() {
         <Link href="/" className="flex items-center gap-2.5 shrink-0 mr-8">
           {logoMark}
           <span className="font-semibold tracking-tight hidden sm:inline" style={{ color: "var(--foreground)" }}>
-            DingDong RAG
+            OpenRAG
           </span>
         </Link>
 

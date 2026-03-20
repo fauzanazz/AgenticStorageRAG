@@ -1,1 +1,1 @@
-"""DingDong RAG - Agentic Knowledge Graph RAG System."""
+"""OpenRAG - Agentic Knowledge Graph RAG System."""

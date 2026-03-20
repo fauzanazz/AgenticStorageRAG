@@ -1,11 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useSearchParams } from "next/navigation";
-import { toast } from "sonner";
+import { useState } from "react";
 import { useModelSettings } from "@/hooks/use-model-settings";
-import { apiClient } from "@/lib/api-client";
-import { Cpu, Eye, EyeOff, AlertTriangle, Check, Loader2, Unplug } from "lucide-react";
+import { Cpu, Eye, EyeOff, AlertTriangle, Check, Loader2 } from "lucide-react";
 import type { ModelOption } from "@/types/settings";
 
 const PROVIDER_KEY_FIELD: Record<string, "anthropic" | "openai" | "dashscope" | "openrouter"> = {
@@ -25,14 +22,13 @@ function groupByProvider<T extends { provider: string }>(items: T[]): { provider
 }
 
 export function ModelConfigCard() {
-  const { settings, catalog, isSaving, isSuccess: modelSaveSuccess, error: modelError, updateSettings, refetch } = useModelSettings();
-  const searchParams = useSearchParams();
+  const { settings, catalog, isSaving, isSuccess: modelSaveSuccess, error: modelError, updateSettings } = useModelSettings();
 
   const [chatModel, setChatModel] = useState<string>("");
   const [ingestionModel, setIngestionModel] = useState<string>("");
   const [embeddingModel, setEmbeddingModel] = useState<string>("");
-  const [oauthConnecting, setOauthConnecting] = useState(false);
-  const [oauthDisconnecting, setOauthDisconnecting] = useState(false);
+  const [claudeSetupToken, setClaudeSetupToken] = useState<string>("");
+  const [showSetupToken, setShowSetupToken] = useState(false);
 
   const [apiKeys, setApiKeys] = useState<Record<string, string>>({
     anthropic: "",
@@ -55,44 +51,6 @@ export function ModelConfigCard() {
     setModelsInitialized(true);
   }
 
-  // Handle Claude OAuth callback redirect
-  useEffect(() => {
-    const oauthResult = searchParams.get("claude_oauth");
-    if (oauthResult === "success") {
-      toast.success("Claude OAuth connected successfully");
-      refetch();
-      // Clean up URL
-      window.history.replaceState({}, "", window.location.pathname);
-    } else if (oauthResult === "error") {
-      toast.error("Claude OAuth connection failed");
-      window.history.replaceState({}, "", window.location.pathname);
-    }
-  }, [searchParams, refetch]);
-
-  const handleClaudeOAuthConnect = async () => {
-    setOauthConnecting(true);
-    try {
-      const data = await apiClient.get<{ authorization_url: string }>("/settings/claude-oauth/authorize");
-      window.location.href = data.authorization_url;
-    } catch {
-      toast.error("Failed to start Claude OAuth flow");
-      setOauthConnecting(false);
-    }
-  };
-
-  const handleClaudeOAuthDisconnect = async () => {
-    setOauthDisconnecting(true);
-    try {
-      await apiClient.delete("/settings/claude-oauth");
-      toast.success("Claude OAuth disconnected");
-      refetch();
-    } catch {
-      toast.error("Failed to disconnect Claude OAuth");
-    } finally {
-      setOauthDisconnecting(false);
-    }
-  };
-
   const handleSave = async () => {
     await updateSettings({
       chat_model: chatModel || undefined,
@@ -102,8 +60,10 @@ export function ModelConfigCard() {
       openai_api_key: apiKeys.openai,
       dashscope_api_key: apiKeys.dashscope,
       openrouter_api_key: apiKeys.openrouter,
+      claude_setup_token: claudeSetupToken,
     });
     setApiKeys({ anthropic: "", openai: "", dashscope: "", openrouter: "" });
+    setClaudeSetupToken("");
   };
 
   const getProviderForModel = (modelId: string): string => {
@@ -120,8 +80,8 @@ export function ModelConfigCard() {
     const keyField = PROVIDER_KEY_FIELD[provider];
     if (!keyField) return true;
     if (apiKeys[keyField]) return true;
-    // Claude OAuth counts as having Anthropic credentials
-    if (keyField === "anthropic" && settings.claude_oauth?.connected) return true;
+    // Claude setup token counts as having Anthropic credentials
+    if (keyField === "anthropic" && settings.claude_setup_token?.has_token) return true;
     const keyStatus = settings[`${keyField}_api_key` as "anthropic_api_key" | "openai_api_key" | "dashscope_api_key" | "openrouter_api_key"];
     return typeof keyStatus === "object" && keyStatus.has_key === true;
   };
@@ -264,52 +224,47 @@ export function ModelConfigCard() {
                 </p>
               )}
 
-              {/* Claude OAuth — shown only for Anthropic */}
+              {/* Claude Setup Token — shown only for Anthropic */}
               {id === "anthropic" && (
                 <div
-                  className="mt-3 rounded-xl p-3"
+                  className="mt-3 rounded-xl p-3 space-y-2"
                   style={{ background: "var(--surface-container-high)", border: "1px solid var(--outline-variant)" }}
                 >
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm font-medium" style={{ color: "var(--on-surface-variant)" }}>
-                        Claude Pro / Max
+                        Claude Pro / Max (Setup Token)
                       </p>
                       <p className="text-xs mt-0.5" style={{ color: "var(--outline)" }}>
-                        Use your Claude.ai subscription instead of an API key
+                        Run <code className="px-1 py-0.5 rounded text-xs" style={{ background: "var(--surface-container-highest)" }}>claude setup-token</code> in your terminal, then paste the token here
                       </p>
                     </div>
-                    {settings?.claude_oauth?.connected ? (
-                      <div className="flex items-center gap-2">
-                        <span
-                          className="text-xs px-2 py-0.5 rounded-full font-medium"
-                          style={{ background: "var(--success-container)", color: "var(--success)" }}
-                        >
-                          Connected
-                        </span>
-                        <button
-                          type="button"
-                          onClick={handleClaudeOAuthDisconnect}
-                          disabled={oauthDisconnecting}
-                          className="h-8 px-3 rounded-lg text-xs font-medium transition-all hover:opacity-80 disabled:opacity-40 flex items-center gap-1.5"
-                          style={{ background: "var(--surface-container-highest)", color: "var(--destructive)" }}
-                        >
-                          {oauthDisconnecting ? <Loader2 className="size-3 animate-spin" /> : <Unplug className="size-3" />}
-                          Disconnect
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={handleClaudeOAuthConnect}
-                        disabled={oauthConnecting}
-                        className="h-8 px-4 rounded-lg text-xs font-semibold text-white transition-all hover:opacity-90 disabled:opacity-40 flex items-center gap-1.5"
-                        style={{ background: "var(--primary)" }}
+                    {settings?.claude_setup_token?.has_token && (
+                      <span
+                        className="text-xs px-2 py-0.5 rounded-full font-medium"
+                        style={{ background: "var(--success-container)", color: "var(--success)" }}
                       >
-                        {oauthConnecting && <Loader2 className="size-3 animate-spin" />}
-                        Connect with Claude
-                      </button>
+                        Configured
+                      </span>
                     )}
+                  </div>
+                  <div className="relative">
+                    <input
+                      type={showSetupToken ? "text" : "password"}
+                      value={claudeSetupToken}
+                      onChange={(e) => setClaudeSetupToken(e.target.value)}
+                      placeholder={settings?.claude_setup_token?.has_token ? "Enter new token to replace..." : "Paste setup token..."}
+                      className={`${inputClassName} pr-12`}
+                      style={inputStyle}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowSetupToken(!showSetupToken)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-lg transition-opacity hover:opacity-70"
+                      style={{ color: "var(--outline)" }}
+                    >
+                      {showSetupToken ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                    </button>
                   </div>
                 </div>
               )}

@@ -31,7 +31,7 @@ export default function AuthLayout({
               D
             </div>
             <span className="text-xl font-semibold tracking-tight" style={{ color: "var(--foreground)" }}>
-              DingDong RAG
+              OpenRAG
             </span>
           </div>
         </div>
@@ -57,21 +57,6 @@ export default function AuthLayout({
           </p>
         </div>
 
-        {/* Bottom stats */}
-        <div className="relative z-10 flex gap-8">
-          {[
-            { value: "10K+", label: "Documents Processed" },
-            { value: "50K+", label: "Entities Extracted" },
-            { value: "99.2%", label: "Accuracy Rate" },
-          ].map((stat) => (
-            <div key={stat.label}>
-              <div className="text-2xl font-bold" style={{ color: "var(--foreground)" }}>{stat.value}</div>
-              <div className="text-xs" style={{ color: "var(--muted-foreground)" }}>
-                {stat.label}
-              </div>
-            </div>
-          ))}
-        </div>
       </div>
 
       {/* Right form panel */}

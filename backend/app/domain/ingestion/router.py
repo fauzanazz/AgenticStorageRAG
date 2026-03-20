@@ -20,10 +20,12 @@ from app.domain.ingestion.exceptions import (
 )
 from app.domain.ingestion.schemas import (
     DefaultFolderResponse,
+    DriveBrowseEntry,
     DriveFolderEntry,
     IngestionJobListResponse,
     IngestionJobResponse,
     IngestionStatsResponse,
+    ProviderInfo,
     SaveDefaultFolderRequest,
     TriggerIngestionRequest,
 )
@@ -58,12 +60,30 @@ def _get_service(
     return IngestionService(db=db, storage=storage)
 
 
+@router.get(
+    "/providers",
+    response_model=list[ProviderInfo],
+    summary="List available ingestion providers",
+    description="Returns all registered source connectors with their configuration status.",
+)
+async def list_providers(
+    _user: "User" = Depends(_require_admin),
+) -> list[ProviderInfo]:
+    """List all registered ingestion source providers."""
+    from app.domain.ingestion.registry import get_all_connectors
+
+    return [
+        ProviderInfo(key=key, label=cls().label, configured=cls.is_configured())
+        for key, cls in get_all_connectors().items()
+    ]
+
+
 @router.post(
     "/trigger",
     response_model=IngestionJobResponse,
     status_code=status.HTTP_202_ACCEPTED,
     summary="Trigger a new ingestion job",
-    description="Starts ingesting files from Google Drive into the base Knowledge Graph. Admin only.",
+    description="Starts ingesting files from a configured source into the base Knowledge Graph. Admin only.",
 )
 async def trigger_ingestion(
     request: TriggerIngestionRequest = TriggerIngestionRequest(),
@@ -168,6 +188,38 @@ async def cancel_job(
         ) from e
 
 
+@router.post(
+    "/jobs/{job_id}/retry",
+    response_model=IngestionJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Retry a failed or cancelled ingestion job",
+    description="Resumes processing from where it left off — only retries files that failed or weren't processed.",
+)
+async def retry_job(
+    job_id: uuid.UUID,
+    user: "User" = Depends(_require_admin),
+    service: IngestionService = Depends(_get_service),
+) -> IngestionJobResponse:
+    """Retry a failed or cancelled ingestion job."""
+    try:
+        return await service.retry_job(job_id, admin_user_id=user.id)
+    except IngestionJobNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=e.message,
+        ) from e
+    except IngestionAlreadyRunningError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=e.message,
+        ) from e
+    except IngestionError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=e.message,
+        ) from e
+
+
 # ── Drive folder browsing ─────────────────────────────────────────────────
 
 
@@ -179,12 +231,16 @@ async def cancel_job(
 )
 async def browse_drive_folders(
     parent_id: str = Query("root", description="Parent folder ID ('root' for top-level)"),
-    _user: "User" = Depends(_require_admin),
+    user: "User" = Depends(_require_admin),
     service: IngestionService = Depends(_get_service),
 ) -> list[DriveFolderEntry]:
-    """List subfolders of a Google Drive folder."""
+    """List subfolders of a Google Drive folder.
+
+    Uses the logged-in user's OAuth tokens to browse their personal Drive.
+    Falls back to server-level credentials when no per-user tokens exist.
+    """
     try:
-        return await service.browse_drive_folders(parent_id)
+        return await service.browse_drive_folders(parent_id, user_id=user.id)
     except Exception as e:
         logger.error("Failed to browse Drive folders: %s", e)
         raise HTTPException(
@@ -218,3 +274,80 @@ async def save_default_folder(
 ) -> DefaultFolderResponse:
     """Save/update the default Drive folder for ingestion."""
     return await service.save_default_folder(request.folder_id, request.folder_name)
+
+
+# ── User-facing Drive browsing (for chat attachments) ─────────────────────
+
+
+@router.get(
+    "/drive/browse-files",
+    response_model=list[DriveBrowseEntry],
+    summary="Browse Drive files for attachments",
+    description=(
+        "Browse files and folders in the user's connected Google Drive. "
+        "Returns files filtered to supported attachment types plus all folders."
+    ),
+)
+async def browse_drive_for_attachments(
+    folder_id: str | None = Query(None, description="Drive folder ID. None = root."),
+    user: "User" = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[DriveBrowseEntry]:
+    """Browse files and folders in the user's connected Google Drive.
+
+    Returns files filtered to supported attachment types plus all folders
+    for navigation. Available to any authenticated user (not admin-only).
+    """
+    from app.domain.auth.models import OAuthAccount
+    from sqlalchemy import select as sa_select
+
+    result = await db.execute(
+        sa_select(OAuthAccount).where(
+            OAuthAccount.user_id == user.id,
+            OAuthAccount.provider == "google",
+        )
+    )
+    oauth = result.scalar_one_or_none()
+    if not oauth:
+        raise HTTPException(
+            status_code=400,
+            detail="Google Drive not connected. Please connect your Google account in settings.",
+        )
+
+    from app.domain.ingestion.drive_connector import GoogleDriveConnector
+
+    connector = GoogleDriveConnector.from_user_tokens(
+        access_token=oauth.access_token,
+        refresh_token=oauth.refresh_token,
+    )
+
+    ATTACHMENT_MIME_TYPES = {
+        "image/png", "image/jpeg", "image/gif", "image/webp",
+        "text/plain", "application/pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.google-apps.document",  # Google Docs (exportable)
+    }
+
+    try:
+        target_folder = folder_id or "root"
+        entries = await connector.list_folder_children(target_folder)
+
+        browse_entries = []
+        for entry in entries:
+            if entry.is_folder or entry.mime_type in ATTACHMENT_MIME_TYPES:
+                browse_entries.append(DriveBrowseEntry(
+                    id=entry.file_id,
+                    name=entry.name,
+                    mime_type=entry.mime_type,
+                    size=entry.size,
+                    is_folder=entry.is_folder,
+                    modified_time=entry.modified_time,
+                ))
+
+        return browse_entries
+    except Exception as e:
+        logger.exception("Failed to browse Drive")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to browse Drive: {e}",
+        ) from e

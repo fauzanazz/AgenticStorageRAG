@@ -1,9 +1,11 @@
 /**
- * Typed API client for the DingDong RAG backend.
+ * Typed API client for the OpenRAG backend.
  *
  * All API calls go through this client. Never use fetch() directly
  * in components or hooks -- always use this client.
  */
+
+import { getAccessToken } from "@/lib/token-store";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
@@ -253,8 +255,5 @@ export class ApiError extends Error {
 
 export const apiClient = new ApiClient({
   baseUrl: API_BASE_URL,
-  getToken: () => {
-    if (typeof window === "undefined") return null;
-    return localStorage.getItem("access_token");
-  },
+  getToken: () => getAccessToken(),
 });

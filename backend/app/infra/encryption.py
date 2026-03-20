@@ -14,10 +14,11 @@ from app.config import get_settings
 
 
 def _get_fernet() -> Fernet:
-    """Derive a Fernet instance from the app's JWT_SECRET_KEY."""
+    """Derive a Fernet instance from the app's encryption key (or JWT secret as fallback)."""
     settings = get_settings()
+    key_material = settings.encryption_key or settings.jwt_secret_key
     # SHA-256 produces exactly 32 bytes → valid Fernet key when base64url-encoded
-    raw_key = hashlib.sha256(settings.jwt_secret_key.encode()).digest()
+    raw_key = hashlib.sha256(key_material.encode()).digest()
     fernet_key = base64.urlsafe_b64encode(raw_key)
     return Fernet(fernet_key)
 

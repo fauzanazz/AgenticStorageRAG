@@ -7,7 +7,7 @@ from app.domain.settings.interfaces import AbstractSettingsService
 from app.domain.settings.models import UserModelSettings
 from app.domain.settings.schemas import (
     ApiKeyStatus,
-    ClaudeOAuthStatus,
+    ClaudeSetupTokenStatus,
     ModelSettingsResponse,
     UpdateModelSettingsRequest,
 )
@@ -52,6 +52,9 @@ class SettingsService(AbstractSettingsService):
         )
         row.openrouter_api_key_enc = self._apply_key(
             request.openrouter_api_key, row.openrouter_api_key_enc
+        )
+        row.claude_oauth_token_enc = self._apply_key(
+            request.claude_setup_token, row.claude_oauth_token_enc
         )
 
         await self._db.commit()
@@ -105,8 +108,7 @@ class SettingsService(AbstractSettingsService):
             openai_api_key=ApiKeyStatus(has_key=row.openai_api_key_enc is not None),
             dashscope_api_key=ApiKeyStatus(has_key=row.dashscope_api_key_enc is not None),
             openrouter_api_key=ApiKeyStatus(has_key=row.openrouter_api_key_enc is not None),
-            claude_oauth=ClaudeOAuthStatus(
-                connected=row.claude_oauth_token_enc is not None,
-                expires_at=row.claude_oauth_token_expiry.isoformat() if row.claude_oauth_token_expiry else None,
+            claude_setup_token=ClaudeSetupTokenStatus(
+                has_token=row.claude_oauth_token_enc is not None,
             ),
         )

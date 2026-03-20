@@ -26,7 +26,7 @@ vi.mock("@/hooks/use-auth", () => ({
 // Mock sidebar components that require SidebarProvider context
 vi.mock("@/components/layout/mobile-header", () => ({
   MobileHeader: ({ title }: { title?: string }) => (
-    <header data-testid="mobile-header">{title || "DingDong RAG"}</header>
+    <header data-testid="mobile-header">{title || "OpenRAG"}</header>
   ),
 }));
 

@@ -25,8 +25,8 @@ export interface ToolResultItem {
 }
 
 export interface NarrativeStep {
-  type: "thinking" | "tool_call";
-  /** For thinking steps — the reasoning text */
+  type: "thinking" | "tool_call" | "narration";
+  /** For thinking/narration steps — the text */
   content?: string;
   /** For tool_call steps */
   tool_name?: string;
@@ -104,4 +104,65 @@ export interface CitationPayload {
 
 export interface ErrorPayload {
   error: string;
+}
+
+// ---------------------------------------------------------------------------
+// Artifact types
+// ---------------------------------------------------------------------------
+
+export interface Artifact {
+  id: string;
+  conversation_id: string;
+  message_id?: string;
+  user_id: string;
+  type: string;
+  title: string;
+  content: string;
+  language?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ArtifactStartPayload {
+  artifact_id: string;
+  title: string;
+  type: string;
+}
+
+export interface ArtifactDeltaPayload {
+  artifact_id: string;
+  content: string;
+}
+
+export interface ArtifactEndPayload {
+  artifact_id: string;
+  title: string;
+  type: string;
+  content_length: number;
+  error?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Chat Attachments
+// ---------------------------------------------------------------------------
+
+export type AttachmentStatus = "uploading" | "ready" | "error";
+
+export interface ChatAttachment {
+  id: string;
+  filename: string;
+  size: number;
+  mime_type: string;
+  status: AttachmentStatus;
+  /** Only set when status is "error" */
+  error?: string;
+}
+
+export interface DriveBrowseEntry {
+  id: string;
+  name: string;
+  mime_type: string;
+  size: number | null;
+  is_folder: boolean;
+  modified_time: string | null;
 }

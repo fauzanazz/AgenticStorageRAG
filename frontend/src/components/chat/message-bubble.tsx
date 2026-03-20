@@ -3,7 +3,9 @@
 import { useMemo } from "react";
 import { Streamdown, type Components, type AllowedTags } from "streamdown";
 import { code } from "@streamdown/code";
+import { math } from "@streamdown/math";
 import "streamdown/styles.css";
+import "katex/dist/katex.min.css";
 import type { ChatMessage, Citation } from "@/types/chat";
 import { SourcesBar } from "@/components/chat/sources-bar";
 import { ThinkingBlock } from "@/components/chat/thinking-block";
@@ -29,12 +31,7 @@ const ALLOWED_TAGS: AllowedTags = {
 function buildComponents(citations: Citation[]): Components {
   return {
     // Custom citation tag → clickable superscript
-    citation: ({
-      ref,
-    }: {
-      ref?: string;
-      children?: React.ReactNode;
-    }) => {
+    citation: ({ ref }: { ref?: string; children?: React.ReactNode }) => {
       const index = ref ? parseInt(ref, 10) - 1 : -1;
       const citation = index >= 0 ? citations[index] : undefined;
       const url = citation?.source_url;
@@ -196,16 +193,27 @@ export function MessageBubble({ message, isStreaming }: MessageBubbleProps) {
                 );
               }
               if (step.type === "tool_call") {
-                return <ToolCallBlock key={`tool-${step.tool_name}-${i}`} step={step} />;
+                return (
+                  <ToolCallBlock
+                    key={`tool-${step.tool_name}-${i}`}
+                    step={step}
+                  />
+                );
+              }
+              if (step.type === "narration") {
+                return (
+                  <p
+                    key={`narration-${i}`}
+                    className="text-sm py-1"
+                    style={{ color: "var(--on-surface-variant)" }}
+                  >
+                    {step.content}
+                  </p>
+                );
               }
               return null;
             })}
           </div>
-        )}
-
-        {/* Sources bar — above assistant messages only */}
-        {!isUser && message.citations.length > 0 && (
-          <SourcesBar citations={message.citations} />
         )}
 
         {/* User bubble */}
@@ -224,7 +232,7 @@ export function MessageBubble({ message, isStreaming }: MessageBubbleProps) {
         {!isUser && hasContent && (
           <div className="text-sm" style={{ color: "#323035" }}>
             <Streamdown
-              plugins={{ code }}
+              plugins={{ code, math }}
               allowedTags={ALLOWED_TAGS}
               components={components}
               isAnimating={isStreaming}
@@ -232,6 +240,11 @@ export function MessageBubble({ message, isStreaming }: MessageBubbleProps) {
               {processedContent}
             </Streamdown>
           </div>
+        )}
+
+        {/* Sources bar — below assistant messages only */}
+        {!isUser && message.citations.length > 0 && (
+          <SourcesBar citations={message.citations} />
         )}
 
         {/* Loading state — only when no steps and no content */}
@@ -242,10 +255,7 @@ export function MessageBubble({ message, isStreaming }: MessageBubbleProps) {
         )}
 
         {/* Timestamp */}
-        <p
-          className="text-[10px]"
-          style={{ color: "var(--outline-variant)" }}
-        >
+        <p className="text-[10px]" style={{ color: "var(--outline-variant)" }}>
           {new Date(message.timestamp).toLocaleTimeString([], {
             hour: "2-digit",
             minute: "2-digit",

@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.exc import DBAPIError, OperationalError
+from sqlalchemy.exc import DBAPIError, OperationalError, PendingRollbackError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.ingestion.drive_connector import SUPPORTED_MIME_TYPES
@@ -33,16 +33,21 @@ from app.infra.storage import StorageClient
 
 logger = logging.getLogger(__name__)
 
-_RETRY_EXCEPTIONS = (DBAPIError, OperationalError, OSError, ConnectionError)
+_RETRY_EXCEPTIONS = (DBAPIError, OperationalError, OSError, ConnectionError, PendingRollbackError)
 
 
 async def _db_retry(
     coro_fn: Any,
     *,
+    db: AsyncSession | None = None,
     retries: int = 3,
     delay: float = 1.0,
 ) -> Any:
-    """Retry a DB coroutine on transient connection errors (pgbouncer drops)."""
+    """Retry a DB coroutine on transient connection errors (pgbouncer drops).
+
+    If ``db`` is provided, issues a rollback before each retry to clear
+    PendingRollbackError states left by prior failed queries.
+    """
     for attempt in range(1, retries + 1):
         try:
             return await coro_fn()
@@ -50,6 +55,11 @@ async def _db_retry(
             if attempt == retries:
                 logger.error("DB operation failed after %d retries: %s", retries, exc)
                 raise
+            if db is not None:
+                try:
+                    await db.rollback()
+                except Exception:
+                    pass
             logger.warning(
                 "DB connection error (attempt %d/%d), retrying in %.1fs: %s",
                 attempt, retries, delay, exc,
@@ -67,7 +77,7 @@ async def _check_cancelled(db: AsyncSession, job_id: uuid.UUID) -> bool:
         return result.scalar_one_or_none() == IngestionStatus.CANCELLED
 
     try:
-        return await _db_retry(_query)
+        return await _db_retry(_query, db=db)
     except _RETRY_EXCEPTIONS:
         # Connection truly dead — assume not cancelled so the job can finish gracefully
         return False
@@ -111,7 +121,7 @@ class IngestionOrchestrator:
             return False
 
         try:
-            return await _db_retry(_query)
+            return await _db_retry(_query, db=self._db)
         except _RETRY_EXCEPTIONS:
             return False
 
@@ -214,6 +224,7 @@ class IngestionOrchestrator:
         job: IngestionJob,
         admin_user_id: uuid.UUID,
         force: bool = False,
+        retry: bool = False,
     ) -> IngestionJob:
         """Execute an ingestion job with parallel scanning and processing.
 
@@ -221,6 +232,7 @@ class IngestionOrchestrator:
             job: The IngestionJob to track progress on.
             admin_user_id: User ID to associate ingested documents with.
             force: If True, re-ingest files even if already processed.
+            retry: If True, skip scanning and only process pending IndexedFiles.
 
         Returns:
             Updated IngestionJob with final status.
@@ -242,51 +254,40 @@ class IngestionOrchestrator:
             if await self._is_cancelled(job):
                 return job
 
-            # 2. Discover top-level children of root folder
-            root_folder_id = job.folder_id or "root"
-            entries = await self._connector.list_folder_children(root_folder_id)
-
-            subfolders: list[tuple[str, str]] = []
-            root_files: list[DriveFolderEntry] = []
-            for entry in entries:
-                if entry.is_folder:
-                    subfolders.append((entry.file_id, entry.name))
-                elif entry.mime_type not in _SKIP_MIME and entry.mime_type in SUPPORTED_MIME_TYPES:
-                    root_files.append(entry)
-
-            # 3. Index root-level files directly (typically few)
-            await self._index_root_files(job, root_files, force)
-
-            # 4. Split subfolders between 2 scanner workers (round-robin)
-            seeds_a: list[tuple[str, str]] = []
-            seeds_b: list[tuple[str, str]] = []
-            for i, folder in enumerate(subfolders):
-                (seeds_a if i % 2 == 0 else seeds_b).append(folder)
-
-            # 5. Set up signaling
+            # Set up signaling
             scanning_done = asyncio.Event()
 
-            # 6. Define workers
-            async def scanner_worker(seeds: list[tuple[str, str]], worker_id: int) -> None:
-                if not seeds:
-                    return
-                async with self._session_factory() as db:
-                    scanner = DriveScanner(db, self._connector, self._llm, job)
-                    await scanner.scan_seeds(
-                        seeds,
-                        force=force,
-                        is_cancelled=lambda: _check_cancelled(db, job.id),
-                    )
+            if retry:
+                # Retry mode: scanning already done, IndexedFiles already exist.
+                # Just signal scanning complete and run the processor.
+                scanning_done.set()
+                logger.info(
+                    "Retry mode: skipping scanning, processing pending files for job %s",
+                    job.id,
+                )
+            else:
+                # 2. Discover top-level children of root folder
+                root_folder_id = job.folder_id or "root"
+                entries = await self._connector.list_folder_children(root_folder_id)
 
-            async def scanning_phase() -> None:
-                try:
-                    await asyncio.gather(
-                        scanner_worker(seeds_a, 0),
-                        scanner_worker(seeds_b, 1),
-                    )
-                finally:
-                    scanning_done.set()
+                subfolders: list[tuple[str, str]] = []
+                root_files: list[DriveFolderEntry] = []
+                for entry in entries:
+                    if entry.is_folder:
+                        subfolders.append((entry.file_id, entry.name))
+                    elif entry.mime_type not in _SKIP_MIME and entry.mime_type in SUPPORTED_MIME_TYPES:
+                        root_files.append(entry)
 
+                # 3. Index root-level files directly (typically few)
+                await self._index_root_files(job, root_files, force)
+
+                # 4. Split subfolders between 2 scanner workers (round-robin)
+                seeds_a: list[tuple[str, str]] = []
+                seeds_b: list[tuple[str, str]] = []
+                for i, folder in enumerate(subfolders):
+                    (seeds_a if i % 2 == 0 else seeds_b).append(folder)
+
+            # Define workers
             async def processor_worker() -> None:
                 pipeline = StagePipeline(
                     session_factory=self._session_factory,
@@ -303,8 +304,31 @@ class IngestionOrchestrator:
                     ),
                 )
 
-            # 7. Run scanning + processing in parallel
-            await asyncio.gather(scanning_phase(), processor_worker())
+            # Run scanning + processing
+            if retry:
+                await processor_worker()
+            else:
+                async def scanner_worker(seeds: list[tuple[str, str]], worker_id: int) -> None:
+                    if not seeds:
+                        return
+                    async with self._session_factory() as db:
+                        scanner = DriveScanner(db, self._connector, self._llm, job)
+                        await scanner.scan_seeds(
+                            seeds,
+                            force=force,
+                            is_cancelled=lambda: _check_cancelled(db, job.id),
+                        )
+
+                async def scanning_phase() -> None:
+                    try:
+                        await asyncio.gather(
+                            scanner_worker(seeds_a, 0),
+                            scanner_worker(seeds_b, 1),
+                        )
+                    finally:
+                        scanning_done.set()
+
+                await asyncio.gather(scanning_phase(), processor_worker())
 
             if await self._is_cancelled(job):
                 return job

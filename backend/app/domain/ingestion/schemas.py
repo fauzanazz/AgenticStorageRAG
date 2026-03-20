@@ -15,6 +15,10 @@ from pydantic import BaseModel, Field
 class TriggerIngestionRequest(BaseModel):
     """Request to trigger a new ingestion job."""
 
+    source: str = Field(
+        default="google_drive",
+        description="Source connector key (e.g. 'google_drive').",
+    )
     folder_id: str | None = Field(
         default=None,
         description="Google Drive folder ID. None = scan root.",
@@ -23,6 +27,14 @@ class TriggerIngestionRequest(BaseModel):
         default=False,
         description="Re-ingest files even if already processed.",
     )
+
+
+class ProviderInfo(BaseModel):
+    """Describes an available ingestion source provider."""
+
+    key: str
+    label: str
+    configured: bool
 
 
 class IngestionJobResponse(BaseModel):
@@ -82,6 +94,7 @@ class DriveFolderEntry(BaseModel):
     size: int | None = None
     modified_time: str | None = None
     is_folder: bool = False
+    target_id: str | None = None  # resolved shortcut target
 
 
 class DefaultFolderResponse(BaseModel):
@@ -128,6 +141,17 @@ class EnrichedFileInfo(DriveFileInfo):
     folder_path: str = ""
     folder_path_ids: list[str] = Field(default_factory=list)
     classification: FileMetadataClassification | None = None
+
+
+class DriveBrowseEntry(BaseModel):
+    """A file or folder entry from Google Drive browsing (user-facing)."""
+
+    id: str
+    name: str
+    mime_type: str
+    size: int | None = None
+    is_folder: bool = False
+    modified_time: str | None = None
 
 
 class IngestionProgressEvent(BaseModel):

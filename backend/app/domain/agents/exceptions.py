@@ -45,3 +45,11 @@ class ConversationAccessDenied(AgentBaseError):
 
     def __init__(self) -> None:
         super().__init__("Access denied to this conversation")
+
+
+class ArtifactNotFoundError(AgentBaseError):
+    """Raised when an artifact is not found."""
+
+    def __init__(self, artifact_id: str):
+        super().__init__(f"Artifact not found: {artifact_id}")
+        self.artifact_id = artifact_id

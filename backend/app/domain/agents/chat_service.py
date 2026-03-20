@@ -19,8 +19,9 @@ from app.domain.agents.exceptions import (
     ConversationNotFoundError,
 )
 from app.domain.agents.interfaces import IChatService
-from app.domain.agents.models import Conversation, Message
+from app.domain.agents.models import Artifact, Conversation, Message
 from app.domain.agents.schemas import (
+    ArtifactResponse,
     Citation,
     ConversationResponse,
     MessageResponse,
@@ -239,3 +240,102 @@ class ChatService(IChatService):
             )
             for msg in messages
         ]
+
+    # -----------------------------------------------------------------------
+    # Artifact CRUD
+    # -----------------------------------------------------------------------
+
+    async def create_artifact(
+        self,
+        conversation_id: uuid.UUID,
+        user_id: uuid.UUID,
+        title: str,
+        content: str,
+        type: str = "markdown",
+        message_id: uuid.UUID | None = None,
+        language: str | None = None,
+    ) -> ArtifactResponse:
+        """Create a new artifact linked to a conversation."""
+        artifact = Artifact(
+            conversation_id=conversation_id,
+            message_id=message_id,
+            user_id=user_id,
+            type=type,
+            title=title,
+            content=content,
+            language=language,
+        )
+        self._db.add(artifact)
+        await self._db.flush()
+        await self._db.refresh(artifact)
+
+        return ArtifactResponse(
+            id=artifact.id,
+            conversation_id=artifact.conversation_id,
+            message_id=artifact.message_id,
+            user_id=artifact.user_id,
+            type=artifact.type,
+            title=artifact.title,
+            content=artifact.content,
+            language=artifact.language,
+            created_at=artifact.created_at,
+            updated_at=artifact.updated_at,
+        )
+
+    async def get_artifacts_by_conversation(
+        self, conversation_id: uuid.UUID, user_id: uuid.UUID
+    ) -> list[ArtifactResponse]:
+        """Get all artifacts for a conversation with ownership check."""
+        conversation = await self._db.get(Conversation, conversation_id)
+        if not conversation:
+            raise ConversationNotFoundError(str(conversation_id))
+        if conversation.user_id != user_id:
+            raise ConversationAccessDenied()
+
+        stmt = (
+            select(Artifact)
+            .where(Artifact.conversation_id == conversation_id)
+            .order_by(Artifact.created_at)
+        )
+        result = await self._db.execute(stmt)
+        artifacts = result.scalars().all()
+
+        return [
+            ArtifactResponse(
+                id=a.id,
+                conversation_id=a.conversation_id,
+                message_id=a.message_id,
+                user_id=a.user_id,
+                type=a.type,
+                title=a.title,
+                content=a.content,
+                language=a.language,
+                created_at=a.created_at,
+                updated_at=a.updated_at,
+            )
+            for a in artifacts
+        ]
+
+    async def get_artifact(
+        self, artifact_id: uuid.UUID, user_id: uuid.UUID
+    ) -> ArtifactResponse:
+        """Get a single artifact with ownership check."""
+        artifact = await self._db.get(Artifact, artifact_id)
+        if not artifact:
+            from app.domain.agents.exceptions import ArtifactNotFoundError
+            raise ArtifactNotFoundError(str(artifact_id))
+        if artifact.user_id != user_id:
+            raise ConversationAccessDenied()
+
+        return ArtifactResponse(
+            id=artifact.id,
+            conversation_id=artifact.conversation_id,
+            message_id=artifact.message_id,
+            user_id=artifact.user_id,
+            type=artifact.type,
+            title=artifact.title,
+            content=artifact.content,
+            language=artifact.language,
+            created_at=artifact.created_at,
+            updated_at=artifact.updated_at,
+        )

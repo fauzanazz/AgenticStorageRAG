@@ -72,8 +72,15 @@ export interface IngestionStatsResponse {
 }
 
 export interface TriggerIngestionRequest {
+  source?: string;
   folder_id?: string | null;
   force?: boolean;
+}
+
+export interface ProviderInfo {
+  key: string;
+  label: string;
+  configured: boolean;
 }
 
 export interface DriveFolderEntry {
@@ -83,6 +90,7 @@ export interface DriveFolderEntry {
   size: number | null;
   modified_time: string | null;
   is_folder: boolean;
+  target_id: string | null;
 }
 
 export interface DefaultFolder {

@@ -11,7 +11,7 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,17 +19,27 @@ from app.dependencies import get_current_user, get_db, get_user_model_settings
 from app.domain.agents.chat_service import ChatService
 from app.domain.agents.exceptions import (
     AgentBaseError,
+    ArtifactNotFoundError,
     ConversationAccessDenied,
     ConversationNotFoundError,
 )
 from app.domain.agents.rag_agent import RAGAgent
+from app.domain.agents.attachments import (
+    AttachmentService,
+    EXTENSION_TO_MIME,
+    AttachmentTooLargeError,
+    UnsupportedAttachmentTypeError,
+)
 from app.domain.agents.schemas import (
+    ArtifactResponse,
+    AttachmentResponse,
     ChatRequest,
     ConversationCreate,
     ConversationResponse,
+    DriveAttachmentRequest,
     MessageResponse,
 )
-from app.domain.agents.tools import HybridSearchTool
+from app.domain.agents.tools import GenerateDocumentTool, HybridSearchTool
 from app.domain.auth.models import User
 from app.domain.knowledge.graph_service import GraphService
 from app.domain.knowledge.hybrid_retriever import HybridRetriever
@@ -77,6 +87,7 @@ def _build_agent(
 
     tools = [
         HybridSearchTool(hybrid_retriever),
+        GenerateDocumentTool(llm=effective_llm, model_override=model_override),
     ]
 
     chat_service = ChatService(db=db)
@@ -216,6 +227,82 @@ async def chat_message(
     )
 
 
+# ── Attachment endpoints ─────────────────────────────────────────────
+
+
+@router.post("/attachments", response_model=AttachmentResponse, status_code=201)
+async def upload_attachment(
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> AttachmentResponse:
+    """Upload a file attachment for use in chat messages."""
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Filename is required")
+
+    content = await file.read()
+
+    # Always derive MIME type from extension — never trust client Content-Type
+    import os
+
+    ext = os.path.splitext(file.filename)[1].lower()
+    mime_type = EXTENSION_TO_MIME.get(ext)
+    if not mime_type:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {ext or 'unknown'}")
+
+    service = AttachmentService(db)
+    try:
+        attachment = await service.upload(user.id, content, file.filename, mime_type)
+        await db.commit()
+        return attachment
+    except (AttachmentTooLargeError, UnsupportedAttachmentTypeError) as e:
+        raise HTTPException(status_code=400, detail=e.message) from e
+
+
+@router.post(
+    "/attachments/from-drive",
+    response_model=list[AttachmentResponse],
+    status_code=201,
+)
+async def attach_from_drive(
+    body: DriveAttachmentRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[AttachmentResponse]:
+    """Download files from Google Drive and attach them for chat."""
+    from app.domain.auth.models import OAuthAccount
+    from sqlalchemy import select as sa_select
+
+    result = await db.execute(
+        sa_select(OAuthAccount).where(
+            OAuthAccount.user_id == user.id,
+            OAuthAccount.provider == "google",
+        )
+    )
+    oauth = result.scalar_one_or_none()
+    if not oauth:
+        raise HTTPException(
+            status_code=400,
+            detail="Google Drive not connected. Please connect your Google account in settings.",
+        )
+
+    from app.domain.ingestion.drive_connector import GoogleDriveConnector
+
+    connector = GoogleDriveConnector.from_user_tokens(
+        access_token=oauth.access_token,
+        refresh_token=oauth.refresh_token,
+    )
+
+    service = AttachmentService(db)
+    try:
+        attachments = await service.upload_from_drive(user.id, body.file_ids, connector)
+        await db.commit()
+        return attachments
+    except Exception as e:
+        logger.exception("Failed to attach files from Drive")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 # ── Conversation CRUD ─────────────────────────────────────────────────
 
 
@@ -289,3 +376,63 @@ async def get_messages(
         raise HTTPException(status_code=404, detail=e.message) from e
     except ConversationAccessDenied as e:
         raise HTTPException(status_code=403, detail=e.message) from e
+
+
+# ── Artifact endpoints ───────────────────────────────────────────────
+
+
+@router.get(
+    "/conversations/{conversation_id}/artifacts",
+    response_model=list[ArtifactResponse],
+)
+async def list_artifacts(
+    conversation_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    chat: ChatService = Depends(_get_chat_service),
+) -> list[ArtifactResponse]:
+    """List all artifacts for a conversation."""
+    try:
+        return await chat.get_artifacts_by_conversation(conversation_id, user.id)
+    except ConversationNotFoundError as e:
+        raise HTTPException(status_code=404, detail=e.message) from e
+    except ConversationAccessDenied as e:
+        raise HTTPException(status_code=403, detail=e.message) from e
+
+
+@router.get("/artifacts/{artifact_id}", response_model=ArtifactResponse)
+async def get_artifact(
+    artifact_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    chat: ChatService = Depends(_get_chat_service),
+) -> ArtifactResponse:
+    """Get a single artifact."""
+    try:
+        return await chat.get_artifact(artifact_id, user.id)
+    except ArtifactNotFoundError as e:
+        raise HTTPException(status_code=404, detail=e.message) from e
+    except ConversationAccessDenied as e:
+        raise HTTPException(status_code=403, detail=e.message) from e
+
+
+@router.get("/artifacts/{artifact_id}/download")
+async def download_artifact(
+    artifact_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    chat: ChatService = Depends(_get_chat_service),
+) -> StreamingResponse:
+    """Download an artifact as a markdown file."""
+    try:
+        artifact = await chat.get_artifact(artifact_id, user.id)
+    except ArtifactNotFoundError as e:
+        raise HTTPException(status_code=404, detail=e.message) from e
+    except ConversationAccessDenied as e:
+        raise HTTPException(status_code=403, detail=e.message) from e
+
+    safe_title = "".join(c if c.isalnum() or c in " -_" else "_" for c in artifact.title)
+    filename = f"{safe_title}.md"
+
+    return StreamingResponse(
+        iter([artifact.content]),
+        media_type="text/markdown",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

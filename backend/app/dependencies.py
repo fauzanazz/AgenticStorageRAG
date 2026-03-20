@@ -123,39 +123,13 @@ async def get_current_user(
 async def get_user_model_settings(
     user_id: uuid.UUID = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
-    redis: RedisClient = Depends(get_redis),
 ) -> UserModelSettings | None:
     """Load the current user's raw model settings row (with encrypted keys).
 
     Returns None if the user has no settings configured yet.
     Falls back gracefully — services must handle None and use server defaults.
-
-    Automatically refreshes near-expired Claude OAuth tokens.
     """
     from app.domain.settings.service import SettingsService
 
     service = SettingsService(db=db)
-    row = await service.get_raw_settings(user_id)
-
-    if (
-        row
-        and row.claude_oauth_token_enc
-        and row.claude_oauth_refresh_token_enc
-        and row.claude_oauth_token_expiry
-    ):
-        from datetime import UTC, datetime, timedelta
-
-        if row.claude_oauth_token_expiry < datetime.now(UTC) + timedelta(minutes=5):
-            try:
-                from app.domain.settings.claude_oauth import ClaudeOAuthService
-
-                oauth_service = ClaudeOAuthService(db=db, redis=redis)
-                await oauth_service.refresh_and_store(user_id, row.claude_oauth_refresh_token_enc)
-                await db.refresh(row)
-            except Exception:
-                import logging
-                logging.getLogger(__name__).warning(
-                    "Failed to refresh Claude OAuth token for user %s", user_id
-                )
-
-    return row
+    return await service.get_raw_settings(user_id)

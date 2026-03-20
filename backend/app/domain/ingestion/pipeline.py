@@ -162,6 +162,7 @@ class StagePipeline:
         )
 
         self._stats = PipelineStats()
+        self._neo4j_client: Any = None  # task-local Neo4j client (lazy init)
         self._retry_file_ids: list[uuid.UUID] = []
         self._retry_lock = asyncio.Lock()
 
@@ -218,6 +219,8 @@ class StagePipeline:
             for w in workers:
                 w.cancel()
             raise
+        finally:
+            await self._close_neo4j()
 
         # Retry pass for failed embed/KG files
         if self._retry_file_ids:
@@ -666,6 +669,28 @@ class StagePipeline:
 
         gc.collect()
 
+    async def _get_neo4j(self) -> Any:
+        """Get or create a task-local Neo4j client.
+
+        The global neo4j_client singleton is bound to the event loop from
+        worker startup. Celery tasks run in their own asyncio.run() loop,
+        so we need a fresh client bound to the current loop.
+        """
+        if self._neo4j_client is None:
+            from app.infra.neo4j_client import Neo4jClient
+            self._neo4j_client = Neo4jClient()
+            await self._neo4j_client.connect()
+        return self._neo4j_client
+
+    async def _close_neo4j(self) -> None:
+        """Close the task-local Neo4j client if one was created."""
+        if self._neo4j_client is not None:
+            try:
+                await self._neo4j_client.close()
+            except Exception:
+                pass
+            self._neo4j_client = None
+
     async def _extract_kg_for_file(self, ext: ExtractResult) -> bool:
         """Run KG extraction for a single file's chunks. Returns True on success."""
         if not ext.chunks:
@@ -675,9 +700,9 @@ class StagePipeline:
             async with self._session_factory() as db:
                 from app.domain.knowledge.kg_builder import KGBuilder
                 from app.domain.knowledge.graph_service import GraphService
-                from app.infra.neo4j_client import neo4j_client
 
-                graph_service = GraphService(db=db, neo4j=neo4j_client)
+                neo4j = await self._get_neo4j()
+                graph_service = GraphService(db=db, neo4j=neo4j)
                 kg_builder = KGBuilder(graph_service=graph_service, llm=self._llm)
 
                 chunk_dicts = [

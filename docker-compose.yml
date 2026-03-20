@@ -1,4 +1,4 @@
-# DingDong RAG - Local Development
+# OpenRAG - Local Development
 #
 # Two modes:
 #   make dev          → Full local stack (Postgres + Neo4j + Redis + backend + worker + frontend)
@@ -18,10 +18,10 @@ services:
   neo4j:
     image: neo4j:5-community
     ports:
-      - "17474:7474"   # Browser → http://localhost:17474
-      - "17687:7687"   # Bolt
+      - "127.0.0.1:17474:7474"   # Browser → http://localhost:17474
+      - "127.0.0.1:17687:7687"   # Bolt
     environment:
-      - NEO4J_AUTH=neo4j/dingdong_dev
+      - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD:-dingdong_dev}
       - NEO4J_PLUGINS=["apoc"]
       - NEO4J_initial_dbms_default__database=dingdongrag
     volumes:
@@ -40,7 +40,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "16379:6379"
+      - "127.0.0.1:16379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -58,11 +58,11 @@ services:
     image: pgvector/pgvector:pg17
     profiles: ["local"]
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=dingdong_rag
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_DB=${POSTGRES_DB:-dingdong_rag}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -78,14 +78,14 @@ services:
       target: development
     profiles: ["local"]
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
       - DEBUG=true
       - ENVIRONMENT=development
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/dingdong_rag
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-dingdong_rag}
       - NEO4J_URI=bolt://neo4j:7687
       - NEO4J_USER=neo4j
-      - NEO4J_PASSWORD=dingdong_dev
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-dingdong_dev}
       - NEO4J_DATABASE=dingdongrag
       - REDIS_URL=redis://redis:6379/0
       - ALLOWED_ORIGINS=["http://localhost:3000"]
@@ -117,10 +117,10 @@ services:
     environment:
       - DEBUG=true
       - ENVIRONMENT=development
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/dingdong_rag
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-dingdong_rag}
       - NEO4J_URI=bolt://neo4j:7687
       - NEO4J_USER=neo4j
-      - NEO4J_PASSWORD=dingdong_dev
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-dingdong_dev}
       - NEO4J_DATABASE=dingdongrag
       - REDIS_URL=redis://redis:6379/0
     env_file:
@@ -143,7 +143,7 @@ services:
       target: development
     profiles: ["local"]
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     command: ["npx", "next", "dev", "--webpack"]
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
@@ -165,13 +165,13 @@ services:
       target: development
     profiles: ["supabase"]
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
       - DEBUG=true
       - ENVIRONMENT=development
       - NEO4J_URI=bolt://neo4j:7687
       - NEO4J_USER=neo4j
-      - NEO4J_PASSWORD=dingdong_dev
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-dingdong_dev}
       - NEO4J_DATABASE=dingdongrag
       - REDIS_URL=redis://redis:6379/0
       - ALLOWED_ORIGINS=["http://localhost:3000"]
@@ -207,7 +207,7 @@ services:
       - ENVIRONMENT=development
       - NEO4J_URI=bolt://neo4j:7687
       - NEO4J_USER=neo4j
-      - NEO4J_PASSWORD=dingdong_dev
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-dingdong_dev}
       - NEO4J_DATABASE=dingdongrag
       - REDIS_URL=redis://redis:6379/0
     env_file:
@@ -228,7 +228,7 @@ services:
       target: development
     profiles: ["supabase"]
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     command: ["npx", "next", "dev", "--webpack"]
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1

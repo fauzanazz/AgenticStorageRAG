@@ -1,4 +1,4 @@
-# Golden Paths -- DingDong RAG
+# Golden Paths -- OpenRAG
 
 This document describes the ONE correct way to add each type of component.
 AI agents and human developers should follow these paths exactly.

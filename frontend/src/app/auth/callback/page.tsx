@@ -4,6 +4,26 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/hooks/use-auth";
+import { apiClient } from "@/lib/api-client";
+import { setAccessToken } from "@/lib/token-store";
+
+interface AuthTokens {
+  access_token: string;
+  refresh_token: string;
+  token_type: string;
+}
+
+interface OAuthTokenResponse {
+  user: {
+    id: string;
+    email: string;
+    full_name: string;
+    is_active: boolean;
+    is_admin: boolean;
+    created_at: string;
+  };
+  tokens: AuthTokens;
+}
 
 export default function OAuthCallbackPage() {
   const router = useRouter();
@@ -12,43 +32,40 @@ export default function OAuthCallbackPage() {
 
   useEffect(() => {
     async function handleCallback() {
-      // Check for error in query params
       const params = new URLSearchParams(window.location.search);
+
+      // Check for error in query params
       const errorParam = params.get("error");
       if (errorParam) {
-        setError(decodeURIComponent(errorParam));
+        setError(errorParam);
         return;
       }
 
-      // Parse tokens from URL fragment
-      const hash = window.location.hash.substring(1); // remove #
-      if (!hash) {
+      // Exchange one-time code for tokens
+      const code = params.get("code");
+      if (!code) {
         setError("No authentication data received");
         return;
       }
 
-      const fragment = new URLSearchParams(hash);
-      const accessToken = fragment.get("access_token");
-      const refreshToken = fragment.get("refresh_token");
-
-      if (!accessToken || !refreshToken) {
-        setError("Incomplete authentication data");
-        return;
-      }
-
-      // Store tokens (same keys as existing auth)
-      localStorage.setItem("access_token", accessToken);
-      localStorage.setItem("refresh_token", refreshToken);
-
-      // Clean the URL (remove tokens from address bar)
-      window.history.replaceState(null, "", "/auth/callback");
-
-      // Load user profile and update AuthProvider state
       try {
+        const response = await apiClient.post<OAuthTokenResponse>(
+          "/auth/oauth/token",
+          { code }
+        );
+
+        // Store access token in memory, refresh token in localStorage
+        setAccessToken(response.tokens.access_token);
+        localStorage.setItem("refresh_token", response.tokens.refresh_token);
+
+        // Clean the URL
+        window.history.replaceState(null, "", "/auth/callback");
+
+        // Refresh auth state (will set access_token in memory)
         await refreshAuth();
         router.push("/");
       } catch {
-        setError("Failed to load user profile");
+        setError("Failed to complete authentication");
       }
     }
 

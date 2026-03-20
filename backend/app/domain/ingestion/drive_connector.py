@@ -69,7 +69,7 @@ _GOOGLE_WORKSPACE_EXPORT_MAP: dict[str, tuple[str, str]] = {
 SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 
 # Fields to request from Drive API
-FILE_FIELDS = "id, name, mimeType, size, modifiedTime, parents"
+FILE_FIELDS = "id, name, mimeType, size, modifiedTime, parents, shortcutDetails"
 LIST_FIELDS = f"nextPageToken, files({FILE_FIELDS})"
 
 
@@ -89,18 +89,67 @@ class GoogleDriveConnector(SourceConnector):
         self._credentials: Any | None = None
         self._auth_method: str | None = None
 
+    @classmethod
+    def from_user_tokens(
+        cls,
+        access_token: str,
+        refresh_token: str | None = None,
+    ) -> "GoogleDriveConnector":
+        """Create a connector pre-authenticated with per-user OAuth tokens.
+
+        Used for folder browsing on behalf of the logged-in user.
+        The connector is ready to use immediately (no authenticate() needed).
+        """
+        settings = get_settings()
+        instance = cls()
+        instance._credentials = Credentials(
+            token=access_token,
+            refresh_token=refresh_token,
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=settings.google_client_id,
+            client_secret=settings.google_client_secret,
+            scopes=SCOPES,
+        )
+        instance._service = build("drive", "v3", credentials=instance._credentials)
+        instance._auth_method = "user_oauth"
+        return instance
+
     @property
     def source_name(self) -> str:
         return "google_drive"
+
+    @property
+    def label(self) -> str:
+        return "Google Drive"
+
+    @classmethod
+    def is_configured(cls) -> bool:
+        """Check whether Google Drive can be used.
+
+        Returns True when either:
+        - Server-level credentials exist (SA file/json or full OAuth triple), OR
+        - Google OAuth client is configured (users can connect their own accounts)
+        """
+        settings = get_settings()
+        return bool(
+            settings.google_service_account_file
+            or settings.google_service_account_json
+            or (settings.google_client_id and settings.google_client_secret)
+        )
 
     async def authenticate(self) -> bool:
         """Authenticate with Google Drive.
 
         Tries Service Account first, then falls back to OAuth2.
+        Skips if already authenticated (e.g. via from_user_tokens).
 
         Returns:
             True if authentication succeeded
         """
+        # Already authenticated (e.g. from_user_tokens)
+        if self._credentials is not None and self._service is not None:
+            return True
+
         settings = get_settings()
 
         try:
@@ -389,6 +438,20 @@ class GoogleDriveConnector(SourceConnector):
                 result = request.execute()
                 for f in result.get("files", []):
                     mime = f["mimeType"]
+                    shortcut = f.get("shortcutDetails")
+                    is_folder = mime == "application/vnd.google-apps.folder"
+                    target_id: str | None = None
+
+                    # Resolve shortcuts that point to folders
+                    if (
+                        mime == "application/vnd.google-apps.shortcut"
+                        and shortcut
+                        and shortcut.get("targetMimeType")
+                        == "application/vnd.google-apps.folder"
+                    ):
+                        is_folder = True
+                        target_id = shortcut["targetId"]
+
                     entries.append(
                         DriveFolderEntry(
                             file_id=f["id"],
@@ -396,7 +459,8 @@ class GoogleDriveConnector(SourceConnector):
                             mime_type=mime,
                             size=int(f["size"]) if f.get("size") else None,
                             modified_time=f.get("modifiedTime"),
-                            is_folder=(mime == "application/vnd.google-apps.folder"),
+                            is_folder=is_folder,
+                            target_id=target_id,
                         )
                     )
                 page_token = result.get("nextPageToken")

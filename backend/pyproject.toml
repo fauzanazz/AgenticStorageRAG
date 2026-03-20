@@ -1,5 +1,5 @@
 [project]
-name = "dingdong-rag"
+name = "openrag"
 version = "0.1.0"
 description = "Agentic Knowledge Graph RAG system"
 requires-python = ">=3.12"
@@ -31,6 +31,7 @@ dependencies = [
     "google-auth>=2.36.0",
     "google-auth-oauthlib>=1.2.0",
     "google-api-python-client>=2.160.0",
+    "psycopg2-binary>=2.9.11",
 ]
 
 [project.optional-dependencies]

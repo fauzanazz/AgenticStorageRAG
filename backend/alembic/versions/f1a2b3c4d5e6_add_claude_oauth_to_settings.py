@@ -1,6 +1,6 @@
 """add claude oauth to user_model_settings
 
-Revision ID: a1b2c3d4e5f6
+Revision ID: f1a2b3c4d5e6
 Revises: d5f7a9b1c3e4
 Create Date: 2026-03-20
 
@@ -9,7 +9,7 @@ from alembic import op
 import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
-revision = "a1b2c3d4e5f6"
+revision = "f1a2b3c4d5e6"
 down_revision = "d5f7a9b1c3e4"
 branch_labels = None
 depends_on = None

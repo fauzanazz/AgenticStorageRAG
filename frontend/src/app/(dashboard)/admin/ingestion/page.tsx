@@ -1,11 +1,13 @@
 "use client";
 
-import React, { useState, useRef } from "react";
+import React, { useState } from "react";
 import { redirect } from "next/navigation";
-import { RefreshCw, ChevronDown, ChevronUp, ChevronRight, DollarSign, FileText, CheckCircle2, Clock, XCircle, SkipForward, FolderOpen, Folder, Check, Save, Loader2 } from "lucide-react";
+import { RefreshCw, ChevronDown, ChevronUp, ChevronRight, DollarSign, FileText, CheckCircle2, Clock, XCircle, SkipForward, Save, Loader2 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
-import { useIngestion, useDriveFolders, useDefaultFolder } from "@/hooks/use-ingestion";
-import type { DriveFolderEntry, FileEvent, FileEvents, IngestionJob, IngestionStatus, LLMCostSummary } from "@/types/ingestion";
+import { useIngestion, useProviders } from "@/hooks/use-ingestion";
+import { getProvider, getAllProviders } from "@/lib/ingestion-providers";
+import type { IngestionProvider, ProviderState } from "@/lib/ingestion-providers";
+import type { DriveFolderEntry, FileEvent, FileEvents, IngestionJob, IngestionStatus, LLMCostSummary, ProviderInfo } from "@/types/ingestion";
 import { Skeleton } from "@/components/ui/skeleton";
 
 // ── Status config ────────────────────────────────────────────────────────────
@@ -82,7 +84,6 @@ function FileList({ fileEvents }: { fileEvents: FileEvents }) {
   const entries = Object.entries(fileEvents);
   if (entries.length === 0) return null;
 
-  // Sort: started first (active), then by timestamp desc
   const sorted = entries.sort(([, a], [, b]) => {
     if (a.state === "started" && b.state !== "started") return -1;
     if (b.state === "started" && a.state !== "started") return 1;
@@ -107,7 +108,7 @@ function FileList({ fileEvents }: { fileEvents: FileEvents }) {
       <div className="max-h-52 overflow-y-auto divide-y" style={{ borderColor: "var(--border)" }}>
         {sorted.map(([fileId, ev]) => {
           const style = FILE_STATE_STYLES[ev.state];
-          const shortFolder = ev.folder?.split("/").slice(-2).join(" › ") ?? "";
+          const shortFolder = ev.folder?.split("/").slice(-2).join(" > ") ?? "";
           return (
             <div key={fileId} className="flex items-center gap-2 px-3 py-2">
               <span style={{ color: style.color }} className="shrink-0">{style.icon}</span>
@@ -142,7 +143,7 @@ function FileList({ fileEvents }: { fileEvents: FileEvents }) {
 
 // ── Job card ─────────────────────────────────────────────────────────────────
 
-function JobCard({ job, onCancel }: { job: IngestionJob; onCancel: (id: string) => void }) {
+function JobCard({ job, onCancel, onRetry, isRetrying }: { job: IngestionJob; onCancel: (id: string) => void; onRetry: (id: string) => void; isRetrying: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const isActive = ["pending", "scanning", "processing"].includes(job.status);
   const meta = job.metadata;
@@ -151,7 +152,6 @@ function JobCard({ job, onCancel }: { job: IngestionJob; onCancel: (id: string) 
   const hasSummary = !!meta.orchestrator_summary;
   const hasExpandable = fileCount > 0 || hasSummary;
 
-  // Auto-expand for active jobs with file events
   const activeFile = Object.values(fileEvents).find((e) => e.state === "started");
 
   return (
@@ -159,7 +159,6 @@ function JobCard({ job, onCancel }: { job: IngestionJob; onCancel: (id: string) 
       className="rounded-2xl overflow-hidden"
       style={{ background: "var(--card)", border: "1px solid var(--border)" }}
     >
-      {/* Header row */}
       <div className="p-5">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1 space-y-1.5">
@@ -179,23 +178,21 @@ function JobCard({ job, onCancel }: { job: IngestionJob; onCancel: (id: string) 
               {job.source === "google_drive" ? "Google Drive" : job.source}
               {job.folder_id && (
                 <span className="ml-1 font-mono text-xs" style={{ color: "var(--outline)" }}>
-                  ({job.folder_id.slice(0, 16)}…)
+                  ({job.folder_id.slice(0, 16)}...)
                 </span>
               )}
             </p>
 
-            {/* Currently ingesting file */}
             {isActive && activeFile && (
               <p className="text-xs flex items-center gap-1.5" style={{ color: "var(--primary)" }}>
                 <Clock className="size-3 shrink-0" />
                 <span className="truncate">{activeFile.name}</span>
               </p>
             )}
-            {/* Pending: waiting for worker */}
             {job.status === "pending" && (
               <p className="text-xs flex items-center gap-1.5" style={{ color: "var(--warning)" }}>
                 <Clock className="size-3 shrink-0" />
-                Waiting for worker to become available…
+                Waiting for worker to become available...
               </p>
             )}
           </div>
@@ -208,6 +205,16 @@ function JobCard({ job, onCancel }: { job: IngestionJob; onCancel: (id: string) 
                 style={{ border: "1px solid var(--outline-variant)", color: "var(--muted-foreground)" }}
               >
                 Cancel
+              </button>
+            )}
+            {(job.status === "failed" || job.status === "cancelled") && (
+              <button
+                onClick={() => onRetry(job.id)}
+                disabled={isRetrying}
+                className="h-8 px-3 rounded-xl text-xs font-medium transition-all hover:opacity-80 disabled:opacity-50"
+                style={{ border: "1px solid var(--primary)", color: "var(--primary)" }}
+              >
+                {isRetrying ? "Retrying..." : "Retry"}
               </button>
             )}
             {hasExpandable && (
@@ -231,7 +238,6 @@ function JobCard({ job, onCancel }: { job: IngestionJob; onCancel: (id: string) 
         )}
       </div>
 
-      {/* Expanded: file list + summary */}
       {expanded && (
         <div
           className="px-5 pb-5 space-y-3"
@@ -371,9 +377,7 @@ function StatsBar({ stats }: { stats: NonNullable<ReturnType<typeof useIngestion
   ];
 
   return (
-    <div
-      className="grid grid-cols-2 sm:grid-cols-4 gap-3"
-    >
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
       {items.map((item) => (
         <div
           key={item.label}
@@ -424,7 +428,6 @@ function WorkerState({ stats }: { stats: NonNullable<ReturnType<typeof useIngest
         })}
       </div>
 
-      {/* Active job mini-view */}
       {stats.active_job && (
         <div className="mt-4 pt-4" style={{ borderTop: "1px solid var(--border)" }}>
           <p className="text-xs font-medium mb-2" style={{ color: "var(--muted-foreground)" }}>Active Job</p>
@@ -446,187 +449,102 @@ function WorkerState({ stats }: { stats: NonNullable<ReturnType<typeof useIngest
   );
 }
 
-// ── Folder tree node ──────────────────────────────────────────────────────────
+// ── Provider section (wrapper to safely call provider hooks) ──────────────────
 
-function FolderNode({
-  folder,
-  selectedId,
-  onSelect,
-  depth = 0,
+function ProviderSection({
+  provider,
+  isTriggering,
+  onTrigger,
 }: {
-  folder: DriveFolderEntry;
-  selectedId: string | null;
-  onSelect: (id: string, name: string) => void;
-  depth?: number;
+  provider: IngestionProvider;
+  isTriggering: boolean;
+  onTrigger: (params: ReturnType<IngestionProvider["buildTriggerParams"]>) => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
-  const { data: children, isLoading } = useDriveFolders(folder.file_id, expanded);
-  const isSelected = selectedId === folder.file_id;
-  const subfolders = children?.filter((c) => c.is_folder) ?? [];
+  const state = provider.useProviderState();
+  const FolderChooser = provider.FolderChooser;
 
   return (
-    <div>
-      <div
-        className="flex items-center gap-1 py-1.5 px-2 rounded-lg cursor-pointer transition-colors hover:bg-black/5 group"
-        style={{
-          paddingLeft: `${depth * 20 + 8}px`,
-          background: isSelected ? "var(--accent)" : undefined,
-        }}
-      >
+    <>
+      {/* Folder chooser (if provider supports it) */}
+      {provider.hasFolderBrowser && FolderChooser && (
+        <FolderChooser
+          selectedFolderId={state.folderId}
+          selectedFolderName={state.folderName}
+          onSelect={state.setFolder}
+        />
+      )}
+
+      {/* Actions */}
+      <div className="flex gap-3 flex-wrap items-center">
         <button
-          onClick={(e) => {
-            e.stopPropagation();
-            setExpanded((v) => !v);
-          }}
-          className="w-5 h-5 flex items-center justify-center shrink-0 rounded transition-colors hover:bg-black/10"
+          onClick={() => onTrigger(provider.buildTriggerParams({ folderId: state.folderId, force: false }))}
+          disabled={isTriggering}
+          className="h-10 px-5 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90 disabled:opacity-50"
+          style={{ background: "var(--primary)" }}
         >
-          {isLoading ? (
-            <Loader2 className="size-3 animate-spin" style={{ color: "var(--muted-foreground)" }} />
-          ) : expanded ? (
-            <ChevronDown className="size-3.5" style={{ color: "var(--muted-foreground)" }} />
-          ) : (
-            <ChevronRight className="size-3.5" style={{ color: "var(--muted-foreground)" }} />
-          )}
+          {isTriggering ? "Starting..." : `Ingest from ${provider.label}`}
         </button>
-
-        <div
-          role="button"
-          tabIndex={0}
-          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(folder.file_id, folder.name); } }}
-          className="flex items-center gap-2 flex-1 min-w-0"
-          onClick={() => onSelect(folder.file_id, folder.name)}
+        <button
+          onClick={() => onTrigger(provider.buildTriggerParams({ folderId: state.folderId, force: true }))}
+          disabled={isTriggering}
+          className="h-10 px-5 rounded-xl text-sm font-medium transition-all hover:opacity-80"
+          style={{ border: "1px solid var(--outline-variant)", color: "var(--on-surface-variant)" }}
         >
-          {expanded ? (
-            <FolderOpen className="size-4 shrink-0" style={{ color: isSelected ? "var(--primary)" : "var(--warning)" }} />
-          ) : (
-            <Folder className="size-4 shrink-0" style={{ color: isSelected ? "var(--primary)" : "var(--warning)" }} />
-          )}
-          <span
-            className="text-sm truncate"
-            style={{ fontWeight: isSelected ? 600 : 400, color: isSelected ? "var(--primary)" : undefined }}
+          Force Re-ingest All
+        </button>
+        {state.isDirty && state.folderId && (
+          <button
+            onClick={state.saveDefault}
+            disabled={state.isSaving}
+            className="h-10 px-4 rounded-xl flex items-center gap-2 text-sm font-medium transition-all hover:opacity-80"
+            style={{ border: "1px solid var(--primary)", color: "var(--primary)" }}
           >
-            {folder.name}
-          </span>
-        </div>
-
-        {isSelected && (
-          <Check className="size-4 shrink-0" style={{ color: "var(--primary)" }} />
+            {state.isSaving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
+            Save as Default
+          </button>
         )}
       </div>
-
-      {expanded && subfolders.length > 0 && (
-        <div>
-          {subfolders.map((child) => (
-            <FolderNode
-              key={child.file_id}
-              folder={child}
-              selectedId={selectedId}
-              onSelect={onSelect}
-              depth={depth + 1}
-            />
-          ))}
-        </div>
-      )}
-
-      {expanded && !isLoading && subfolders.length === 0 && (
-        <p
-          className="text-xs py-1"
-          style={{ paddingLeft: `${(depth + 1) * 20 + 8}px`, color: "var(--outline-variant)" }}
-        >
-          No subfolders
-        </p>
-      )}
-    </div>
+    </>
   );
 }
 
-// ── Folder picker ─────────────────────────────────────────────────────────────
+// ── Provider dropdown ─────────────────────────────────────────────────────────
 
-function FolderPicker({
-  selectedFolderId,
-  selectedFolderName,
+function ProviderDropdown({
+  providers,
+  selectedKey,
   onSelect,
 }: {
-  selectedFolderId: string | null;
-  selectedFolderName: string | null;
-  onSelect: (id: string, name: string) => void;
+  providers: ProviderInfo[];
+  selectedKey: string;
+  onSelect: (key: string) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const { data: rootFolders, isLoading, error } = useDriveFolders("root", open);
-  const folders = rootFolders?.filter((f) => f.is_folder) ?? [];
+  if (providers.length <= 1) return null;
 
   return (
-    <div
-      className="rounded-2xl overflow-hidden"
-      style={{ background: "var(--card)", border: "1px solid var(--border)" }}
-    >
-      {/* Header */}
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="w-full p-4 flex items-center justify-between gap-3 transition-colors hover:bg-black/[0.02]"
+    <div className="flex items-center gap-3">
+      <label className="text-sm font-medium" style={{ color: "var(--muted-foreground)" }}>
+        Source
+      </label>
+      <select
+        value={selectedKey}
+        onChange={(e) => onSelect(e.target.value)}
+        className="h-10 px-3 rounded-xl text-sm font-medium appearance-none cursor-pointer"
+        style={{
+          background: "var(--card)",
+          border: "1px solid var(--border)",
+          color: "var(--foreground)",
+        }}
       >
-        <div className="flex items-center gap-3 min-w-0">
-          <div
-            className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
-            style={{ background: "var(--accent)" }}
-          >
-            <FolderOpen className="size-4" style={{ color: "var(--primary)" }} />
-          </div>
-          <div className="text-left min-w-0">
-            <p className="text-sm font-medium">Drive Folder</p>
-            {selectedFolderName ? (
-              <p className="text-xs truncate" style={{ color: "var(--primary)" }}>
-                {selectedFolderName}
-              </p>
-            ) : (
-              <p className="text-xs" style={{ color: "var(--outline)" }}>
-                No folder selected — will scan entire Drive
-              </p>
-            )}
-          </div>
-        </div>
-        {open ? (
-          <ChevronUp className="size-4 shrink-0" style={{ color: "var(--muted-foreground)" }} />
-        ) : (
-          <ChevronDown className="size-4 shrink-0" style={{ color: "var(--muted-foreground)" }} />
-        )}
-      </button>
-
-      {/* Tree */}
-      {open && (
-        <div
-          className="px-2 pb-3 max-h-80 overflow-y-auto"
-          style={{ borderTop: "1px solid var(--border)" }}
-        >
-          {isLoading && (
-            <div className="py-4 flex items-center justify-center gap-2">
-              <Loader2 className="size-4 animate-spin" style={{ color: "var(--primary)" }} />
-              <span className="text-xs" style={{ color: "var(--muted-foreground)" }}>Loading folders...</span>
-            </div>
-          )}
-
-          {error && (
-            <p className="py-3 px-2 text-xs" style={{ color: "var(--destructive)" }}>
-              Failed to load folders: {error.message}
-            </p>
-          )}
-
-          {!isLoading && !error && folders.length === 0 && (
-            <p className="py-3 px-2 text-xs" style={{ color: "var(--outline-variant)" }}>
-              No folders found in Drive root
-            </p>
-          )}
-
-          {folders.map((folder) => (
-            <FolderNode
-              key={folder.file_id}
-              folder={folder}
-              selectedId={selectedFolderId}
-              onSelect={onSelect}
-            />
-          ))}
-        </div>
-      )}
+        {providers.map((p) => {
+          const localProvider = getProvider(p.key);
+          return (
+            <option key={p.key} value={p.key} disabled={!p.configured || !localProvider}>
+              {p.label}{!p.configured ? " (not configured)" : ""}
+            </option>
+          );
+        })}
+      </select>
     </div>
   );
 }
@@ -646,39 +564,18 @@ export default function IngestionPage() {
     refresh,
     triggerIngestion,
     cancelJob,
+    retryJob,
+    isRetrying,
     setError,
   } = useIngestion();
 
-  const { defaultFolder, saveDefaultFolder, isSaving } = useDefaultFolder();
+  const { data: backendProviders } = useProviders();
+  const [selectedProviderKey, setSelectedProviderKey] = useState("google_drive");
 
-  // Local selection state (may differ from saved default)
-  const syncedRef = useRef(false);
-  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
-  const [selectedFolderName, setSelectedFolderName] = useState<string | null>(null);
+  const activeProvider = getProvider(selectedProviderKey);
+  const providerList = backendProviders ?? [{ key: "google_drive", label: "Google Drive", configured: true }];
 
-  // Sync selection with saved default (once)
-  if (defaultFolder && !syncedRef.current) {
-    syncedRef.current = true;
-    setSelectedFolderId(defaultFolder.folder_id);
-    setSelectedFolderName(defaultFolder.folder_name);
-  }
-
-  const handleFolderSelect = (id: string, name: string) => {
-    setSelectedFolderId(id);
-    setSelectedFolderName(name);
-  };
-
-  const handleSaveDefault = async () => {
-    if (selectedFolderId && selectedFolderName) {
-      await saveDefaultFolder(selectedFolderId, selectedFolderName);
-    }
-  };
-
-  const isDirty =
-    selectedFolderId !== (defaultFolder?.folder_id ?? null) ||
-    selectedFolderName !== (defaultFolder?.folder_name ?? null);
-
-  // Admin guard — redirect during render (no useEffect needed)
+  // Admin guard
   if (user && !user.is_admin) {
     redirect("/");
   }
@@ -686,58 +583,39 @@ export default function IngestionPage() {
   return (
     <div className="flex-1 p-6 lg:p-8 space-y-6 max-w-4xl">
       {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Base Knowledge Ingestion</h1>
-        <p className="mt-1 text-sm" style={{ color: "var(--muted-foreground)" }}>
-          Agent orchestrator that recursively explores Google Drive, classifies documents, and builds the Knowledge Graph.
-        </p>
-      </div>
-
-      {/* Folder picker */}
-      <FolderPicker
-        selectedFolderId={selectedFolderId}
-        selectedFolderName={selectedFolderName}
-        onSelect={handleFolderSelect}
-      />
-
-      {/* Actions */}
-      <div className="flex gap-3 flex-wrap items-center">
-        <button
-          onClick={() => triggerIngestion({ folder_id: selectedFolderId })}
-          disabled={isTriggering}
-          className="h-10 px-5 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90 disabled:opacity-50"
-          style={{ background: "var(--primary)" }}
-        >
-          {isTriggering ? "Starting..." : "Ingest from Drive"}
-        </button>
-        <button
-          onClick={() => triggerIngestion({ folder_id: selectedFolderId, force: true })}
-          disabled={isTriggering}
-          className="h-10 px-5 rounded-xl text-sm font-medium transition-all hover:opacity-80"
-          style={{ border: "1px solid var(--outline-variant)", color: "var(--on-surface-variant)" }}
-        >
-          Force Re-ingest All
-        </button>
-        {isDirty && selectedFolderId && (
-          <button
-            onClick={handleSaveDefault}
-            disabled={isSaving}
-            className="h-10 px-4 rounded-xl flex items-center gap-2 text-sm font-medium transition-all hover:opacity-80"
-            style={{ border: "1px solid var(--primary)", color: "var(--primary)" }}
-          >
-            {isSaving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
-            Save as Default
-          </button>
-        )}
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Base Knowledge Ingestion</h1>
+          <p className="mt-1 text-sm" style={{ color: "var(--muted-foreground)" }}>
+            Agent orchestrator that recursively explores sources, classifies documents, and builds the Knowledge Graph.
+          </p>
+        </div>
         <button
           onClick={() => refresh()}
-          className="h-10 px-4 rounded-xl flex items-center gap-2 text-sm font-medium transition-all hover:bg-black/5"
+          className="h-10 px-4 rounded-xl flex items-center gap-2 text-sm font-medium transition-all hover:bg-black/5 shrink-0"
           style={{ color: "var(--muted-foreground)" }}
         >
           <RefreshCw className="size-4" />
           Refresh
         </button>
       </div>
+
+      {/* Provider selector */}
+      <ProviderDropdown
+        providers={providerList}
+        selectedKey={selectedProviderKey}
+        onSelect={setSelectedProviderKey}
+      />
+
+      {/* Provider-specific section (keyed to force remount on switch) */}
+      {activeProvider && (
+        <ProviderSection
+          key={selectedProviderKey}
+          provider={activeProvider}
+          isTriggering={isTriggering}
+          onTrigger={(params) => triggerIngestion(params)}
+        />
+      )}
 
       {/* Error */}
       {error && (
@@ -767,7 +645,6 @@ export default function IngestionPage() {
 
       {/* Two-column: job list + worker state */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Job list (2/3) */}
         <div className="lg:col-span-2 space-y-3">
           <h2 className="text-sm font-medium">
             Ingestion Jobs
@@ -786,17 +663,16 @@ export default function IngestionPage() {
               style={{ background: "var(--card)", border: "1px solid var(--border)" }}
             >
               <p className="text-sm" style={{ color: "var(--muted-foreground)" }}>
-                No ingestion jobs yet. Click &ldquo;Ingest from Drive&rdquo; to start.
+                No ingestion jobs yet. Select a source and click &ldquo;Ingest&rdquo; to start.
               </p>
             </div>
           ) : (
             jobs.map((job) => (
-              <JobCard key={job.id} job={job} onCancel={cancelJob} />
+              <JobCard key={job.id} job={job} onCancel={cancelJob} onRetry={retryJob} isRetrying={isRetrying} />
             ))
           )}
         </div>
 
-        {/* Worker state (1/3) */}
         <div className="space-y-3">
           <h2 className="text-sm font-medium">Worker Summary</h2>
           {stats ? (

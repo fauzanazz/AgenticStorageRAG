@@ -16,7 +16,7 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "DingDong RAG",
+  title: "OpenRAG",
   description: "Agentic Knowledge Graph RAG with hybrid retrieval",
 };
 

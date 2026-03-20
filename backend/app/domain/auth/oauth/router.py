@@ -7,10 +7,12 @@ Currently supports Google; extensible via the provider registry.
 from __future__ import annotations
 
 import logging
+import secrets
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -18,6 +20,7 @@ from app.dependencies import get_db, get_redis
 from app.domain.auth.exceptions import OAuthError
 from app.domain.auth.oauth.google import GoogleOAuthProvider
 from app.domain.auth.oauth.service import OAuthService
+from app.domain.auth.schemas import AuthResponse
 from app.infra.redis_client import RedisClient
 
 logger = logging.getLogger(__name__)
@@ -125,11 +128,37 @@ async def callback(
         params = urlencode({"error": e.message})
         return RedirectResponse(url=f"{frontend_callback}?{params}")
 
-    # Redirect to frontend with tokens in URL fragment
-    # Fragments (#) are never sent to the server, keeping tokens client-side only
-    fragment = urlencode({
-        "access_token": auth_response.tokens.access_token,
-        "refresh_token": auth_response.tokens.refresh_token,
-        "expires_in": str(auth_response.tokens.expires_in),
-    })
-    return RedirectResponse(url=f"{frontend_callback}#{fragment}")
+    # Store auth response behind a one-time exchange code and redirect
+    exchange_code = secrets.token_urlsafe(32)
+    await redis.set_json(
+        f"oauth_code:{exchange_code}",
+        auth_response.model_dump(mode="json"),
+        ttl=60,
+    )
+    return RedirectResponse(url=f"{frontend_callback}?code={exchange_code}")
+
+
+class OAuthTokenRequest(BaseModel):
+    code: str
+
+
+@router.post(
+    "/token",
+    summary="Exchange one-time OAuth code for tokens",
+    response_model=AuthResponse,
+)
+async def exchange_oauth_code(
+    body: OAuthTokenRequest,
+    redis: RedisClient = Depends(get_redis),
+) -> AuthResponse:
+    """Exchange a one-time OAuth code for an AuthResponse (tokens + user)."""
+    key = f"oauth_code:{body.code}"
+    data = await redis.get_json(key)
+    if data is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired OAuth code",
+        )
+    # Delete immediately — one-time use
+    await redis.delete(key)
+    return AuthResponse.model_validate(data)

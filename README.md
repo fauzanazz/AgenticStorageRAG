@@ -1,4 +1,4 @@
-# DingDong RAG
+# OpenRAG
 
 An agentic Knowledge Graph RAG application that ingests documents into a hybrid retrieval system (Neo4j graph + pgvector), with an autonomous AI agent that reasons over the knowledge to answer queries through a mobile-first web interface.
 
@@ -82,7 +82,7 @@ cd frontend && pnpm dev
 ## Project Structure
 
 ```
-dingdong-rag/
+openrag/
 ├── backend/
 │   ├── app/
 │   │   ├── main.py              # FastAPI app + lifespan
@@ -177,7 +177,7 @@ See [`.env.example`](.env.example) for the full list. Key variables:
 
 ## Self-Hosting Guide
 
-Complete guide to deploy DingDong RAG on your own infrastructure.
+Complete guide to deploy OpenRAG on your own infrastructure.
 
 ### 1. Prerequisites
 
@@ -191,8 +191,8 @@ Complete guide to deploy DingDong RAG on your own infrastructure.
 ### 2. Clone and Configure
 
 ```bash
-git clone https://github.com/your-org/dingdong-rag.git
-cd dingdong-rag
+git clone https://github.com/your-org/openrag.git
+cd openrag
 cp .env.example .env
 ```
 
@@ -296,7 +296,7 @@ The `/health/detailed` endpoint reports the status of all infrastructure connect
 
 ## Self-Seeding Guide
 
-DingDong RAG has a two-tier knowledge architecture. This section covers how to populate both tiers.
+OpenRAG has a two-tier knowledge architecture. This section covers how to populate both tiers.
 
 ### Tier 1: Base Knowledge Graph (from Google Drive)
 
@@ -467,7 +467,7 @@ make graph-export       # Export current graph to versioned JSONL files
 **Docker:**
 ```bash
 make build-frontend
-docker run -p 3000:3000 -e NEXT_PUBLIC_API_URL=https://your-api.com/api/v1 dingdong-rag-frontend
+docker run -p 3000:3000 -e NEXT_PUBLIC_API_URL=https://your-api.com/api/v1 openrag-frontend
 ```
 
 ### Infrastructure Checklist

@@ -49,13 +49,40 @@ def _make_llm_response(
     return resp
 
 
-def _make_stream_chunk(content: str) -> MagicMock:
+def _make_stream_chunk(
+    content: str | None = None,
+    tool_calls: list[MagicMock] | None = None,
+) -> MagicMock:
     """Return a MagicMock streaming chunk."""
     chunk = MagicMock()
     chunk.choices = [MagicMock()]
-    chunk.choices[0].delta = MagicMock()
-    chunk.choices[0].delta.content = content
+    delta = MagicMock()
+    delta.content = content
+    delta.tool_calls = tool_calls
+    chunk.choices[0].delta = delta
     return chunk
+
+
+def _make_tool_call_delta(
+    index: int = 0,
+    call_id: str | None = None,
+    name: str | None = None,
+    arguments: str | None = None,
+) -> MagicMock:
+    """Return a MagicMock tool_call delta for streaming."""
+    tc = MagicMock()
+    tc.index = index
+    tc.id = call_id
+    tc.function = MagicMock()
+    tc.function.name = name
+    tc.function.arguments = arguments
+    return tc
+
+
+async def _async_iter(items):
+    """Helper: wrap a list into an async iterable."""
+    for item in items:
+        yield item
 
 
 # ---------------------------------------------------------------------------
@@ -161,17 +188,28 @@ class TestRAGAgentReActLoop:
         mock_tool: MagicMock,
     ) -> None:
         """LLM returning tool_calls causes the tool to be executed."""
-        tc = _make_tool_call_obj("hybrid_search", '{"query": "AI"}')
-
-        # Iteration 1: LLM requests tool call; iteration 2 (synthesis): streaming fails
-        mock_llm.complete.side_effect = [
-            _make_llm_response(tool_calls=[tc]),   # ReAct iteration 1
-            Exception("streaming failed"),          # streaming attempt fails
+        # Iteration 1: stream returns a tool call
+        tc_delta = _make_tool_call_delta(
+            index=0, call_id="call_123", name="hybrid_search", arguments='{"query": "AI"}'
+        )
+        iter1_chunks = [
+            _make_stream_chunk(content="Let me search.", tool_calls=None),
+            _make_stream_chunk(content=None, tool_calls=[tc_delta]),
         ]
-        synthesis = MagicMock()
-        synthesis.choices = [MagicMock()]
-        synthesis.choices[0].message.content = "AI is Artificial Intelligence."
-        mock_llm.complete_with_retry.return_value = synthesis
+        # Iteration 2: stream returns final answer (no tool calls)
+        iter2_chunks = [
+            _make_stream_chunk(content="AI is Artificial Intelligence."),
+        ]
+
+        call_count = 0
+        async def _complete_side(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _async_iter(iter1_chunks)
+            return _async_iter(iter2_chunks)
+
+        mock_llm.complete = AsyncMock(side_effect=_complete_side)
 
         request = ChatRequest(message="What is AI?", conversation_id=uuid.uuid4())
         events = []
@@ -180,9 +218,9 @@ class TestRAGAgentReActLoop:
 
         # Tool must have been called
         mock_tool.execute.assert_awaited_once()
-        tool_call_events = [e for e in events if e.event == "tool_call"]
-        assert len(tool_call_events) == 1
-        tc_data = json.loads(tool_call_events[0].data)
+        tool_start_events = [e for e in events if e.event == "tool_start"]
+        assert len(tool_start_events) == 1
+        tc_data = json.loads(tool_start_events[0].data)
         assert tc_data["tool_name"] == "hybrid_search"
 
     @pytest.mark.asyncio
@@ -206,17 +244,21 @@ class TestRAGAgentReActLoop:
 
         agent = RAGAgent(llm=mock_llm, chat_service=mock_chat_service, tools=[tool_a, tool_b])
 
-        tc_a = _make_tool_call_obj("graph_search", '{"query": "test"}')
-        tc_b = _make_tool_call_obj("vector_search", '{"query": "test"}')
+        tc_a_delta = _make_tool_call_delta(index=0, call_id="call_a", name="graph_search", arguments='{"query": "test"}')
+        tc_b_delta = _make_tool_call_delta(index=1, call_id="call_b", name="vector_search", arguments='{"query": "test"}')
 
-        mock_llm.complete.side_effect = [
-            _make_llm_response(tool_calls=[tc_a, tc_b]),  # both tools in one iteration
-            Exception("streaming failed"),
-        ]
-        synthesis = MagicMock()
-        synthesis.choices = [MagicMock()]
-        synthesis.choices[0].message.content = "Answer."
-        mock_llm.complete_with_retry.return_value = synthesis
+        iter1_chunks = [_make_stream_chunk(content=None, tool_calls=[tc_a_delta, tc_b_delta])]
+        iter2_chunks = [_make_stream_chunk(content="Answer.")]
+
+        call_count = 0
+        async def _complete_side(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _async_iter(iter1_chunks)
+            return _async_iter(iter2_chunks)
+
+        mock_llm.complete = AsyncMock(side_effect=_complete_side)
 
         request = ChatRequest(message="test", conversation_id=uuid.uuid4())
         events = []
@@ -226,33 +268,27 @@ class TestRAGAgentReActLoop:
         # Both tools should have been called
         tool_a.execute.assert_awaited_once()
         tool_b.execute.assert_awaited_once()
-        tool_call_events = [e for e in events if e.event == "tool_call"]
-        assert len(tool_call_events) == 2
+        tool_start_events = [e for e in events if e.event == "tool_start"]
+        assert len(tool_start_events) == 2
 
     @pytest.mark.asyncio
-    async def test_react_loop_no_tool_calls_uses_fallback(
+    async def test_react_loop_no_tool_calls_emits_token(
         self,
         agent: RAGAgent,
         mock_llm: AsyncMock,
-        mock_tool: MagicMock,
     ) -> None:
-        """If the LLM returns no tool calls, hybrid_search runs as fallback."""
-        mock_llm.complete.side_effect = [
-            _make_llm_response(content="I don't need tools.", tool_calls=None),
-            Exception("streaming failed"),
-        ]
-        synthesis = MagicMock()
-        synthesis.choices = [MagicMock()]
-        synthesis.choices[0].message.content = "Answer."
-        mock_llm.complete_with_retry.return_value = synthesis
+        """If the LLM returns no tool calls, the text is emitted as a token."""
+        chunks = [_make_stream_chunk(content="The answer is clear.")]
+        mock_llm.complete = AsyncMock(return_value=_async_iter(chunks))
 
         request = ChatRequest(message="test", conversation_id=uuid.uuid4())
         events = []
         async for event in agent.chat(request, uuid.uuid4()):
             events.append(event)
 
-        # Fallback hybrid_search should have been called
-        mock_tool.execute.assert_awaited_once()
+        token_events = [e for e in events if e.event == "token"]
+        assert len(token_events) >= 1
+        assert "answer" in token_events[0].data
 
     @pytest.mark.asyncio
     async def test_react_loop_stops_after_max_iterations(
@@ -262,25 +298,23 @@ class TestRAGAgentReActLoop:
         mock_tool: MagicMock,
     ) -> None:
         """Loop terminates after MAX_REACT_ITERATIONS even if LLM keeps returning tool calls."""
-        tc = _make_tool_call_obj("hybrid_search", '{"query": "test"}')
+        tc_delta = _make_tool_call_delta(
+            index=0, call_id="call_loop", name="hybrid_search", arguments='{"query": "test"}'
+        )
+        tool_chunks = [_make_stream_chunk(content=None, tool_calls=[tc_delta])]
 
-        # Always return tool_calls → loop must stop at MAX_REACT_ITERATIONS
-        tool_call_resp = _make_llm_response(tool_calls=[tc])
-        mock_llm.complete.side_effect = [tool_call_resp] * (MAX_REACT_ITERATIONS + 10)
-
-        synthesis = MagicMock()
-        synthesis.choices = [MagicMock()]
-        synthesis.choices[0].message.content = "Answer after max iterations."
-        mock_llm.complete_with_retry.return_value = synthesis
+        # Always return tool calls → loop must eventually stop
+        mock_llm.complete = AsyncMock(
+            side_effect=[_async_iter(list(tool_chunks)) for _ in range(MAX_REACT_ITERATIONS + 5)]
+        )
 
         request = ChatRequest(message="test", conversation_id=uuid.uuid4())
         events = []
         async for event in agent.chat(request, uuid.uuid4()):
             events.append(event)
 
-        # LLM called exactly MAX_REACT_ITERATIONS times in the loop
-        # + 1 for the streaming synthesis attempt (falls back to complete_with_retry)
-        assert mock_llm.complete.call_count <= MAX_REACT_ITERATIONS + 1
+        # LLM should be called at most MAX_REACT_ITERATIONS times
+        assert mock_llm.complete.call_count <= MAX_REACT_ITERATIONS
 
 
 # ---------------------------------------------------------------------------
@@ -299,14 +333,8 @@ class TestRAGAgentChat:
         mock_chat_service: AsyncMock,
     ) -> None:
         """When no conversation_id is provided, a new one should be created."""
-        mock_llm.complete.side_effect = [
-            _make_llm_response(content="No tools needed.", tool_calls=None),
-            Exception("streaming failed"),
-        ]
-        synthesis = MagicMock()
-        synthesis.choices = [MagicMock()]
-        synthesis.choices[0].message.content = "AI stands for Artificial Intelligence."
-        mock_llm.complete_with_retry.return_value = synthesis
+        chunks = [_make_stream_chunk(content="AI stands for Artificial Intelligence.")]
+        mock_llm.complete = AsyncMock(return_value=_async_iter(chunks))
 
         request = ChatRequest(message="What is AI?")
         events = []
@@ -326,14 +354,8 @@ class TestRAGAgentChat:
         mock_chat_service: AsyncMock,
     ) -> None:
         """When conversation_id is provided, no new conversation is created."""
-        mock_llm.complete.side_effect = [
-            _make_llm_response(content="Answer.", tool_calls=None),
-            Exception("streaming failed"),
-        ]
-        synthesis = MagicMock()
-        synthesis.choices = [MagicMock()]
-        synthesis.choices[0].message.content = "Answer."
-        mock_llm.complete_with_retry.return_value = synthesis
+        chunks = [_make_stream_chunk(content="Answer.")]
+        mock_llm.complete = AsyncMock(return_value=_async_iter(chunks))
 
         request = ChatRequest(message="test", conversation_id=uuid.uuid4())
         events = []
@@ -352,14 +374,8 @@ class TestRAGAgentChat:
         mock_llm: AsyncMock,
     ) -> None:
         """Response tokens should be streamed as token events."""
-        mock_llm.complete.side_effect = [
-            _make_llm_response(content="No tools.", tool_calls=None),
-            Exception("streaming fails → fallback"),
-        ]
-        synthesis = MagicMock()
-        synthesis.choices = [MagicMock()]
-        synthesis.choices[0].message.content = "The answer is simple."
-        mock_llm.complete_with_retry.return_value = synthesis
+        chunks = [_make_stream_chunk(content="The answer is simple.")]
+        mock_llm.complete = AsyncMock(return_value=_async_iter(chunks))
 
         request = ChatRequest(message="test", conversation_id=uuid.uuid4())
         token_events = []
@@ -394,14 +410,8 @@ class TestRAGAgentChat:
         mock_llm: AsyncMock,
     ) -> None:
         """A done event must always be the final event."""
-        mock_llm.complete.side_effect = [
-            _make_llm_response(content="No tools.", tool_calls=None),
-            Exception("streaming fails"),
-        ]
-        synthesis = MagicMock()
-        synthesis.choices = [MagicMock()]
-        synthesis.choices[0].message.content = "Done."
-        mock_llm.complete_with_retry.return_value = synthesis
+        chunks = [_make_stream_chunk(content="Done.")]
+        mock_llm.complete = AsyncMock(return_value=_async_iter(chunks))
 
         request = ChatRequest(message="test", conversation_id=uuid.uuid4())
         events = []
@@ -417,24 +427,13 @@ class TestRAGAgentChat:
         mock_llm: AsyncMock,
     ) -> None:
         """When the LLM streams correctly, tokens come from the stream."""
-        # First complete call → ReAct iteration (no tool_calls → break out of loop)
-        react_resp = _make_llm_response(content="No tools needed.", tool_calls=None)
-
-        # Second call (streaming synthesis) → returns an async iterable
-        async def _stream():
-            for word in ["The ", "answer ", "is ", "42."]:
-                yield _make_stream_chunk(word)
-
-        call_count = 0
-
-        async def _complete_side_effect(**kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                return react_resp
-            return _stream()
-
-        mock_llm.complete = AsyncMock(side_effect=_complete_side_effect)
+        chunks = [
+            _make_stream_chunk("The "),
+            _make_stream_chunk("answer "),
+            _make_stream_chunk("is "),
+            _make_stream_chunk("42."),
+        ]
+        mock_llm.complete = AsyncMock(return_value=_async_iter(chunks))
 
         request = ChatRequest(message="test", conversation_id=uuid.uuid4())
         token_events = []
@@ -442,4 +441,6 @@ class TestRAGAgentChat:
             if event.event == "token":
                 token_events.append(event.data)
 
-        assert "".join(token_events) == "The answer is 42."
+        # All chunks are emitted as a single token event (buffered)
+        full = "".join(token_events)
+        assert full == "The answer is 42."

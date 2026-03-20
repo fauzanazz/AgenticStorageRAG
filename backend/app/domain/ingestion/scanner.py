@@ -114,7 +114,9 @@ class DriveScanner:
             for entry in entries:
                 if entry.is_folder:
                     child_path = f"{parent_path}/{entry.name}" if parent_path else entry.name
-                    folders.append((entry.file_id, child_path))
+                    # Use resolved target for shortcuts pointing to folders
+                    recurse_id = entry.target_id or entry.file_id
+                    folders.append((recurse_id, child_path))
                 elif entry.mime_type in _SKIP_MIME:
                     continue
                 elif entry.mime_type in SUPPORTED_MIME_TYPES:

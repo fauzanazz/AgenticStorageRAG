@@ -25,13 +25,69 @@ import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from app.celery_app import celery_app
 from app.domain.ingestion.models import IngestionJob, IngestionStatus
 from app.infra.llm import llm_provider
 from app.infra.storage import storage_client
 
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.domain.ingestion.interfaces import SourceConnector
+
 logger = logging.getLogger(__name__)
+
+
+async def _build_connector(
+    source: str,
+    user_id: uuid.UUID,
+    db: AsyncSession,
+) -> SourceConnector:
+    """Build an authenticated source connector, preferring per-user OAuth tokens.
+
+    Falls back to server-level credentials (env vars / service account) when
+    the user has no stored OAuth tokens for the source provider.
+    """
+    from app.domain.ingestion.registry import get_connector_class
+
+    connector_cls = get_connector_class(source)
+
+    # Try per-user OAuth tokens (currently only for google_drive)
+    if source == "google_drive":
+        from sqlalchemy import select
+
+        from app.domain.auth.models import OAuthAccount
+        from app.domain.ingestion.drive_connector import GoogleDriveConnector
+        from app.infra.encryption import decrypt_value
+
+        result = await db.execute(
+            select(OAuthAccount).where(
+                OAuthAccount.user_id == user_id,
+                OAuthAccount.provider == "google",
+            )
+        )
+        account = result.scalar_one_or_none()
+        if account and account.access_token_enc:
+            access_token = decrypt_value(account.access_token_enc)
+            refresh_token = (
+                decrypt_value(account.refresh_token_enc)
+                if account.refresh_token_enc
+                else None
+            )
+            logger.info(
+                "Using per-user OAuth tokens for ingestion (user=%s)", user_id,
+            )
+            return GoogleDriveConnector.from_user_tokens(
+                access_token=access_token,
+                refresh_token=refresh_token,
+            )
+
+    # Fallback: server-level credentials
+    connector = connector_cls()
+    await connector.authenticate()
+    return connector
 
 
 @celery_app.task(
@@ -49,15 +105,18 @@ def run_ingestion_task(  # type: ignore[misc]
     job_id: str,
     admin_user_id: str,
     force: bool = False,
+    source: str = "google_drive",
+    retry: bool = False,
 ) -> None:
-    """Run the IngestionOrchestrator for a triggered Google Drive ingestion job.
+    """Run the IngestionOrchestrator for a triggered ingestion job.
 
     Args:
         job_id: UUID string of the IngestionJob record.
         admin_user_id: UUID string of the admin who triggered the job.
         force: Re-ingest already-processed files when True.
+        source: Source connector key (e.g. 'google_drive').
+        retry: If True, skip scanning and only process pending IndexedFiles.
     """
-    from app.domain.ingestion.drive_connector import GoogleDriveConnector
     from app.domain.ingestion.orchestrator import IngestionOrchestrator
 
     job_uuid = uuid.UUID(job_id)
@@ -78,13 +137,21 @@ def run_ingestion_task(  # type: ignore[misc]
         task_engine, task_session_factory = build_session_factory(_db_module._engine.url)
 
         try:
+            # Look up user OAuth tokens in a separate session so we don't
+            # pollute the orchestrator's session with extra transaction state.
+            async with task_session_factory() as auth_db:
+                connector = await _build_connector(
+                    source=source,
+                    user_id=admin_uuid,
+                    db=auth_db,
+                )
+
             async with task_session_factory() as db:
                 job = await db.get(IngestionJob, job_uuid)
                 if job is None:
                     logger.error("Ingestion job not found: %s", job_uuid)
                     return
 
-                connector = GoogleDriveConnector()
                 orchestrator = IngestionOrchestrator(
                     db=db,
                     storage=storage_client,
@@ -94,7 +161,7 @@ def run_ingestion_task(  # type: ignore[misc]
                 )
 
                 try:
-                    await orchestrator.run(job=job, admin_user_id=admin_uuid, force=force)
+                    await orchestrator.run(job=job, admin_user_id=admin_uuid, force=force, retry=retry)
                     logger.info("Ingestion job completed: %s", job_uuid)
                 except Exception:
                     logger.exception("Ingestion job failed: %s", job_uuid)

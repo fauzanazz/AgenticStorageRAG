@@ -2,9 +2,8 @@ export interface ApiKeyStatus {
   has_key: boolean;
 }
 
-export interface ClaudeOAuthStatus {
-  connected: boolean;
-  expires_at: string | null;
+export interface ClaudeSetupTokenStatus {
+  has_token: boolean;
 }
 
 export interface ModelSettings {
@@ -15,7 +14,7 @@ export interface ModelSettings {
   openai_api_key: ApiKeyStatus;
   dashscope_api_key: ApiKeyStatus;
   openrouter_api_key: ApiKeyStatus;
-  claude_oauth: ClaudeOAuthStatus;
+  claude_setup_token: ClaudeSetupTokenStatus;
 }
 
 export interface UpdateModelSettingsRequest {
@@ -27,12 +26,14 @@ export interface UpdateModelSettingsRequest {
   openai_api_key?: string | null;
   dashscope_api_key?: string | null;
   openrouter_api_key?: string | null;
+  claude_setup_token?: string | null;
 }
 
 export interface ModelOption {
   provider: string;
   model_id: string;
   label: string;
+  supports_thinking?: boolean;
 }
 
 export interface ModelCatalog {
