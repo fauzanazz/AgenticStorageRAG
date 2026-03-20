@@ -84,6 +84,20 @@ class DriveFolderEntry(BaseModel):
     is_folder: bool = False
 
 
+class DefaultFolderResponse(BaseModel):
+    """Saved default Drive folder for ingestion."""
+
+    folder_id: str | None = None
+    folder_name: str | None = None
+
+
+class SaveDefaultFolderRequest(BaseModel):
+    """Request to save/update the default Drive folder."""
+
+    folder_id: str = Field(description="Google Drive folder ID")
+    folder_name: str = Field(description="Folder display name")
+
+
 class FileMetadataClassification(BaseModel):
     """LLM-classified metadata extracted from a file's folder path context.
 

@@ -1,7 +1,9 @@
-"""Tests for the ingestion orchestrator agent and tools."""
+"""Tests for the ingestion orchestrator, scanner, file processor, and tools."""
 
+import asyncio
 import json
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -14,6 +16,7 @@ from app.domain.ingestion.orchestrator_tools import (
     IngestFileTool,
     ScanFolderTool,
     UpdateProgressTool,
+    ingest_single_file,
 )
 from app.domain.ingestion.schemas import DriveFolderEntry
 
@@ -45,6 +48,22 @@ def _make_job(**kwargs) -> IngestionJob:
     for k, v in defaults.items():
         setattr(job, k, v)
     return job
+
+
+def _make_session_factory():
+    """Create a mock session factory that returns async context managers."""
+    mock_db = AsyncMock()
+    # Make execute return a result with scalar_one_or_none
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = IngestionStatus.PROCESSING
+    mock_result.scalars.return_value.all.return_value = []
+    mock_db.execute.return_value = mock_result
+
+    @asynccontextmanager
+    async def factory():
+        yield mock_db
+
+    return factory, mock_db
 
 
 # ---------------------------------------------------------------------------
@@ -147,12 +166,12 @@ class TestClassifyFileTool:
 
 
 # ---------------------------------------------------------------------------
-# IngestFileTool
+# ingest_single_file (standalone function)
 # ---------------------------------------------------------------------------
 
 
-class TestIngestFileTool:
-    """Test the ingest_file tool."""
+class TestIngestSingleFile:
+    """Test the standalone ingest_single_file function."""
 
     @pytest.mark.asyncio
     async def test_ingest_success(self) -> None:
@@ -163,7 +182,6 @@ class TestIngestFileTool:
         mock_exec_result = MagicMock()
         mock_exec_result.first.return_value = None
         mock_db.execute.return_value = mock_exec_result
-        mock_storage = AsyncMock()
         mock_connector = AsyncMock()
         mock_connector.download_file.return_value = (b"fake pdf", "doc.pdf")
 
@@ -174,30 +192,26 @@ class TestIngestFileTool:
         ]
         mock_processing_result.metadata = {"page_count": 1}
 
-        tool = IngestFileTool(
-            db=mock_db,
-            connector=mock_connector,
-            job=MagicMock(metadata_={}),
-            llm=MagicMock(),
-        )
-
         with (
             patch("app.domain.ingestion.orchestrator_tools.get_processor") as mock_get_proc,
-            patch.object(tool, "_embed_chunks", return_value=1),
-            patch.object(tool, "_extract_knowledge_graph", return_value={"entities_created": 2, "relationships_created": 1}),
-            patch.object(tool, "_record_file_event", new_callable=AsyncMock),
+            patch("app.domain.ingestion.orchestrator_tools._embed_chunks", return_value=1),
+            patch("app.domain.ingestion.orchestrator_tools._extract_knowledge_graph", return_value={"entities_created": 2, "relationships_created": 1}),
         ):
             mock_processor = AsyncMock()
             mock_processor.process.return_value = mock_processing_result
             mock_get_proc.return_value = mock_processor
 
-            result = await tool.execute(
+            result = await ingest_single_file(
+                db=mock_db,
+                connector=mock_connector,
+                llm=MagicMock(),
+                job=MagicMock(metadata_={}),
                 file_id="drive-file-1",
                 file_name="doc.pdf",
                 mime_type="application/pdf",
                 folder_path="Informatika/Semester 3",
                 classification={"major": "Informatika"},
-                admin_user_id=str(uuid.uuid4()),
+                admin_user_id=uuid.uuid4(),
             )
 
         assert result["status"] == "processed"
@@ -212,22 +226,18 @@ class TestIngestFileTool:
         mock_exec_result = MagicMock()
         mock_exec_result.first.return_value = None
         mock_db.execute.return_value = mock_exec_result
-        mock_storage = AsyncMock()
         mock_connector = AsyncMock()
 
-        tool = IngestFileTool(
-            db=mock_db,
-            connector=mock_connector,
-            job=MagicMock(metadata_={}),
-            llm=MagicMock(),
-        )
-
         with patch("app.domain.ingestion.orchestrator_tools.get_processor", return_value=None):
-            result = await tool.execute(
+            result = await ingest_single_file(
+                db=mock_db,
+                connector=mock_connector,
+                llm=MagicMock(),
+                job=MagicMock(metadata_={}),
                 file_id="file-1",
                 file_name="image.png",
                 mime_type="image/png",
-                admin_user_id=str(uuid.uuid4()),
+                admin_user_id=uuid.uuid4(),
             )
 
         assert result["status"] == "skipped"
@@ -239,31 +249,42 @@ class TestIngestFileTool:
         mock_exec_result = MagicMock()
         mock_exec_result.first.return_value = None
         mock_db.execute.return_value = mock_exec_result
-        mock_storage = AsyncMock()
         mock_connector = AsyncMock()
         mock_connector.download_file.side_effect = Exception("Network error")
 
-        tool = IngestFileTool(
-            db=mock_db,
-            connector=mock_connector,
-            job=MagicMock(metadata_={}),
-            llm=MagicMock(),
-        )
-
-        with (
-            patch("app.domain.ingestion.orchestrator_tools.get_processor") as mock_get_proc,
-            patch.object(tool, "_record_file_event", new_callable=AsyncMock),
-        ):
+        with patch("app.domain.ingestion.orchestrator_tools.get_processor") as mock_get_proc:
             mock_get_proc.return_value = AsyncMock()
-            result = await tool.execute(
+            result = await ingest_single_file(
+                db=mock_db,
+                connector=mock_connector,
+                llm=MagicMock(),
+                job=MagicMock(metadata_={}),
                 file_id="file-1",
                 file_name="doc.pdf",
                 mime_type="application/pdf",
-                admin_user_id=str(uuid.uuid4()),
+                admin_user_id=uuid.uuid4(),
             )
 
         assert result["status"] == "failed"
         assert "Network error" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_ingest_size_guard(self) -> None:
+        """Should skip files exceeding max size."""
+        result = await ingest_single_file(
+            db=AsyncMock(),
+            connector=AsyncMock(),
+            llm=MagicMock(),
+            job=MagicMock(metadata_={}),
+            file_id="file-big",
+            file_name="huge.pdf",
+            mime_type="application/pdf",
+            admin_user_id=uuid.uuid4(),
+            size_bytes=999_999_999_999,  # Way over any limit
+        )
+
+        assert result["status"] == "skipped"
+        assert "file_too_large" in result["reason"]
 
 
 # ---------------------------------------------------------------------------
@@ -299,12 +320,12 @@ class TestUpdateProgressTool:
 
 
 # ---------------------------------------------------------------------------
-# IngestionOrchestrator
+# IngestionOrchestrator (parallel pipeline)
 # ---------------------------------------------------------------------------
 
 
 class TestIngestionOrchestrator:
-    """Test the orchestrator agent loop."""
+    """Test the parallel orchestrator."""
 
     @pytest.mark.asyncio
     async def test_auth_failure_marks_job_failed(self) -> None:
@@ -329,8 +350,82 @@ class TestIngestionOrchestrator:
         assert "authentication failed" in result.error_message.lower()
 
     @pytest.mark.asyncio
-    async def test_agent_loop_executes_tools(self) -> None:
-        """Should execute tool calls from LLM and terminate on text response."""
+    async def test_parallel_pipeline_completes(self) -> None:
+        """Should run scanners and processor in parallel and complete the job."""
+        mock_db = AsyncMock()
+        mock_storage = AsyncMock()
+        mock_connector = AsyncMock()
+        mock_connector.authenticate.return_value = True
+        mock_connector.list_folder_children.return_value = [
+            DriveFolderEntry(
+                file_id="subfolder-1",
+                name="Folder A",
+                mime_type="application/vnd.google-apps.folder",
+                is_folder=True,
+            ),
+            DriveFolderEntry(
+                file_id="subfolder-2",
+                name="Folder B",
+                mime_type="application/vnd.google-apps.folder",
+                is_folder=True,
+            ),
+        ]
+        mock_llm = AsyncMock()
+
+        # Mock DB result for _is_cancelled and finalize refresh
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = IngestionStatus.PROCESSING
+        mock_result.rowcount = 1
+        # For the finalize select, return a mock job
+        refreshed_job = MagicMock()
+        refreshed_job.total_files = 5
+        refreshed_job.processed_files = 5
+        refreshed_job.failed_files = 0
+        refreshed_job.skipped_files = 0
+        mock_result.scalar_one_or_none.side_effect = [
+            IngestionStatus.PROCESSING,  # _is_cancelled check
+            refreshed_job,               # finalize refresh
+            None,                        # _update_job_status check
+        ]
+        mock_db.execute.return_value = mock_result
+
+        session_factory, worker_db = _make_session_factory()
+
+        job = _make_job()
+        orchestrator = IngestionOrchestrator(
+            db=mock_db,
+            storage=mock_storage,
+            connector=mock_connector,
+            llm=mock_llm,
+            session_factory=session_factory,
+        )
+
+        with (
+            patch("app.domain.ingestion.orchestrator.DriveScanner") as mock_scanner_cls,
+            patch("app.domain.ingestion.orchestrator.StagePipeline") as mock_processor_cls,
+        ):
+            mock_scanner = AsyncMock()
+            mock_scanner.scan_seeds.return_value = 3
+            mock_scanner_cls.return_value = mock_scanner
+
+            mock_pipeline = AsyncMock()
+            mock_pipeline.run.return_value = {
+                "downloaded": 5, "extracted": 5, "embedded": 5,
+                "kg_done": 5, "failed": 0, "skipped": 0,
+                "retry_succeeded": 0, "retry_failed": 0,
+            }
+            mock_processor_cls.return_value = mock_pipeline
+
+            result = await orchestrator.run(job, admin_user_id=uuid.uuid4())
+
+        assert result.status == IngestionStatus.COMPLETED
+        # scan_seeds should be called for each worker that has seeds
+        assert mock_scanner.scan_seeds.await_count == 2
+        mock_pipeline.run.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_parallel_empty_root(self) -> None:
+        """Should complete successfully when root has no subfolders or files."""
         mock_db = AsyncMock()
         mock_storage = AsyncMock()
         mock_connector = AsyncMock()
@@ -338,38 +433,16 @@ class TestIngestionOrchestrator:
         mock_connector.list_folder_children.return_value = []
         mock_llm = AsyncMock()
 
-        # First LLM call: returns a scan_folder tool call
-        first_response = MagicMock()
-        first_choice = MagicMock()
-        first_message = MagicMock()
-        first_tool_call = MagicMock()
-        first_tool_call.id = "call_1"
-        first_tool_call.function.name = "scan_folder"
-        first_tool_call.function.arguments = json.dumps({"folder_id": "root-folder-id"})
-        first_message.tool_calls = [first_tool_call]
-        first_message.content = None
-        first_choice.message = first_message
-        first_response.choices = [first_choice]
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.side_effect = [
+            IngestionStatus.PROCESSING,  # _is_cancelled
+            MagicMock(total_files=0, processed_files=0, failed_files=0, skipped_files=0),
+            None,
+        ]
+        mock_result.rowcount = 1
+        mock_db.execute.return_value = mock_result
 
-        # Second LLM call: returns a text response (done)
-        second_response = MagicMock()
-        second_choice = MagicMock()
-        second_message = MagicMock()
-        second_message.tool_calls = None
-        second_message.content = "Ingestion complete. Scanned 1 folder, found 0 files."
-        second_choice.message = second_message
-        second_response.choices = [second_choice]
-
-        # First call: scan_folder tool call; second call: text response (done)
-        no_tool_response = MagicMock()
-        no_tool_choice = MagicMock()
-        no_tool_message = MagicMock()
-        no_tool_message.tool_calls = None
-        no_tool_message.content = "Ingestion complete. Scanned 1 folder, found 0 files."
-        no_tool_choice.message = no_tool_message
-        no_tool_response.choices = [no_tool_choice]
-
-        mock_llm.complete_for_ingestion.side_effect = [first_response, no_tool_response]
+        session_factory, worker_db = _make_session_factory()
 
         job = _make_job()
         orchestrator = IngestionOrchestrator(
@@ -377,46 +450,63 @@ class TestIngestionOrchestrator:
             storage=mock_storage,
             connector=mock_connector,
             llm=mock_llm,
+            session_factory=session_factory,
         )
 
-        result = await orchestrator.run(job, admin_user_id=uuid.uuid4())
+        with (
+            patch("app.domain.ingestion.orchestrator.DriveScanner") as mock_scanner_cls,
+            patch("app.domain.ingestion.orchestrator.StagePipeline") as mock_processor_cls,
+        ):
+            mock_scanner = AsyncMock()
+            mock_scanner_cls.return_value = mock_scanner
+
+            mock_pipeline = AsyncMock()
+            mock_pipeline.run.return_value = {
+                "downloaded": 0, "extracted": 0, "embedded": 0,
+                "kg_done": 0, "failed": 0, "skipped": 0,
+                "retry_succeeded": 0, "retry_failed": 0,
+            }
+            mock_processor_cls.return_value = mock_pipeline
+
+            result = await orchestrator.run(job, admin_user_id=uuid.uuid4())
 
         assert result.status == IngestionStatus.COMPLETED
-        assert mock_llm.complete_for_ingestion.call_count == 2
-        assert mock_connector.list_folder_children.await_count == 1
-        assert "orchestrator_summary" in result.metadata_
+        # No seeds → scan_seeds should not be called
+        mock_scanner.scan_seeds.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_unknown_tool_handled_gracefully(self) -> None:
-        """Should handle unknown tool calls without crashing."""
+    async def test_scanner_error_still_completes(self) -> None:
+        """Should complete even if one scanner raises (scanning_done still set)."""
         mock_db = AsyncMock()
         mock_storage = AsyncMock()
         mock_connector = AsyncMock()
         mock_connector.authenticate.return_value = True
+        mock_connector.list_folder_children.return_value = [
+            DriveFolderEntry(
+                file_id="subfolder-1",
+                name="Folder A",
+                mime_type="application/vnd.google-apps.folder",
+                is_folder=True,
+            ),
+            DriveFolderEntry(
+                file_id="subfolder-2",
+                name="Folder B",
+                mime_type="application/vnd.google-apps.folder",
+                is_folder=True,
+            ),
+        ]
         mock_llm = AsyncMock()
 
-        # LLM calls a non-existent tool, then finishes
-        first_response = MagicMock()
-        first_choice = MagicMock()
-        first_message = MagicMock()
-        bad_tool_call = MagicMock()
-        bad_tool_call.id = "call_bad"
-        bad_tool_call.function.name = "nonexistent_tool"
-        bad_tool_call.function.arguments = "{}"
-        first_message.tool_calls = [bad_tool_call]
-        first_message.content = None
-        first_choice.message = first_message
-        first_response.choices = [first_choice]
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.side_effect = [
+            IngestionStatus.PROCESSING,
+            MagicMock(total_files=0, processed_files=0, failed_files=0, skipped_files=0),
+            None,
+        ]
+        mock_result.rowcount = 1
+        mock_db.execute.return_value = mock_result
 
-        second_response = MagicMock()
-        second_choice = MagicMock()
-        second_message = MagicMock()
-        second_message.tool_calls = None
-        second_message.content = "Done."
-        second_choice.message = second_message
-        second_response.choices = [second_choice]
-
-        mock_llm.complete.side_effect = [first_response, second_response]
+        session_factory, worker_db = _make_session_factory()
 
         job = _make_job()
         orchestrator = IngestionOrchestrator(
@@ -424,12 +514,72 @@ class TestIngestionOrchestrator:
             storage=mock_storage,
             connector=mock_connector,
             llm=mock_llm,
+            session_factory=session_factory,
+        )
+
+        call_count = 0
+
+        async def scan_seeds_side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise RuntimeError("Scanner A crashed")
+            return 2
+
+        with (
+            patch("app.domain.ingestion.orchestrator.DriveScanner") as mock_scanner_cls,
+            patch("app.domain.ingestion.orchestrator.StagePipeline") as mock_processor_cls,
+        ):
+            mock_scanner = AsyncMock()
+            mock_scanner.scan_seeds.side_effect = scan_seeds_side_effect
+            mock_scanner_cls.return_value = mock_scanner
+
+            mock_pipeline = AsyncMock()
+            mock_pipeline.run.return_value = {
+                "downloaded": 0, "extracted": 0, "embedded": 0,
+                "kg_done": 0, "failed": 0, "skipped": 0,
+                "retry_succeeded": 0, "retry_failed": 0,
+            }
+            mock_processor_cls.return_value = mock_pipeline
+
+            # The gather will propagate the scanner error, caught by orchestrator's try/except
+            from app.domain.ingestion.exceptions import IngestionError
+            with pytest.raises(IngestionError):
+                await orchestrator.run(job, admin_user_id=uuid.uuid4())
+
+        assert job.status == IngestionStatus.FAILED
+
+    @pytest.mark.asyncio
+    async def test_cancellation_stops_workers(self) -> None:
+        """Should pass cancellation callback to workers."""
+        mock_db = AsyncMock()
+        mock_storage = AsyncMock()
+        mock_connector = AsyncMock()
+        mock_connector.authenticate.return_value = True
+        mock_connector.list_folder_children.return_value = []
+        mock_llm = AsyncMock()
+
+        job = _make_job()
+
+        # Simulate cancellation on first _is_cancelled check
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = IngestionStatus.CANCELLED
+        mock_result.rowcount = 1
+        mock_db.execute.return_value = mock_result
+
+        session_factory, _ = _make_session_factory()
+
+        orchestrator = IngestionOrchestrator(
+            db=mock_db,
+            storage=mock_storage,
+            connector=mock_connector,
+            llm=mock_llm,
+            session_factory=session_factory,
         )
 
         result = await orchestrator.run(job, admin_user_id=uuid.uuid4())
 
-        # Should complete without error
-        assert result.status == IngestionStatus.COMPLETED
+        assert result.status == IngestionStatus.CANCELLED
 
 
 # ---------------------------------------------------------------------------

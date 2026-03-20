@@ -300,6 +300,64 @@ class TestDownloadFile:
             content, filename = await connector.download_file("file-2")
             assert filename == "My Document.docx"
 
+    @pytest.mark.asyncio
+    async def test_download_google_spreadsheet_exports_pdf(self) -> None:
+        """Google Spreadsheets should be exported as PDF."""
+        connector = GoogleDriveConnector()
+        connector._credentials = MagicMock()
+
+        mock_svc = MagicMock()
+        mock_svc.files.return_value.get.return_value.execute.return_value = {
+            "id": "file-3",
+            "name": "My Spreadsheet",
+            "mimeType": "application/vnd.google-apps.spreadsheet",
+        }
+        mock_request = MagicMock()
+        mock_svc.files.return_value.export_media.return_value = mock_request
+
+        with (
+            patch.object(connector, "_build_service", return_value=mock_svc),
+            patch("app.domain.ingestion.drive_connector.MediaIoBaseDownload") as mock_dl,
+        ):
+            mock_dl_instance = MagicMock()
+            mock_dl_instance.next_chunk.return_value = (None, True)
+            mock_dl.return_value = mock_dl_instance
+
+            content, filename = await connector.download_file("file-3")
+            assert filename == "My Spreadsheet.pdf"
+            mock_svc.files.return_value.export_media.assert_called_once_with(
+                fileId="file-3", mimeType="application/pdf"
+            )
+
+    @pytest.mark.asyncio
+    async def test_download_google_presentation_exports_pdf(self) -> None:
+        """Google Presentations should be exported as PDF."""
+        connector = GoogleDriveConnector()
+        connector._credentials = MagicMock()
+
+        mock_svc = MagicMock()
+        mock_svc.files.return_value.get.return_value.execute.return_value = {
+            "id": "file-4",
+            "name": "My Slides",
+            "mimeType": "application/vnd.google-apps.presentation",
+        }
+        mock_request = MagicMock()
+        mock_svc.files.return_value.export_media.return_value = mock_request
+
+        with (
+            patch.object(connector, "_build_service", return_value=mock_svc),
+            patch("app.domain.ingestion.drive_connector.MediaIoBaseDownload") as mock_dl,
+        ):
+            mock_dl_instance = MagicMock()
+            mock_dl_instance.next_chunk.return_value = (None, True)
+            mock_dl.return_value = mock_dl_instance
+
+            content, filename = await connector.download_file("file-4")
+            assert filename == "My Slides.pdf"
+            mock_svc.files.return_value.export_media.assert_called_once_with(
+                fileId="file-4", mimeType="application/pdf"
+            )
+
 
 class TestSupportedMimeTypes:
     """Test MIME type configuration."""
@@ -315,3 +373,9 @@ class TestSupportedMimeTypes:
 
     def test_google_docs_supported(self) -> None:
         assert "application/vnd.google-apps.document" in SUPPORTED_MIME_TYPES
+
+    def test_google_spreadsheets_supported(self) -> None:
+        assert "application/vnd.google-apps.spreadsheet" in SUPPORTED_MIME_TYPES
+
+    def test_google_presentations_supported(self) -> None:
+        assert "application/vnd.google-apps.presentation" in SUPPORTED_MIME_TYPES

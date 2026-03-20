@@ -1,100 +1,82 @@
-"""Ingestion orchestrator -- ReAct agent for Google Drive ingestion.
-
-LLM-powered orchestrator that dynamically explores folder structures,
-classifies file metadata, and ingests documents incrementally.
+"""Ingestion orchestrator -- parallel pipeline for Google Drive ingestion.
 
 Architecture
 ~~~~~~~~~~~~
-The orchestrator is a ReAct (Reason + Act) agent loop:
+Scanning and processing run in parallel via asyncio.gather:
+  - 2 scanner workers BFS different subtrees, inserting indexed_files rows
+  - 1 processor worker polls indexed_files and ingests them as they appear
 
-1.  The LLM receives a system prompt describing the task and available tools.
-2.  At each step the LLM either:
-    a. Calls one or more tools (scan_folder, classify_file, ingest_file,
-       update_progress), OR
-    b. Emits a final text message indicating the job is done.
-3.  Tool results are appended to the conversation and the loop repeats.
-4.  A hard cap on iterations prevents runaway loops.
-
-Because the LLM drives the traversal, the agent adapts to ANY folder
-structure -- no hardcoded rules about Major/Year/Course paths.
+The processor stops once both scanners finish and no pending files remain.
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import update
+from sqlalchemy import select
+from sqlalchemy.exc import DBAPIError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.ingestion.drive_connector import SUPPORTED_MIME_TYPES
 from app.domain.ingestion.exceptions import IngestionError
 from app.domain.ingestion.interfaces import SourceConnector
+from app.domain.ingestion.pipeline import PipelineConfig, StagePipeline
 from app.domain.ingestion.models import IngestionJob, IngestionStatus
-from app.domain.ingestion.orchestrator_tools import (
-    BatchIngestFilesTool,
-    ClassifyFileTool,
-    IngestFileTool,
-    OrchestratorTool,
-    ScanFolderTool,
-    UpdateProgressTool,
-)
+from app.domain.ingestion.scanner import DriveScanner, _SKIP_MIME
+from app.domain.ingestion.schemas import DriveFolderEntry
 from app.infra.llm import LLMProvider
 from app.infra.storage import StorageClient
 
 logger = logging.getLogger(__name__)
 
-# Hard cap to prevent infinite agent loops
-MAX_ITERATIONS = 500
+_RETRY_EXCEPTIONS = (DBAPIError, OperationalError, OSError, ConnectionError)
 
-ORCHESTRATOR_SYSTEM_PROMPT = """You are an ingestion orchestrator agent. Your job is to systematically explore a Google Drive folder tree, discover all ingestible documents (PDFs, DOCX, Google Docs), classify their metadata from folder context, and ingest each one.
 
-## Your Tools
+async def _db_retry(
+    coro_fn: Any,
+    *,
+    retries: int = 3,
+    delay: float = 1.0,
+) -> Any:
+    """Retry a DB coroutine on transient connection errors (pgbouncer drops)."""
+    for attempt in range(1, retries + 1):
+        try:
+            return await coro_fn()
+        except _RETRY_EXCEPTIONS as exc:
+            if attempt == retries:
+                logger.error("DB operation failed after %d retries: %s", retries, exc)
+                raise
+            logger.warning(
+                "DB connection error (attempt %d/%d), retrying in %.1fs: %s",
+                attempt, retries, delay, exc,
+            )
+            await asyncio.sleep(delay)
+            delay *= 2  # exponential backoff
 
-1. **scan_folder** -- List all children (files + subfolders) of a folder. Start here with the root folder.
-2. **classify_file** -- For each ingestible file, classify its metadata (major, course code, course name, year, category) from the folder path context. This uses AI to infer the structure -- no hardcoded rules.
-3. **ingest_file** -- Download, process, embed, and extract knowledge from a single file. Use this for one-off files.
-4. **batch_ingest_files** -- Ingest multiple files IN PARALLEL. Accepts a list of files (each with file_id, file_name, mime_type, folder_path, classification). Processes them concurrently -- MUCH FASTER than calling ingest_file in a loop. Use this whenever you have 2+ files ready.
-5. **update_progress** -- Save current progress counts to the database so the admin can track your work. Call this after finishing each folder's files.
 
-## Strategy (optimised for speed)
+async def _check_cancelled(db: AsyncSession, job_id: uuid.UUID) -> bool:
+    """Session-safe cancellation check for parallel workers."""
+    async def _query() -> bool:
+        result = await db.execute(
+            select(IngestionJob.status).where(IngestionJob.id == job_id)
+        )
+        return result.scalar_one_or_none() == IngestionStatus.CANCELLED
 
-1. **Scan the root folder** to see its children.
-2. For each subfolder, scan it recursively to explore the tree.
-3. For each folder containing ingestible files:
-   a. Call **classify_file** for ALL files in the folder (can batch multiple classify_file calls).
-   b. Collect all the classifications.
-   c. Call **batch_ingest_files** with the full list of files + their classifications to ingest them in parallel.
-4. Skip files that are not PDF, DOCX, or Google Docs (images, spreadsheets, etc.).
-5. Skip Google Drive shortcuts (mime type: application/vnd.google-apps.shortcut).
-6. After finishing a folder's files, call **update_progress**.
-7. Continue until all folders have been explored and all files processed.
-
-## Important Rules
-
-- Process ALL files -- do not stop early.
-- **Prefer batch_ingest_files over ingest_file for 2+ files** -- it is parallel and faster.
-- Work folder-by-folder: scan a folder, classify all its files, batch ingest them, then move to the next subfolder.
-- The admin_user_id for ingest_file and batch_ingest_files is: {admin_user_id}
-- The root folder ID is: {root_folder_id}
-- Supported MIME types for ingestion: application/pdf, application/vnd.openxmlformats-officedocument.wordprocessingml.document, application/vnd.google-apps.document
-- When you have finished exploring all folders and ingesting all files, send a final text message summarizing what was done.
-- Call update_progress periodically (at least after finishing each major folder).
-
-## Folder Path Convention
-
-When calling classify_file and ingest_file/batch_ingest_files, build the folder_path as a slash-separated breadcrumb from the root folder to the file's parent folder. For example, if you scanned "Root" > "Informatika" > "Semester 3" > "IF2120 - Probabilitas" > "Referensi", the folder_path for a file in Referensi would be: "Informatika/Semester 3/IF2120 - Probabilitas/Referensi"
-"""
+    try:
+        return await _db_retry(_query)
+    except _RETRY_EXCEPTIONS:
+        # Connection truly dead — assume not cancelled so the job can finish gracefully
+        return False
 
 
 class IngestionOrchestrator:
-    """LLM-driven orchestrator for Google Drive ingestion.
+    """Parallel orchestrator for Google Drive ingestion.
 
-    Uses a ReAct agent loop with tools to explore folder trees,
-    classify file metadata via LLM, and ingest files incrementally.
+    Runs 2 scanner workers and 1 processor worker concurrently via asyncio.gather.
     """
 
     def __init__(
@@ -106,20 +88,32 @@ class IngestionOrchestrator:
         user_settings: "Any | None" = None,
         session_factory: Any = None,
     ) -> None:
-        from app.config import get_settings
         self._db = db
         self._storage = storage
         self._connector = connector
-        # Use a scoped provider (user's model + API key) when settings are present
         self._llm = llm.with_user_settings(user_settings) if user_settings is not None else llm
-        self._settings = get_settings()
-        # Session factory for BatchIngestFilesTool to create per-file sessions.
-        # Falls back to reading the module global if not provided (e.g. in tests).
         if session_factory is not None:
             self._session_factory = session_factory
         else:
             import app.infra.database as _db_module
             self._session_factory = _db_module._session_factory
+
+    async def _is_cancelled(self, job: IngestionJob) -> bool:
+        """Check the database to see if the job has been cancelled externally."""
+        async def _query() -> bool:
+            result = await self._db.execute(
+                select(IngestionJob.status).where(IngestionJob.id == job.id)
+            )
+            current_status = result.scalar_one_or_none()
+            if current_status == IngestionStatus.CANCELLED:
+                job.status = IngestionStatus.CANCELLED
+                return True
+            return False
+
+        try:
+            return await _db_retry(_query)
+        except _RETRY_EXCEPTIONS:
+            return False
 
     async def _update_job_status(
         self,
@@ -128,13 +122,11 @@ class IngestionOrchestrator:
         error_message: str | None = None,
         completed: bool = False,
     ) -> None:
-        """Persist job status using a direct SQL UPDATE to avoid ORM dirty-tracking issues.
+        """Persist job status using a direct SQL UPDATE.
 
-        pgbouncer transaction mode + long-running sessions can cause ORM state
-        to drift. Direct SQL UPDATE guarantees the write goes through.
-
-        Uses SQLAlchemy's ``update()`` construct to handle type casts and
-        parameter binding portably (works with both asyncpg and pgbouncer).
+        Uses an atomic WHERE guard (status != CANCELLED) so that a concurrent
+        cancel from the API server is never overwritten.
+        Retries on transient connection errors from pgbouncer.
         """
         from sqlalchemy import update as sa_update
 
@@ -146,21 +138,76 @@ class IngestionOrchestrator:
         if completed:
             values["completed_at"] = datetime.now(timezone.utc)
 
-        stmt = (
-            sa_update(IngestionJob)
-            .where(IngestionJob.id == job.id)
-            .values(**values)
-            .execution_options(synchronize_session=False)
-        )
-        await self._db.execute(stmt)
-        await self._db.commit()
+        async def _do_update() -> int:
+            stmt = (
+                sa_update(IngestionJob)
+                .where(
+                    IngestionJob.id == job.id,
+                    IngestionJob.status != IngestionStatus.CANCELLED,
+                )
+                .values(**values)
+                .execution_options(synchronize_session=False)
+            )
+            result = await self._db.execute(stmt)
+            await self._db.commit()
+            return result.rowcount  # type: ignore[return-value]
 
-        # Keep the in-memory object in sync
+        try:
+            rowcount = await _db_retry(_do_update)
+        except _RETRY_EXCEPTIONS:
+            logger.error("Failed to update job %s status to %s after retries", job.id, status)
+            return
+
+        if rowcount == 0:
+            job.status = IngestionStatus.CANCELLED
+            return
+
         job.status = status
         if error_message is not None:
             job.error_message = error_message
         if completed:
             job.completed_at = datetime.now(timezone.utc)
+
+    async def _index_root_files(
+        self,
+        job: IngestionJob,
+        files: list[DriveFolderEntry],
+        force: bool,
+    ) -> int:
+        """Classify and insert root-level files directly (before spawning workers)."""
+        if not files:
+            return 0
+
+        # Classify via LLM
+        scanner = DriveScanner(
+            db=self._db,
+            connector=self._connector,
+            llm=self._llm,
+            job=job,
+        )
+        classifications = await scanner._classify_folder_files(files, "")
+
+        skip_file_ids: set[str] = set()
+        if not force:
+            skip_file_ids = await scanner._find_already_ingested(
+                [f.file_id for f in files]
+            )
+
+        count = await scanner._insert_indexed_files(
+            files, "", classifications, skip_file_ids,
+        )
+
+        if count:
+            await scanner._increment_total_files(count)
+        skipped_count = sum(1 for f in files if f.file_id in skip_file_ids)
+        if skipped_count:
+            await scanner._increment_skipped_files(skipped_count)
+
+        logger.info(
+            "Root files indexed: %d inserted, %d skipped",
+            count, skipped_count,
+        )
+        return count
 
     async def run(
         self,
@@ -168,7 +215,7 @@ class IngestionOrchestrator:
         admin_user_id: uuid.UUID,
         force: bool = False,
     ) -> IngestionJob:
-        """Execute an ingestion job using the orchestrator agent.
+        """Execute an ingestion job with parallel scanning and processing.
 
         Args:
             job: The IngestionJob to track progress on.
@@ -179,9 +226,7 @@ class IngestionOrchestrator:
             Updated IngestionJob with final status.
         """
         try:
-            # Phase 1: Authenticate with Drive
-            await self._update_job_status(job, IngestionStatus.SCANNING)
-
+            # 1. Authenticate
             authenticated = await self._connector.authenticate()
             if not authenticated:
                 await self._update_job_status(
@@ -192,174 +237,95 @@ class IngestionOrchestrator:
                 )
                 return job
 
-            # Phase 2: Set up tools
-            file_concurrency = self._settings.file_concurrency
-            ingest_tool = IngestFileTool(
-                db=self._db,
-                connector=self._connector,
-                job=job,
-                llm=self._llm,
-            )
-            batch_tool = BatchIngestFilesTool(
-                session_factory=self._session_factory,
-                connector=self._connector,
-                job=job,
-                llm=self._llm,
-                file_concurrency=file_concurrency,
-            )
-            tools: list[OrchestratorTool] = [
-                ScanFolderTool(connector=self._connector),
-                ClassifyFileTool(llm=self._llm),
-                ingest_tool,
-                batch_tool,
-                UpdateProgressTool(db=self._db, job=job),
-            ]
-            tool_map = {t.name: t for t in tools}
-            tool_specs = [t.to_tool_spec() for t in tools]
-
-            # Phase 3: Build initial messages
-            root_folder = job.folder_id or "root"
-            system_prompt = ORCHESTRATOR_SYSTEM_PROMPT.format(
-                admin_user_id=str(admin_user_id),
-                root_folder_id=root_folder,
-            )
-
-            messages: list[dict[str, Any]] = [
-                {"role": "system", "content": system_prompt},
-                {
-                    "role": "user",
-                    "content": (
-                        f"Begin ingestion. Scan the root folder '{root_folder}' "
-                        f"and process all ingestible files recursively."
-                    ),
-                },
-            ]
-
-            # Phase 4: Agent loop
             await self._update_job_status(job, IngestionStatus.PROCESSING)
 
-            iteration = 0
-            while iteration < MAX_ITERATIONS:
-                iteration += 1
+            if await self._is_cancelled(job):
+                return job
 
+            # 2. Discover top-level children of root folder
+            root_folder_id = job.folder_id or "root"
+            entries = await self._connector.list_folder_children(root_folder_id)
+
+            subfolders: list[tuple[str, str]] = []
+            root_files: list[DriveFolderEntry] = []
+            for entry in entries:
+                if entry.is_folder:
+                    subfolders.append((entry.file_id, entry.name))
+                elif entry.mime_type not in _SKIP_MIME and entry.mime_type in SUPPORTED_MIME_TYPES:
+                    root_files.append(entry)
+
+            # 3. Index root-level files directly (typically few)
+            await self._index_root_files(job, root_files, force)
+
+            # 4. Split subfolders between 2 scanner workers (round-robin)
+            seeds_a: list[tuple[str, str]] = []
+            seeds_b: list[tuple[str, str]] = []
+            for i, folder in enumerate(subfolders):
+                (seeds_a if i % 2 == 0 else seeds_b).append(folder)
+
+            # 5. Set up signaling
+            scanning_done = asyncio.Event()
+
+            # 6. Define workers
+            async def scanner_worker(seeds: list[tuple[str, str]], worker_id: int) -> None:
+                if not seeds:
+                    return
+                async with self._session_factory() as db:
+                    scanner = DriveScanner(db, self._connector, self._llm, job)
+                    await scanner.scan_seeds(
+                        seeds,
+                        force=force,
+                        is_cancelled=lambda: _check_cancelled(db, job.id),
+                    )
+
+            async def scanning_phase() -> None:
                 try:
-                    response = await self._llm.complete_for_ingestion(
-                        messages=messages,
-                        temperature=0.0,
-                        max_tokens=4096,
-                        tools=tool_specs,
+                    await asyncio.gather(
+                        scanner_worker(seeds_a, 0),
+                        scanner_worker(seeds_b, 1),
                     )
-                except Exception as e:
-                    logger.error(
-                        "LLM call failed at iteration %d: %s", iteration, e
-                    )
-                    # Try once more with fallback model
-                    try:
-                        response = await self._llm.complete(
-                            messages=messages,
-                            model=self._llm.fallback_model,
-                            temperature=0.0,
-                            max_tokens=4096,
-                            tools=tool_specs,
-                        )
-                    except Exception as e2:
-                        logger.error("Fallback LLM also failed: %s", e2)
-                        break
+                finally:
+                    scanning_done.set()
 
-                choice = response.choices[0]
-                message = choice.message
-
-                # Check for tool calls
-                if message.tool_calls:
-                    # Append the assistant message with tool calls
-                    messages.append(message.model_dump())
-
-                    # Execute tool calls -- run independent calls concurrently
-                    # classify_file and scan_folder are safe to run in parallel.
-                    # ingest_file and batch_ingest_files serialize themselves
-                    # internally via BatchIngestFilesTool's semaphore.
-                    async def _run_tool_call(tool_call) -> tuple[str, dict]:
-                        fn = tool_call.function
-                        tool_name = fn.name
-                        tool_args = json.loads(fn.arguments) if fn.arguments else {}
-
-                        tool = tool_map.get(tool_name)
-                        if tool is None:
-                            logger.warning("Unknown tool requested: %s", tool_name)
-                            return tool_call.id, {"error": f"Unknown tool: {tool_name}"}
-
-                        try:
-                            # Inject admin_user_id for file-ingesting tools
-                            if tool_name in ("ingest_file", "batch_ingest_files"):
-                                tool_args["admin_user_id"] = str(admin_user_id)
-
-                            result = await tool.execute(**tool_args)
-                        except Exception as e:
-                            logger.exception("Tool %s failed: %s", tool_name, e)
-                            result = {
-                                "error": f"Tool execution failed: {str(e)[:200]}"
-                            }
-
-                        logger.info(
-                            "Iteration %d: %s -> %s",
-                            iteration,
-                            tool_name,
-                            _summarise_result(result),
-                        )
-                        return tool_call.id, result
-
-                    # Run all tool calls in this response concurrently
-                    results = await asyncio.gather(
-                        *[_run_tool_call(tc) for tc in message.tool_calls],
-                        return_exceptions=True,
-                    )
-
-                    for i, outcome in enumerate(results):
-                        tool_call = message.tool_calls[i]
-                        if isinstance(outcome, Exception):
-                            tool_result = {"error": str(outcome)[:200]}
-                            call_id = tool_call.id
-                        else:
-                            call_id, tool_result = outcome  # type: ignore[misc]
-
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": call_id,
-                            "content": json.dumps(tool_result, default=str),
-                        })
-
-                elif message.content:
-                    # Agent sent a text message -- done
-                    logger.info(
-                        "Orchestrator finished after %d iterations. Summary: %s",
-                        iteration,
-                        message.content[:300],
-                    )
-                    job.metadata_["orchestrator_summary"] = message.content[:2000]
-                    break
-
-                else:
-                    # No tool calls and no content -- unexpected, break
-                    logger.warning(
-                        "Orchestrator returned empty response at iteration %d",
-                        iteration,
-                    )
-                    break
-
-                # Prune message history if it's getting too long
-                # Keep system + last N messages to avoid token limits
-                if len(messages) > 100:
-                    messages = _prune_messages(messages)
-
-            else:
-                logger.warning(
-                    "Orchestrator hit max iterations (%d)", MAX_ITERATIONS
+            async def processor_worker() -> None:
+                pipeline = StagePipeline(
+                    session_factory=self._session_factory,
+                    connector=self._connector,
+                    llm=self._llm,
+                    job=job,
+                    admin_user_id=admin_user_id,
+                    config=PipelineConfig.from_settings(),
                 )
-                job.metadata_["orchestrator_warning"] = (
-                    f"Hit max iterations ({MAX_ITERATIONS})"
+                await pipeline.run(
+                    scanning_done,
+                    is_cancelled=lambda: _check_cancelled(
+                        self._db, job.id
+                    ),
                 )
 
-            # Phase 5: Finalise job
+            # 7. Run scanning + processing in parallel
+            await asyncio.gather(scanning_phase(), processor_worker())
+
+            if await self._is_cancelled(job):
+                return job
+
+            # 8. Finalize — read counters from DB for accuracy
+            async def _refresh_job() -> IngestionJob | None:
+                r = await self._db.execute(
+                    select(IngestionJob).where(IngestionJob.id == job.id)
+                )
+                return r.scalar_one_or_none()
+
+            try:
+                refreshed = await _db_retry(_refresh_job)
+            except _RETRY_EXCEPTIONS:
+                refreshed = None
+            if refreshed:
+                job.total_files = refreshed.total_files
+                job.processed_files = refreshed.processed_files
+                job.failed_files = refreshed.failed_files
+                job.skipped_files = refreshed.skipped_files
+
             error_msg = None
             if job.failed_files > 0:
                 error_msg = f"{job.failed_files} files failed during ingestion"
@@ -372,75 +338,23 @@ class IngestionOrchestrator:
             )
 
             logger.info(
-                "Ingestion orchestrator complete (job %s): "
-                "%d processed, %d failed, %d skipped, %d iterations",
+                "Ingestion complete (job %s): %d processed, %d failed, %d skipped",
                 job.id,
                 job.processed_files,
                 job.failed_files,
                 job.skipped_files,
-                iteration,
             )
             return job
 
         except Exception as e:
-            await self._update_job_status(
-                job,
-                IngestionStatus.FAILED,
-                error_message=str(e)[:500],
-                completed=True,
-            )
             logger.exception("Ingestion orchestrator failed (job %s)", job.id)
+            try:
+                await self._update_job_status(
+                    job,
+                    IngestionStatus.FAILED,
+                    error_message=str(e)[:500],
+                    completed=True,
+                )
+            except Exception:
+                logger.error("Could not persist FAILED status for job %s", job.id)
             raise IngestionError(str(e)) from e
-
-
-def _summarise_result(result: dict[str, Any]) -> str:
-    """One-line summary of a tool result for logging."""
-    status = result.get("status", "")
-    if "children_count" in result:
-        return (
-            f"{result['children_count']} children "
-            f"({len(result.get('folders', []))} folders, "
-            f"{len(result.get('files', []))} files)"
-        )
-    if "classification" in result:
-        c = result["classification"]
-        return (
-            f"classified -> {c.get('course_code') or 'unknown course'} / "
-            f"{c.get('category') or 'unknown category'}"
-        )
-    if "document_id" in result:
-        return (
-            f"ingested {result.get('file_name', '')} "
-            f"({result.get('chunk_count', 0)} chunks, "
-            f"{result.get('embeddings_created', 0)} embeddings)"
-        )
-    if "ingested_count" in result:
-        return (
-            f"batch: {result.get('ingested_count', 0)} ingested, "
-            f"{result.get('failed_count', 0)} failed, "
-            f"{result.get('skipped_count', 0)} skipped"
-        )
-    if status:
-        return status
-    return json.dumps(result, default=str)[:120]
-
-
-def _prune_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Keep the system prompt and last 80 messages to stay within token limits.
-
-    Inserts a summary message so the agent knows context was pruned.
-    """
-    system = messages[0]
-    recent = messages[-80:]
-
-    pruned_count = len(messages) - 81
-    summary_msg = {
-        "role": "user",
-        "content": (
-            f"[CONTEXT NOTE: {pruned_count} earlier messages were pruned to save "
-            f"context space. Continue where you left off -- scan remaining folders "
-            f"and ingest remaining files.]"
-        ),
-    }
-
-    return [system, summary_msg] + recent

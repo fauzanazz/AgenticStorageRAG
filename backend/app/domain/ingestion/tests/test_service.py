@@ -1,7 +1,7 @@
 """Tests for ingestion service."""
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -12,7 +12,7 @@ from app.domain.ingestion.exceptions import (
 )
 from app.domain.ingestion.models import IngestionJob, IngestionStatus
 from app.domain.ingestion.schemas import TriggerIngestionRequest
-from app.domain.ingestion.service import IngestionService
+from app.domain.ingestion.service import IngestionService, _STALE_JOB_THRESHOLD
 
 
 def _make_job(**kwargs) -> MagicMock:
@@ -125,12 +125,19 @@ class TestTriggerIngestion:
 
     @pytest.mark.asyncio
     async def test_already_running(self) -> None:
-        """Should raise error if job is already running."""
+        """Should raise error if a genuinely active job exists."""
         mock_db = AsyncMock()
         mock_db.add = MagicMock()
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = _make_job(status=IngestionStatus.PROCESSING)
-        mock_db.execute.return_value = mock_result
+
+        # 1st call: stale-job UPDATE (no stale jobs found)
+        mock_stale_result = MagicMock()
+        mock_stale_result.rowcount = 0
+        # 2nd call: SELECT for active jobs — finds a running one
+        mock_running_result = MagicMock()
+        mock_running_result.scalar_one_or_none.return_value = _make_job(
+            status=IngestionStatus.PROCESSING,
+        )
+        mock_db.execute.side_effect = [mock_stale_result, mock_running_result]
 
         service = IngestionService(db=mock_db, storage=AsyncMock())
         with pytest.raises(IngestionAlreadyRunningError):
@@ -138,3 +145,51 @@ class TestTriggerIngestion:
                 TriggerIngestionRequest(),
                 admin_user_id=uuid.uuid4(),
             )
+
+    @pytest.mark.asyncio
+    async def test_stale_job_auto_failed(self) -> None:
+        """Stale zombie jobs should be auto-failed so trigger succeeds."""
+        mock_db = AsyncMock()
+        mock_db.add = MagicMock()
+
+        # 1st call: stale-job UPDATE — 1 row updated (zombie cleared)
+        mock_stale_result = MagicMock()
+        mock_stale_result.rowcount = 1
+        # 2nd call: SELECT for active jobs — none found (zombie was cleared)
+        mock_running_result = MagicMock()
+        mock_running_result.scalar_one_or_none.return_value = None
+        # 3rd call: SELECT AppConfig for default folder — no saved default
+        mock_config_result = MagicMock()
+        mock_config_result.scalar_one_or_none.return_value = None
+
+        mock_db.execute.side_effect = [mock_stale_result, mock_running_result, mock_config_result]
+
+        # After db.add + commit, refresh populates the job fields
+        async def _fake_refresh(obj: IngestionJob) -> None:
+            obj.id = uuid.uuid4()
+            obj.total_files = 0
+            obj.processed_files = 0
+            obj.failed_files = 0
+            obj.skipped_files = 0
+            obj.metadata_ = {}
+            obj.started_at = datetime.now(timezone.utc)
+            obj.completed_at = None
+
+        mock_db.refresh = AsyncMock(side_effect=_fake_refresh)
+
+        service = IngestionService(db=mock_db, storage=AsyncMock())
+
+        with patch("app.domain.ingestion.service.get_settings") as mock_settings:
+            mock_settings.return_value.google_drive_folder_id = "test-folder"
+            with patch("app.domain.ingestion.tasks.run_ingestion_task") as mock_task:
+                result = await service.trigger_ingestion(
+                    TriggerIngestionRequest(),
+                    admin_user_id=uuid.uuid4(),
+                )
+
+        # Stale-job commit was called (at least once for stale + once for new job)
+        assert mock_db.commit.await_count >= 2
+        # A new job was created
+        mock_db.add.assert_called_once()
+        # Celery task was dispatched
+        mock_task.delay.assert_called_once()

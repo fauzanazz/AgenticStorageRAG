@@ -18,6 +18,7 @@ Concurrency model
 from __future__ import annotations
 
 import asyncio
+import gc
 import json
 import logging
 import uuid
@@ -34,7 +35,10 @@ from app.domain.documents.models import (
     DocumentStatus,
 )
 from app.domain.documents.processors import get_processor
-from app.domain.ingestion.drive_connector import SUPPORTED_MIME_TYPES
+from app.domain.ingestion.drive_connector import (
+    SUPPORTED_MIME_TYPES,
+    _GOOGLE_WORKSPACE_EXPORT_MAP,
+)
 from app.domain.ingestion.interfaces import SourceConnector
 from app.domain.ingestion.models import IngestionJob, IngestionStatus
 from app.domain.ingestion.schemas import (
@@ -212,6 +216,10 @@ class ClassifyFileTool(OrchestratorTool):
         return {
             "type": "object",
             "properties": {
+                "file_id": {
+                    "type": "string",
+                    "description": "Google Drive file ID (from scan_folder results). Passed through to the result so you can use it later in batch_ingest_files.",
+                },
                 "file_name": {
                     "type": "string",
                     "description": "Name of the file.",
@@ -229,6 +237,7 @@ class ClassifyFileTool(OrchestratorTool):
         }
 
     async def execute(self, **kwargs: Any) -> dict[str, Any]:
+        file_id: str | None = kwargs.get("file_id")
         file_name: str = kwargs["file_name"]
         folder_path: str = kwargs["folder_path"]
         mime_type: str = kwargs.get("mime_type", "unknown")
@@ -265,15 +274,18 @@ class ClassifyFileTool(OrchestratorTool):
                 additional_context=parsed.get("additional_context", {}),
             )
 
-            return {
+            result: dict[str, Any] = {
                 "status": "classified",
                 "file_name": file_name,
                 "classification": classification.model_dump(),
             }
+            if file_id:
+                result["file_id"] = file_id
+            return result
 
         except Exception as e:
             logger.warning("Classification failed for %s: %s", file_name, e)
-            return {
+            fallback: dict[str, Any] = {
                 "status": "classification_failed",
                 "file_name": file_name,
                 "error": str(e)[:200],
@@ -281,11 +293,276 @@ class ClassifyFileTool(OrchestratorTool):
                     folder_path=folder_path,
                 ).model_dump(),
             }
+            if file_id:
+                fallback["file_id"] = file_id
+            return fallback
 
 
 # ---------------------------------------------------------------------------
 # 3. ingest_file
 # ---------------------------------------------------------------------------
+
+
+async def ingest_single_file(
+    db: AsyncSession,
+    connector: SourceConnector,
+    llm: LLMProvider,
+    job: IngestionJob,
+    file_id: str,
+    file_name: str,
+    mime_type: str,
+    folder_path: str = "",
+    classification: dict[str, Any] | None = None,
+    admin_user_id: uuid.UUID | None = None,
+    size_bytes: int | None = None,
+) -> dict[str, Any]:
+    """Standalone function: download, process, chunk, embed, KG-extract a single file.
+
+    This is the core ingestion logic extracted from IngestFileTool so it can be
+    called both by the tool (ReAct agent) and by FileProcessor (two-phase pipeline).
+
+    Returns a dict with status, file_name, document_id, chunk_count, etc.
+    """
+    classification = classification or {}
+
+    logger.info("Ingesting file: %s (%s)", file_name, file_id)
+
+    # --- File size guard ---
+    from app.config import get_settings as _get_settings
+
+    _max_bytes = _get_settings().max_ingest_file_size_mb * 1024 * 1024
+    if size_bytes is not None and size_bytes > _max_bytes:
+        logger.warning(
+            "File %s (%s) is %s bytes — exceeds max_ingest_file_size_mb=%d MB, skipping",
+            file_name, file_id, size_bytes, _get_settings().max_ingest_file_size_mb,
+        )
+        return {
+            "status": "skipped",
+            "file_name": file_name,
+            "reason": f"file_too_large ({size_bytes} bytes, max {_max_bytes} bytes)",
+        }
+
+    # --- Deduplication guard ---
+    from sqlalchemy import select as sa_select
+    from sqlalchemy import or_ as sa_or
+
+    existing_result = await db.execute(
+        sa_select(Document.id, Document.status)
+        .where(
+            Document.source == DocumentSource.GOOGLE_DRIVE,
+            Document.is_base_knowledge.is_(True),
+            sa_or(
+                Document.status == DocumentStatus.READY,
+                Document.status == DocumentStatus.PROCESSING,
+            ),
+            Document.metadata_["drive_file_id"].astext == file_id,
+        )
+        .limit(1)
+    )
+    existing_row = existing_result.first()
+    if existing_row is not None:
+        logger.info(
+            "File %s (%s) already exists as document %s (status=%s) — skipping",
+            file_name, file_id, existing_row[0], existing_row[1],
+        )
+        return {
+            "status": "skipped",
+            "file_name": file_name,
+            "reason": "already_ingested",
+            "document_id": str(existing_row[0]),
+        }
+
+    try:
+        # Determine target MIME type for processing
+        target_mime = mime_type
+        if mime_type in _GOOGLE_WORKSPACE_EXPORT_MAP:
+            target_mime = _GOOGLE_WORKSPACE_EXPORT_MAP[mime_type][0]
+
+        # Get processor
+        processor = get_processor(target_mime)
+        if processor is None:
+            file_ext = SUPPORTED_MIME_TYPES.get(mime_type, "")
+            processor = get_processor(file_ext)
+        if processor is None:
+            return {
+                "status": "skipped",
+                "file_name": file_name,
+                "reason": f"No processor for MIME type {mime_type}",
+            }
+
+        # Download from Drive
+        file_content, filename = await connector.download_file(file_id)
+
+        import resource
+        def _rss_mb() -> int:
+            try:
+                with open("/proc/self/status") as f:
+                    for line in f:
+                        if line.startswith("VmRSS:"):
+                            return int(line.split()[1]) // 1024
+            except Exception:
+                pass
+            return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // 1024
+
+        logger.info(
+            "Downloaded %s (%d bytes) — RSS: %d MB",
+            filename, len(file_content), _rss_mb(),
+        )
+
+        doc_id = uuid.uuid4()
+        storage_path = f"drive://{file_id}"
+
+        # Build enriched metadata
+        doc_metadata: dict[str, Any] = {
+            "drive_file_id": file_id,
+            "original_mime_type": mime_type,
+            "folder_path": folder_path,
+        }
+        if classification:
+            doc_metadata["classification"] = classification
+
+        # Create Document record
+        document = Document(
+            id=doc_id,
+            user_id=admin_user_id,
+            filename=filename,
+            file_type=target_mime,
+            file_size=len(file_content),
+            storage_path=storage_path,
+            status=DocumentStatus.PROCESSING,
+            source=DocumentSource.GOOGLE_DRIVE,
+            is_base_knowledge=True,
+            expires_at=None,
+            metadata_=doc_metadata,
+        )
+        db.add(document)
+        await db.commit()
+        await db.refresh(document)
+
+        # Extract text + chunk
+        processing_result = await processor.process(file_content)
+        logger.info("After text extraction — RSS: %d MB", _rss_mb())
+
+        # Store chunks
+        chunks_created: list[DocumentChunk] = []
+        for chunk_data in processing_result.chunks:
+            chunk = DocumentChunk(
+                document_id=document.id,
+                chunk_index=chunk_data.chunk_index,
+                content=chunk_data.content,
+                page_number=chunk_data.page_number,
+                token_count=len(chunk_data.content.split()),
+                metadata_=chunk_data.metadata,
+            )
+            db.add(chunk)
+            chunks_created.append(chunk)
+
+        await db.flush()
+
+        document.status = DocumentStatus.READY
+        document.chunk_count = len(processing_result.chunks)
+        document.metadata_.update(processing_result.metadata)
+        document.processed_at = datetime.now(timezone.utc)
+        await db.commit()
+
+        logger.info("Ingested %s: %d chunks", filename, len(processing_result.chunks))
+
+        # Post-processing: embeddings + KG extraction (non-fatal)
+        embed_count = await _embed_chunks(db, llm, document, chunks_created)
+        logger.info("After embedding — RSS: %d MB", _rss_mb())
+        kg_stats = await _extract_knowledge_graph(db, llm, document, chunks_created)
+        logger.info("After KG extraction — RSS: %d MB", _rss_mb())
+
+        chunk_count = len(chunks_created)
+
+        # Release heavy objects
+        file_content = None  # noqa: F841
+        processing_result = None  # noqa: F841
+        chunks_created = []
+        gc.collect()
+
+        return {
+            "status": "processed",
+            "file_name": filename,
+            "document_id": str(document.id),
+            "chunk_count": chunk_count,
+            "embeddings_created": embed_count,
+            "kg_entities": kg_stats.get("entities_created", 0),
+            "kg_relationships": kg_stats.get("relationships_created", 0),
+        }
+
+    except Exception as e:
+        logger.exception("Failed to ingest file %s: %s", file_name, e)
+        return {
+            "status": "failed",
+            "file_name": file_name,
+            "error": str(e)[:300],
+        }
+
+
+async def _embed_chunks(
+    db: AsyncSession,
+    llm: LLMProvider,
+    document: Document,
+    chunks: list[DocumentChunk],
+) -> int:
+    """Generate and store vector embeddings. Non-fatal on failure."""
+    if not chunks:
+        return 0
+    try:
+        from app.domain.knowledge.vector_service import VectorService
+
+        vector_service = VectorService(db=db)
+        chunk_dicts = [
+            {"id": c.id, "content": c.content, "metadata": c.metadata_ or {}}
+            for c in chunks
+        ]
+        count = await vector_service.embed_chunks(
+            chunks=chunk_dicts, document_id=document.id
+        )
+        await db.commit()
+        logger.info("Embedded %d chunks for %s", count, document.id)
+        return count
+    except Exception as e:
+        logger.error("Embedding failed for %s (non-fatal): %s", document.id, e)
+        return 0
+
+
+async def _extract_knowledge_graph(
+    db: AsyncSession,
+    llm: LLMProvider,
+    document: Document,
+    chunks: list[DocumentChunk],
+) -> dict[str, int]:
+    """Extract entities + relationships into KG. Non-fatal on failure."""
+    if not chunks:
+        return {"entities_created": 0, "relationships_created": 0}
+    try:
+        from app.domain.knowledge.kg_builder import KGBuilder
+        from app.domain.knowledge.graph_service import GraphService
+        from app.infra.neo4j_client import neo4j_client
+
+        graph_service = GraphService(db=db, neo4j=neo4j_client)
+        kg_builder = KGBuilder(graph_service=graph_service, llm=llm)
+
+        chunk_dicts = [
+            {"content": c.content, "metadata": c.metadata_ or {}}
+            for c in chunks
+        ]
+        result = await kg_builder.build_from_chunks(
+            chunks=chunk_dicts, document_id=document.id
+        )
+        await db.commit()
+        logger.info(
+            "KG extraction for %s: %d entities, %d rels",
+            document.id,
+            result.get("entities_created", 0),
+            result.get("relationships_created", 0),
+        )
+        return result
+    except Exception as e:
+        logger.error("KG extraction failed for %s (non-fatal): %s", document.id, e)
+        return {"entities_created": 0, "relationships_created": 0}
 
 
 class IngestFileTool(OrchestratorTool):
@@ -294,6 +571,7 @@ class IngestFileTool(OrchestratorTool):
     Each invocation is an atomic unit -- progress is committed after each file.
     The file is NOT copied to Supabase Storage; only the Drive file ID reference
     is stored on the Document record (storage_path = "drive://{file_id}").
+    Thin wrapper around the standalone ingest_single_file() function.
     """
 
     def __init__(
@@ -349,6 +627,10 @@ class IngestFileTool(OrchestratorTool):
                     "type": "string",
                     "description": "Admin user UUID who owns the ingested document.",
                 },
+                "size_bytes": {
+                    "type": "integer",
+                    "description": "File size in bytes from scan_folder_children. Used to skip oversized files before download.",
+                },
             },
             "required": ["file_id", "file_name", "mime_type", "admin_user_id"],
         }
@@ -360,272 +642,22 @@ class IngestFileTool(OrchestratorTool):
         folder_path: str = kwargs.get("folder_path", "")
         classification: dict[str, Any] = kwargs.get("classification", {})
         admin_user_id = uuid.UUID(kwargs["admin_user_id"])
+        size_bytes: int | None = kwargs.get("size_bytes")
 
-        logger.info("Ingesting file: %s (%s)", file_name, file_id)
-
-        # --- Deduplication guard ---
-        # Check whether this Drive file has already been successfully ingested.
-        # This prevents the LLM agent from inserting a duplicate Document row if
-        # it calls ingest_file twice for the same file_id (e.g. after context pruning).
-        from sqlalchemy import select as sa_select
-
-        existing_result = await self._db.execute(
-            sa_select(Document.id, Document.metadata_["drive_modified_time"].astext)
-            .where(
-                Document.source == DocumentSource.GOOGLE_DRIVE,
-                Document.is_base_knowledge.is_(True),
-                Document.status == DocumentStatus.READY,
-                Document.metadata_["drive_file_id"].astext == file_id,
-            )
-            .limit(1)
+        return await ingest_single_file(
+            db=self._db,
+            connector=self._connector,
+            llm=self._llm,
+            job=self._job,
+            file_id=file_id,
+            file_name=file_name,
+            mime_type=mime_type,
+            folder_path=folder_path,
+            classification=classification,
+            admin_user_id=admin_user_id,
+            size_bytes=size_bytes,
         )
-        existing_row = existing_result.first()
-        if existing_row is not None:
-            logger.info(
-                "File %s (%s) already ingested as document %s — skipping",
-                file_name,
-                file_id,
-                existing_row[0],
-            )
-            await self._record_file_event(file_id, file_name, "skipped", folder_path)
-            return {
-                "status": "skipped",
-                "file_name": file_name,
-                "reason": "already_ingested",
-                "document_id": str(existing_row[0]),
-            }
 
-        # Event 1: started
-        await self._record_file_event(file_id, file_name, "started", folder_path)
-
-        try:
-            # Determine target MIME type for processing
-            target_mime = mime_type
-            if mime_type == "application/vnd.google-apps.document":
-                target_mime = (
-                    "application/vnd.openxmlformats-officedocument"
-                    ".wordprocessingml.document"
-                )
-
-            # Get processor
-            processor = get_processor(target_mime)
-            if processor is None:
-                file_ext = SUPPORTED_MIME_TYPES.get(mime_type, "")
-                processor = get_processor(file_ext)
-            if processor is None:
-                await self._record_file_event(file_id, file_name, "skipped", folder_path)
-                return {
-                    "status": "skipped",
-                    "file_name": file_name,
-                    "reason": f"No processor for MIME type {mime_type}",
-                }
-
-            # Download from Drive
-            file_content, filename = await self._connector.download_file(file_id)
-
-            # Store the Drive reference on the Document — no copy to Supabase.
-            # The file already lives permanently in Drive; re-fetching is always
-            # possible via the connector using the Drive file ID.
-            doc_id = uuid.uuid4()
-            storage_path = f"drive://{file_id}"
-
-            # Build enriched metadata
-            doc_metadata: dict[str, Any] = {
-                "drive_file_id": file_id,
-                "original_mime_type": mime_type,
-                "folder_path": folder_path,
-            }
-            if classification:
-                doc_metadata["classification"] = classification
-
-            # Create Document record
-            document = Document(
-                id=doc_id,
-                user_id=admin_user_id,
-                filename=filename,
-                file_type=target_mime,
-                file_size=len(file_content),
-                storage_path=storage_path,
-                status=DocumentStatus.PROCESSING,
-                source=DocumentSource.GOOGLE_DRIVE,
-                is_base_knowledge=True,
-                expires_at=None,
-                metadata_=doc_metadata,
-            )
-            self._db.add(document)
-            await self._db.commit()
-            await self._db.refresh(document)
-
-            # Extract text + chunk
-            processing_result = await processor.process(file_content)
-
-            # Store chunks
-            chunks_created: list[DocumentChunk] = []
-            for chunk_data in processing_result.chunks:
-                chunk = DocumentChunk(
-                    document_id=document.id,
-                    chunk_index=chunk_data.chunk_index,
-                    content=chunk_data.content,
-                    page_number=chunk_data.page_number,
-                    token_count=len(chunk_data.content.split()),
-                    metadata_=chunk_data.metadata,
-                )
-                self._db.add(chunk)
-                chunks_created.append(chunk)
-
-            await self._db.flush()
-
-            document.status = DocumentStatus.READY
-            document.chunk_count = len(processing_result.chunks)
-            document.metadata_.update(processing_result.metadata)
-            document.processed_at = datetime.now(timezone.utc)
-            await self._db.commit()
-
-            logger.info(
-                "Ingested %s: %d chunks", filename, len(processing_result.chunks)
-            )
-
-            # Post-processing: embeddings + KG extraction (non-fatal)
-            embed_count = await self._embed_chunks(document, chunks_created)
-            kg_stats = await self._extract_knowledge_graph(document, chunks_created)
-
-            # Event 2: completed
-            await self._record_file_event(
-                file_id, filename, "completed", folder_path,
-                extra={"chunks": len(processing_result.chunks), "embeddings": embed_count},
-            )
-
-            return {
-                "status": "processed",
-                "file_name": filename,
-                "document_id": str(document.id),
-                "chunk_count": len(processing_result.chunks),
-                "embeddings_created": embed_count,
-                "kg_entities": kg_stats.get("entities_created", 0),
-                "kg_relationships": kg_stats.get("relationships_created", 0),
-            }
-
-        except Exception as e:
-            logger.exception("Failed to ingest file %s: %s", file_name, e)
-            await self._record_file_event(file_id, file_name, "failed", folder_path)
-            return {
-                "status": "failed",
-                "file_name": file_name,
-                "error": str(e)[:300],
-            }
-
-    # -- helpers (ported from IngestionSwarm) --------------------------------
-
-    async def _record_file_event(
-        self,
-        file_id: str,
-        file_name: str,
-        state: str,
-        folder_path: str = "",
-        extra: dict[str, Any] | None = None,
-    ) -> None:
-        """Write a file state event (started | completed | skipped | failed) to job metadata_.
-
-        Keyed by file_id so each file gets exactly one entry that gets updated in-place.
-        Uses flag_modified + direct SQL UPDATE for JSONB to ensure persistence with pgbouncer.
-        """
-        try:
-            from sqlalchemy.orm.attributes import flag_modified
-
-            file_events: dict = self._job.metadata_.get("file_events", {})
-            entry: dict[str, Any] = file_events.get(file_id, {"name": file_name})
-            entry["state"] = state
-            entry["ts"] = datetime.now(timezone.utc).isoformat()
-            if folder_path:
-                entry["folder"] = folder_path
-            if extra:
-                entry.update(extra)
-            file_events[file_id] = entry
-
-            # Merge back and flag as modified (required for JSONB in-place mutation)
-            new_metadata = dict(self._job.metadata_)
-            new_metadata["file_events"] = file_events
-            self._job.metadata_ = new_metadata
-            flag_modified(self._job, "metadata_")
-
-            # Use SQLAlchemy update() to guarantee the write persists
-            from sqlalchemy import update as sa_update
-
-            stmt = (
-                sa_update(IngestionJob)
-                .where(IngestionJob.id == self._job.id)
-                .values(metadata_=new_metadata)
-                .execution_options(synchronize_session=False)
-            )
-            await self._db.execute(stmt)
-            await self._db.commit()
-        except Exception as e:
-            logger.warning("Failed to record file event for %s: %s", file_id, e)
-
-    async def _embed_chunks(
-        self,
-        document: Document,
-        chunks: list[DocumentChunk],
-    ) -> int:
-        """Generate and store vector embeddings. Non-fatal on failure."""
-        if not chunks:
-            return 0
-        try:
-            from app.domain.knowledge.vector_service import VectorService
-
-            vector_service = VectorService(db=self._db)
-            chunk_dicts = [
-                {"id": c.id, "content": c.content, "metadata": c.metadata_ or {}}
-                for c in chunks
-            ]
-            count = await vector_service.embed_chunks(
-                chunks=chunk_dicts, document_id=document.id
-            )
-            await self._db.commit()
-            logger.info("Embedded %d chunks for %s", count, document.id)
-            return count
-        except Exception as e:
-            logger.error(
-                "Embedding failed for %s (non-fatal): %s", document.id, e
-            )
-            return 0
-
-    async def _extract_knowledge_graph(
-        self,
-        document: Document,
-        chunks: list[DocumentChunk],
-    ) -> dict[str, int]:
-        """Extract entities + relationships into KG. Non-fatal on failure."""
-        if not chunks:
-            return {"entities_created": 0, "relationships_created": 0}
-        try:
-            from app.domain.knowledge.kg_builder import KGBuilder
-            from app.domain.knowledge.graph_service import GraphService
-            from app.infra.neo4j_client import neo4j_client
-
-            graph_service = GraphService(db=self._db, neo4j=neo4j_client)
-            kg_builder = KGBuilder(graph_service=graph_service, llm=self._llm)
-
-            chunk_dicts = [
-                {"content": c.content, "metadata": c.metadata_ or {}}
-                for c in chunks
-            ]
-            result = await kg_builder.build_from_chunks(
-                chunks=chunk_dicts, document_id=document.id
-            )
-            await self._db.commit()
-            logger.info(
-                "KG extraction for %s: %d entities, %d rels",
-                document.id,
-                result.get("entities_created", 0),
-                result.get("relationships_created", 0),
-            )
-            return result
-        except Exception as e:
-            logger.error(
-                "KG extraction failed for %s (non-fatal): %s", document.id, e
-            )
-            return {"entities_created": 0, "relationships_created": 0}
 
 
 # ---------------------------------------------------------------------------
@@ -694,6 +726,7 @@ class BatchIngestFilesTool(OrchestratorTool):
                             "mime_type": {"type": "string", "description": "MIME type."},
                             "folder_path": {"type": "string", "description": "Slash-separated folder breadcrumb."},
                             "classification": {"type": "object", "description": "Metadata from classify_file."},
+                            "size_bytes": {"type": "integer", "description": "File size in bytes from scan results."},
                         },
                         "required": ["file_id", "file_name", "mime_type"],
                     },
@@ -710,24 +743,23 @@ class BatchIngestFilesTool(OrchestratorTool):
         """Ingest a single file with its own DB session, bounded by the semaphore."""
         async with self._semaphore:
             async with self._session_factory() as db:
-                ingest_tool = IngestFileTool(
+                return await ingest_single_file(
                     db=db,
                     connector=self._connector,
-                    job=self._job,
                     llm=self._llm,
-                )
-                return await ingest_tool.execute(
+                    job=self._job,
                     file_id=file_info["file_id"],
                     file_name=file_info["file_name"],
                     mime_type=file_info["mime_type"],
                     folder_path=file_info.get("folder_path", ""),
                     classification=file_info.get("classification", {}),
-                    admin_user_id=admin_user_id,
+                    admin_user_id=uuid.UUID(admin_user_id),
+                    size_bytes=file_info.get("size_bytes"),
                 )
 
     async def execute(self, **kwargs: Any) -> dict[str, Any]:
-        files: list[dict[str, Any]] = kwargs["files"]
-        admin_user_id: str = kwargs["admin_user_id"]
+        files: list[dict[str, Any]] = kwargs.get("files", [])
+        admin_user_id: str = kwargs.get("admin_user_id", "")
 
         if not files:
             return {
@@ -888,12 +920,18 @@ class UpdateProgressTool(OrchestratorTool):
         except Exception:
             pass  # not an ORM instance (e.g. in tests)
 
-        # Direct SQL UPDATE guarantees persistence with pgbouncer transaction-mode pooling
+        # Direct SQL UPDATE guarantees persistence with pgbouncer transaction-mode pooling.
+        # The WHERE guard ensures we never overwrite a CANCELLED status set by
+        # the API server in a different process — this is the atomic check-and-set
+        # that prevents the "already running" bug after cancel.
         from sqlalchemy import update as sa_update
 
         stmt = (
             sa_update(IngestionJob)
-            .where(IngestionJob.id == self._job.id)
+            .where(
+                IngestionJob.id == self._job.id,
+                IngestionJob.status != IngestionStatus.CANCELLED,
+            )
             .values(
                 status=new_status,
                 total_files=total_discovered,
@@ -904,8 +942,21 @@ class UpdateProgressTool(OrchestratorTool):
             )
             .execution_options(synchronize_session=False)
         )
-        await self._db.execute(stmt)
+        result = await self._db.execute(stmt)
         await self._db.commit()
+
+        # If the row was not updated (0 rows matched), the job was cancelled
+        # externally.  Sync the in-memory state so the orchestrator detects it.
+        if result.rowcount == 0:
+            self._job.status = IngestionStatus.CANCELLED
+            logger.info(
+                "UpdateProgress skipped — job %s was cancelled externally",
+                self._job.id,
+            )
+            return {
+                "status": "cancelled",
+                "message": "Job was cancelled externally",
+            }
 
         logger.info(
             "Progress updated (job %s): %d/%d processed, %d failed, %d skipped. %s",

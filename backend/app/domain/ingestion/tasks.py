@@ -1,9 +1,9 @@
 """Celery tasks for Google Drive ingestion.
 
-The IngestionOrchestrator is a long-running ReAct agent (up to 500
-iterations). It runs inside this Celery task, which executes in a
-thread (-P threads). Each iteration: LLM call → Drive I/O (non-blocking
-via asyncio.to_thread) → DB write.
+The IngestionOrchestrator runs a two-phase pipeline: Phase 1 (scanner)
+does a deterministic BFS of the Drive folder tree and indexes all files;
+Phase 2 (processor) ingests each indexed file sequentially. It runs
+inside this Celery task via asyncio.run() in a thread (-P threads).
 
 No auto-retry: the orchestrator manages its own internal error handling
 and progress tracking (status field on IngestionJob). A crashed task
@@ -24,8 +24,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from datetime import datetime, timezone
 
 from app.celery_app import celery_app
+from app.domain.ingestion.models import IngestionJob, IngestionStatus
 from app.infra.llm import llm_provider
 from app.infra.storage import storage_client
 
@@ -36,9 +38,10 @@ logger = logging.getLogger(__name__)
     name="app.domain.ingestion.tasks.run_ingestion_task",
     bind=True,
     max_retries=0,   # No auto-retry — orchestrator handles its own failure state
-    acks_late=True,
+    acks_late=False,  # Acknowledge IMMEDIATELY so OOM kills don't requeue the task
     time_limit=7200,       # 2-hour hard kill for runaway jobs
     soft_time_limit=6900,  # 115-min soft limit (raises SoftTimeLimitExceeded first)
+    rate_limit="1/m",      # Only 1 ingestion task per minute — prevents concurrent runs
 )
 def run_ingestion_task(  # type: ignore[misc]
     self,
@@ -55,7 +58,6 @@ def run_ingestion_task(  # type: ignore[misc]
         force: Re-ingest already-processed files when True.
     """
     from app.domain.ingestion.drive_connector import GoogleDriveConnector
-    from app.domain.ingestion.models import IngestionJob
     from app.domain.ingestion.orchestrator import IngestionOrchestrator
 
     job_uuid = uuid.UUID(job_id)
@@ -64,6 +66,7 @@ def run_ingestion_task(  # type: ignore[misc]
     async def _run() -> None:
         import app.infra.database as _db_module
         from app.infra.database import build_session_factory
+        from sqlalchemy import update as sa_update
 
         if _db_module._engine is None:
             logger.error("Database not initialised before ingestion task")
@@ -95,7 +98,43 @@ def run_ingestion_task(  # type: ignore[misc]
                     logger.info("Ingestion job completed: %s", job_uuid)
                 except Exception:
                     logger.exception("Ingestion job failed: %s", job_uuid)
-                    raise  # Let Celery record the failure; acks_late ensures redelivery
+                    # Guarantee the job is marked FAILED so it never stays
+                    # stuck in PENDING/SCANNING/PROCESSING as a zombie.
+                    # The orchestrator's own except handler may have already
+                    # done this, but if that handler itself failed (e.g. DB
+                    # session was broken), we need a last-resort fallback
+                    # using a fresh session.
+                    try:
+                        async with task_session_factory() as fallback_db:
+                            stmt = (
+                                sa_update(IngestionJob)
+                                .where(
+                                    IngestionJob.id == job_uuid,
+                                    IngestionJob.status.in_([
+                                        IngestionStatus.PENDING,
+                                        IngestionStatus.SCANNING,
+                                        IngestionStatus.PROCESSING,
+                                    ]),
+                                )
+                                .values(
+                                    status=IngestionStatus.FAILED,
+                                    error_message="Task crashed unexpectedly",
+                                    completed_at=datetime.now(timezone.utc),
+                                )
+                                .execution_options(synchronize_session=False)
+                            )
+                            await fallback_db.execute(stmt)
+                            await fallback_db.commit()
+                            logger.info(
+                                "Fallback: marked job %s as FAILED", job_uuid,
+                            )
+                    except Exception:
+                        logger.exception(
+                            "Fallback FAILED status write also failed for job %s — "
+                            "job may be stuck. trigger_ingestion stale-job detection "
+                            "will clean it up.",
+                            job_uuid,
+                        )
         finally:
             await task_engine.dispose()
 

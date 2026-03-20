@@ -19,9 +19,12 @@ from app.domain.ingestion.exceptions import (
     IngestionJobNotFoundError,
 )
 from app.domain.ingestion.schemas import (
+    DefaultFolderResponse,
+    DriveFolderEntry,
     IngestionJobListResponse,
     IngestionJobResponse,
     IngestionStatsResponse,
+    SaveDefaultFolderRequest,
     TriggerIngestionRequest,
 )
 from app.domain.ingestion.service import IngestionService
@@ -163,3 +166,55 @@ async def cancel_job(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=e.message,
         ) from e
+
+
+# ── Drive folder browsing ─────────────────────────────────────────────────
+
+
+@router.get(
+    "/drive/browse",
+    response_model=list[DriveFolderEntry],
+    summary="Browse Drive folders",
+    description="List subfolders of a Drive folder. Use parent_id='root' for top-level.",
+)
+async def browse_drive_folders(
+    parent_id: str = Query("root", description="Parent folder ID ('root' for top-level)"),
+    _user: "User" = Depends(_require_admin),
+    service: IngestionService = Depends(_get_service),
+) -> list[DriveFolderEntry]:
+    """List subfolders of a Google Drive folder."""
+    try:
+        return await service.browse_drive_folders(parent_id)
+    except Exception as e:
+        logger.error("Failed to browse Drive folders: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to browse Drive: {e}",
+        ) from e
+
+
+@router.get(
+    "/drive/default-folder",
+    response_model=DefaultFolderResponse,
+    summary="Get default Drive folder",
+)
+async def get_default_folder(
+    _user: "User" = Depends(_require_admin),
+    service: IngestionService = Depends(_get_service),
+) -> DefaultFolderResponse:
+    """Get the saved default Drive folder for ingestion."""
+    return await service.get_default_folder()
+
+
+@router.put(
+    "/drive/default-folder",
+    response_model=DefaultFolderResponse,
+    summary="Save default Drive folder",
+)
+async def save_default_folder(
+    request: SaveDefaultFolderRequest,
+    _user: "User" = Depends(_require_admin),
+    service: IngestionService = Depends(_get_service),
+) -> DefaultFolderResponse:
+    """Save/update the default Drive folder for ingestion."""
+    return await service.save_default_folder(request.folder_id, request.folder_name)

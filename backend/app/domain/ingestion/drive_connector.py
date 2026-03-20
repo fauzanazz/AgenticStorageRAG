@@ -44,6 +44,25 @@ SUPPORTED_MIME_TYPES: dict[str, str] = {
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
     # Google Docs are exported as DOCX
     "application/vnd.google-apps.document": "docx",
+    # Google Spreadsheets and Presentations are exported as PDF
+    "application/vnd.google-apps.spreadsheet": "pdf",
+    "application/vnd.google-apps.presentation": "pdf",
+}
+
+# Google Workspace MIME types → export MIME type + file extension
+_GOOGLE_WORKSPACE_EXPORT_MAP: dict[str, tuple[str, str]] = {
+    "application/vnd.google-apps.document": (
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ".docx",
+    ),
+    "application/vnd.google-apps.spreadsheet": (
+        "application/pdf",
+        ".pdf",
+    ),
+    "application/vnd.google-apps.presentation": (
+        "application/pdf",
+        ".pdf",
+    ),
 }
 
 # Google Drive API scopes -- read-only
@@ -252,22 +271,42 @@ class GoogleDriveConnector(SourceConnector):
             fname = meta["name"]
             mime = meta["mimeType"]
 
-            if mime == "application/vnd.google-apps.document":
-                export_mime = (
-                    "application/vnd.openxmlformats-officedocument"
-                    ".wordprocessingml.document"
-                )
+            if mime in _GOOGLE_WORKSPACE_EXPORT_MAP:
+                export_mime, export_ext = _GOOGLE_WORKSPACE_EXPORT_MAP[mime]
                 req = svc.files().export_media(fileId=file_id, mimeType=export_mime)
-                if not fname.endswith(".docx"):
-                    fname = f"{fname}.docx"
+                if not fname.endswith(export_ext):
+                    fname = f"{fname}{export_ext}"
             else:
                 req = svc.files().get_media(fileId=file_id)
 
             buf = io.BytesIO()
             dl = MediaIoBaseDownload(buf, req, chunksize=10 * 1024 * 1024)  # 10 MB chunks
             done = False
-            while not done:
-                _, done = dl.next_chunk()
+            try:
+                while not done:
+                    _, done = dl.next_chunk()
+            except HttpError as dl_err:
+                # Some Google Workspace files report a standard MIME type (e.g.
+                # application/pdf) but cannot be downloaded with get_media().
+                # Fall back to exporting as PDF when we get fileNotDownloadable.
+                if "fileNotDownloadable" in str(dl_err):
+                    logger.warning(
+                        "get_media() returned fileNotDownloadable for %s — retrying with PDF export",
+                        file_id,
+                    )
+                    req = svc.files().export_media(
+                        fileId=file_id,
+                        mimeType="application/pdf",
+                    )
+                    buf = io.BytesIO()
+                    dl = MediaIoBaseDownload(buf, req, chunksize=10 * 1024 * 1024)
+                    done = False
+                    while not done:
+                        _, done = dl.next_chunk()
+                    if not fname.endswith(".pdf"):
+                        fname = f"{fname}.pdf"
+                else:
+                    raise
 
             return buf.getvalue(), fname
 
