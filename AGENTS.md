@@ -170,9 +170,13 @@ The `IngestionOrchestrator` is the production path (`ingestion/jobs.py` calls it
 
 `GoogleDriveConnector` methods (`authenticate()`, `list_files()`, `list_folder_children()`, `download_file()`) are declared `async` and all underlying `google-api-python-client` calls (`.execute()`, `.next_chunk()`) are now wrapped in `asyncio.to_thread()`. This prevents blocking the asyncio event loop during Drive I/O. If you add new Drive API calls, always wrap `.execute()` in `asyncio.to_thread()`.
 
-### 9. Ingestion job "cancel" is soft-cancel only
+### 9. Ingestion job "cancel" is cooperative + stale jobs are auto-failed
 
-`IngestionService.cancel_job()` sets the DB status to `CANCELLED`, but **does not actually stop the running worker coroutine**. The worker holds no reference back to the DB status. If a job is cancelled from the UI while the orchestrator is mid-run, the orchestrator will continue processing until it finishes or hits `MAX_ITERATIONS=500`. The cancel only prevents the job from being shown as RUNNING in the UI.
+`IngestionService.cancel_job()` sets the DB status to `CANCELLED` using a direct SQL UPDATE. The `IngestionOrchestrator` polls for cancellation at the start of every agent loop iteration (`_is_cancelled()`) and stops voluntarily when it detects the status change. All status-writing code paths (`_update_job_status()`, `UpdateProgressTool`, `_record_file_event`) use an **atomic WHERE guard** (`status != CANCELLED`) so they never overwrite `CANCELLED`. The cancel is still cooperative (not an immediate kill) -- the orchestrator will finish the current iteration before checking.
+
+**Stale job detection:** `trigger_ingestion()` auto-fails any job that has been in an active state (PENDING/SCANNING/PROCESSING) for longer than 2h15m (the Celery `time_limit` + buffer). This prevents zombie jobs from blocking new triggers forever -- even if the worker crashes, gets SIGKILL'd, or both the orchestrator and task-level error handlers fail.
+
+**Task-level safety net:** The Celery task (`tasks.py`) catches all exceptions from the orchestrator and uses a **fresh DB session** to mark the job as FAILED if the orchestrator's own error handler fails (e.g. because the original session was broken).
 
 ### 10. Auto-seed on startup (silent)
 
@@ -327,6 +331,7 @@ Backend tests are co-located inside each domain: `domain/{name}/tests/`. All ext
 | `ANTHROPIC_API_KEY` | Yes* | Fallback LLM (Claude) |
 | `OPENAI_API_KEY` | No | Used for OpenAI-hosted embedding models (e.g. `text-embedding-3-small`) |
 | `GEMINI_API_KEY` | No | Required when using `gemini/` prefixed LLM or embedding models |
+| `OPENROUTER_API_KEY` | No | OpenRouter — access 200+ models via a single key (uses `openrouter/` prefix) |
 | `EMBEDDING_MODEL` | No | Embedding model name (default: `text-embedding-3-small`) |
 | `DATABASE_URL` | No | Defaults to local Docker Postgres |
 | `NEO4J_URI` | No | Defaults to `bolt://localhost:17687` |

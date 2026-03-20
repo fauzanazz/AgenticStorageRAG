@@ -186,6 +186,20 @@ paths:
               schema:
                 $ref: "#/components/schemas/DocumentListResponse"
 
+  /documents/drive-tree:
+    get:
+      operationId: getDriveTree
+      summary: Get Drive documents as a folder tree
+      description: Returns all indexed Drive files organised into a nested folder tree structure.
+      tags: [Documents]
+      responses:
+        "200":
+          description: Drive folder tree
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriveTreeResponse"
+
   /documents/{document_id}:
     get:
       operationId: getDocument
@@ -637,6 +651,24 @@ paths:
           description: Job not found
 
   # ── Settings ──────────────────────────────────────────────────────────
+  /settings/models/available:
+    get:
+      operationId: getAvailableModels
+      summary: Get chat models available to the current user
+      description: |
+        Returns chat models filtered by which providers have API keys,
+        combining server-level env vars with the user's per-user keys.
+      tags: [Settings]
+      responses:
+        "200":
+          description: Available chat models
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AvailableModelsResponse"
+        "401":
+          description: Not authenticated
+
   /settings/models/catalog:
     get:
       operationId: getModelCatalog
@@ -893,6 +925,74 @@ components:
         total_embeddings:
           type: integer
         processing_documents:
+          type: integer
+
+    # ── Drive Tree ────────────────────────────────────────────────────
+    DriveFileNode:
+      type: object
+      required: [id, drive_file_id, file_name, mime_type, folder_path, status, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        drive_file_id:
+          type: string
+        file_name:
+          type: string
+        mime_type:
+          type: string
+        size_bytes:
+          type: integer
+          nullable: true
+        folder_path:
+          type: string
+        status:
+          type: string
+          enum: [pending, processing, completed, failed, skipped]
+        document_id:
+          type: string
+          format: uuid
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        processed_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    DriveFolderNode:
+      type: object
+      required: [name, path, folders, files, total_files, processed_files]
+      properties:
+        name:
+          type: string
+        path:
+          type: string
+        folders:
+          type: array
+          items:
+            $ref: "#/components/schemas/DriveFolderNode"
+        files:
+          type: array
+          items:
+            $ref: "#/components/schemas/DriveFileNode"
+        total_files:
+          type: integer
+        processed_files:
+          type: integer
+
+    DriveTreeResponse:
+      type: object
+      required: [root, total_files, processed_files, scanned_files]
+      properties:
+        root:
+          $ref: "#/components/schemas/DriveFolderNode"
+        total_files:
+          type: integer
+        processed_files:
+          type: integer
+        scanned_files:
           type: integer
 
     # ── Knowledge ─────────────────────────────────────────────────────
@@ -1192,6 +1292,10 @@ components:
           type: string
           format: uuid
           nullable: true
+        model:
+          type: string
+          nullable: true
+          description: Model override for this request (e.g. 'anthropic/claude-sonnet-4-20250514')
         vector_weight:
           type: number
           minimum: 0
@@ -1358,7 +1462,7 @@ components:
 
     ModelSettingsResponse:
       type: object
-      required: [chat_model, ingestion_model, embedding_model, anthropic_api_key, openai_api_key, dashscope_api_key]
+      required: [chat_model, ingestion_model, embedding_model, anthropic_api_key, openai_api_key, dashscope_api_key, openrouter_api_key]
       properties:
         chat_model:
           type: string
@@ -1374,6 +1478,8 @@ components:
         openai_api_key:
           $ref: "#/components/schemas/ApiKeyStatus"
         dashscope_api_key:
+          $ref: "#/components/schemas/ApiKeyStatus"
+        openrouter_api_key:
           $ref: "#/components/schemas/ApiKeyStatus"
 
     UpdateModelSettingsRequest:
@@ -1403,6 +1509,11 @@ components:
           nullable: true
           description: |
             "" = leave unchanged, null = clear the stored key, any other value = new key to store
+        openrouter_api_key:
+          type: string
+          nullable: true
+          description: |
+            "" = leave unchanged, null = clear the stored key, any other value = new key to store
 
     ModelOption:
       type: object
@@ -1417,6 +1528,16 @@ components:
         label:
           type: string
           example: Claude Sonnet 4
+
+    AvailableModelsResponse:
+      type: object
+      required: [models]
+      properties:
+        models:
+          type: array
+          items:
+            $ref: "#/components/schemas/ModelOption"
+          description: Chat models filtered by providers with available API keys.
 
     ModelCatalogResponse:
       type: object

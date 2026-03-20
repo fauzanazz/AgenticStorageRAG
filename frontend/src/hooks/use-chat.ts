@@ -67,7 +67,6 @@ export function useChat() {
     queryKey: queryKeys.conversations.messages(activeConversation?.id ?? ""),
     queryFn: () => fetchMessages(activeConversation!.id),
     enabled: !!activeConversation,
-    select: (data: ChatMessage[]) => data,
   });
 
   // Keep local messages in sync with the cache when a conversation is loaded.
@@ -99,7 +98,7 @@ export function useChat() {
   // ── Delete conversation mutation ─────────────────────────────────────────
   const deleteMutation = useMutation<void, Error, string>({
     mutationFn: (conversationId) =>
-      apiClient.delete(`/chat/conversations/${conversationId}`),
+      apiClient.delete<void>(`/chat/conversations/${conversationId}`),
     onSuccess: (_, conversationId) => {
       // Remove from cache immediately — no stale key.
       queryClient.setQueryData<ChatSession[]>(
