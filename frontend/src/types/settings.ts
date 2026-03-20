@@ -43,4 +43,5 @@ export interface ModelCatalog {
 
 export interface AvailableModelsResponse {
   models: ModelOption[];
+  default_model: string | null;
 }

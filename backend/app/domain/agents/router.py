@@ -39,7 +39,7 @@ from app.domain.agents.schemas import (
     DriveAttachmentRequest,
     MessageResponse,
 )
-from app.domain.agents.tools import GenerateDocumentTool, HybridSearchTool
+from app.domain.agents.tools import FetchDocumentTool, GenerateDocumentTool, HybridSearchTool
 from app.domain.auth.models import User
 from app.domain.knowledge.graph_service import GraphService
 from app.domain.knowledge.hybrid_retriever import HybridRetriever
@@ -88,6 +88,7 @@ def _build_agent(
     tools = [
         HybridSearchTool(hybrid_retriever),
         GenerateDocumentTool(llm=effective_llm, model_override=model_override),
+        FetchDocumentTool(db=db),
     ]
 
     chat_service = ChatService(db=db)

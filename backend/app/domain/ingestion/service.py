@@ -246,7 +246,7 @@ class IngestionService:
         await self._db.commit()
 
         # Refresh the job
-        await self._db.expire_all()
+        self._db.expire_all()
         result = await self._db.execute(
             select(IngestionJob).where(IngestionJob.id == job_id)
         )

@@ -22,7 +22,7 @@ class UserModelSettings(Base):
     chat_model: Mapped[str] = mapped_column(
         String(200),
         nullable=False,
-        default="dashscope/qwen3-max",
+        default="anthropic/claude-sonnet-4-6",
     )
     ingestion_model: Mapped[str] = mapped_column(
         String(200),

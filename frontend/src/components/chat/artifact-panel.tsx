@@ -7,6 +7,12 @@ import "streamdown/styles.css";
 import "katex/dist/katex.min.css";
 import type { Artifact } from "@/types/chat";
 
+const HTML_TYPES = new Set(["text/html", "html", "application/html"]);
+
+function isHtmlArtifact(artifact: Artifact): boolean {
+  return HTML_TYPES.has(artifact.type);
+}
+
 interface ArtifactPanelProps {
   artifact: Artifact | null;
   isStreaming?: boolean;
@@ -17,12 +23,16 @@ export function ArtifactPanel({ artifact, isStreaming, onClose }: ArtifactPanelP
 
   if (!artifact) return null;
 
+  const isHtml = isHtmlArtifact(artifact);
+
   const handleDownload = () => {
-    const blob = new Blob([artifact.content], { type: "text/markdown" });
+    const mimeType = isHtml ? "text/html" : "text/markdown";
+    const ext = isHtml ? "html" : "md";
+    const blob = new Blob([artifact.content], { type: mimeType });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${artifact.title.replace(/[^a-zA-Z0-9 _-]/g, "_")}.md`;
+    a.download = `${artifact.title.replace(/[^a-zA-Z0-9 _-]/g, "_")}.${ext}`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -31,7 +41,7 @@ export function ArtifactPanel({ artifact, isStreaming, onClose }: ArtifactPanelP
 
   return (
     <div
-      className="flex flex-col h-full"
+      className="flex flex-col h-full min-w-0 overflow-hidden"
       style={{
         borderLeft: "1px solid var(--border)",
         background: "var(--card)",
@@ -62,7 +72,7 @@ export function ArtifactPanel({ artifact, isStreaming, onClose }: ArtifactPanelP
             onClick={handleDownload}
             className="rounded-lg p-1.5 transition-colors hover:bg-black/5"
             style={{ color: "var(--muted-foreground)" }}
-            title="Download as .md"
+            title={`Download as .${isHtml ? "html" : "md"}`}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -85,16 +95,25 @@ export function ArtifactPanel({ artifact, isStreaming, onClose }: ArtifactPanelP
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto px-5 py-4">
-        <div className="prose prose-sm max-w-none dark:prose-invert">
-          <Streamdown
-            plugins={{ code, math }}
-            isAnimating={isStreaming}
-          >
-            {artifact.content}
-          </Streamdown>
+      {isHtml ? (
+        <iframe
+          className="flex-1 w-full border-0 bg-white"
+          sandbox="allow-scripts"
+          srcDoc={artifact.content}
+          title={artifact.title}
+        />
+      ) : (
+        <div className="flex-1 overflow-y-auto overflow-x-hidden px-6 py-5 min-w-0">
+          <div className="prose prose-sm max-w-none dark:prose-invert break-words [&_pre]:overflow-x-auto [&_pre]:max-w-full [&_table]:overflow-x-auto [&_table]:block [&_img]:max-w-full">
+            <Streamdown
+              plugins={{ code, math }}
+              isAnimating={isStreaming}
+            >
+              {artifact.content}
+            </Streamdown>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

@@ -353,15 +353,15 @@ class TestEmbedBatching:
             chunks=[mock_chunk],
         )
 
+        mock_neo4j = AsyncMock()
+
         with patch(
             "app.domain.knowledge.vector_service.VectorService"
         ) as MockVS, patch(
             "app.domain.knowledge.graph_service.GraphService"
         ), patch(
             "app.domain.knowledge.kg_builder.KGBuilder"
-        ) as MockKG, patch(
-            "app.infra.neo4j_client.neo4j_client"
-        ):
+        ) as MockKG:
             mock_vs_instance = AsyncMock()
             mock_vs_instance.embed_chunks.return_value = 1
             MockVS.return_value = mock_vs_instance
@@ -373,6 +373,7 @@ class TestEmbedBatching:
             }
             MockKG.return_value = mock_kg_instance
 
+            pipeline._get_neo4j = AsyncMock(return_value=mock_neo4j)
             await pipeline._flush_embed_batch([ext_result])
 
         mock_vs_instance.embed_chunks.assert_called_once()

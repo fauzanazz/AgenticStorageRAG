@@ -32,6 +32,8 @@ export const queryKeys = {
     lists: () => ["conversations", "list"] as const,
     messages: (conversationId: string) =>
       ["conversations", "messages", conversationId] as const,
+    artifacts: (conversationId: string) =>
+      ["conversations", "artifacts", conversationId] as const,
   },
 
   // ── Knowledge ─────────────────────────────────────────────────────────────

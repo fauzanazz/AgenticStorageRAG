@@ -48,6 +48,7 @@ class TestCreateEngine:
             pool_pre_ping=True,
             pool_size=10,
             max_overflow=20,
+            pool_recycle=300,
             connect_args={"statement_cache_size": 0, "prepared_statement_cache_size": 0},
         )
 

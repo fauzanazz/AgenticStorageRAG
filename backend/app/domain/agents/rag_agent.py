@@ -47,6 +47,13 @@ SYSTEM_PROMPT = """You are OpenRAG, an intelligent knowledge assistant. You have
 You have access to the following retrieval tools:
 {tool_descriptions}
 
+## Language
+- **Detect the user's language** from their message and **always respond in that same language** — including narration, final answer, and citation references.
+- **Search queries must be in English.** The knowledge base is primarily in English. When the user writes in a non-English language, reformulate your tool call queries in English to maximize retrieval quality. Present the results back in the user's language.
+- **Technical terms** (API names, proper nouns, product names, code identifiers) should remain in their original form — do not translate them.
+- **Mixed-language input** (e.g., English technical terms in an Indonesian sentence): respond in the dominant language of the message.
+- **Short or ambiguous messages** (e.g., "OK", "hi", a single word): match the language established in the conversation history. If there is no history, default to English.
+
 ## Instructions
 1. **Always narrate your reasoning.** Before calling any tool, briefly explain what you are about to do and why (1-2 sentences). After receiving results, briefly note what you found before deciding your next step.
 2. Always use `hybrid_search` — it combines both knowledge graph and vector results for comprehensive retrieval.
@@ -55,6 +62,7 @@ You have access to the following retrieval tools:
 5. ALWAYS cite your sources. Include document names, page numbers, and entity names in your response.
 6. If the search results don't contain enough information, say so honestly.
 7. Use `generate_document` when the user asks you to create, write, draft, or generate a report, summary, analysis, or any long-form structured document. Also use it when your response would be better served as a standalone document (multi-section content, comparison tables, guides). You can search for information first, then pass it as context to the document generator.
+8. Use `fetch_document` when the user explicitly asks to see, read, or retrieve the full content of a specific document (e.g., "show me the full report", "read the entire file", "get the complete document"). Pass the `document_id` from your search results or citations. For very large documents, the tool returns chunks instead — you can request more by calling it again with an incremented `chunk_offset`.
 
 ## Narration Style
 - Keep narration short and natural: "Let me search for..." / "I found several relevant passages. Let me also check..."
@@ -584,8 +592,13 @@ class RAGAgent(IRAGAgent):
     ) -> None:
         """Generate a concise conversation title using a cheap mini model.
 
-        Fire-and-forget — failures silently fall back to truncated user message.
+        Fire-and-forget — uses its own DB session since this runs as a
+        background task after the request-scoped session is closed.
         """
+        from app.domain.agents.chat_service import ChatService
+        from app.infra.database import get_db_session
+
+        title = user_message[:80]  # fallback
         try:
             response = await self._llm.complete(
                 model=self._llm.title_model,
@@ -605,21 +618,21 @@ class RAGAgent(IRAGAgent):
                 temperature=0.0,
                 stream=False,
             )
-            title = response.choices[0].message.content.strip().strip('"\'')[:80]
-            if title:
-                await self._chat.update_conversation_title(
-                    conversation_id=conversation_id,
-                    title=title,
-                )
-                return
+            generated = response.choices[0].message.content.strip().strip('"\'')[:80]
+            if generated:
+                title = generated
         except Exception as e:
             logger.warning("Title generation failed, using fallback: %s", e)
 
-        # Fallback: truncated user message
-        await self._chat.update_conversation_title(
-            conversation_id=conversation_id,
-            title=user_message[:80],
-        )
+        try:
+            async for db in get_db_session():
+                chat = ChatService(db=db)
+                await chat.update_conversation_title(
+                    conversation_id=conversation_id,
+                    title=title,
+                )
+        except Exception as e:
+            logger.warning("Title update failed: %s", e)
 
     # ------------------------------------------------------------------
     # Citation extraction from tool results

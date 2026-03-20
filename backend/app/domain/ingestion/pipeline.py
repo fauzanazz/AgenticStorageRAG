@@ -447,6 +447,7 @@ class StagePipeline:
                 finally:
                     # Release file bytes regardless of outcome
                     dl_result.file_bytes = b""
+                    gc.collect()
         finally:
             # Last extract worker to finish sends sentinels to embed workers
             async with self._ext_done_lock:
@@ -511,6 +512,9 @@ class StagePipeline:
             await db.refresh(document)
 
             chunks_created: list[DocumentChunk] = []
+            chunk_count = len(processing_result.chunks)
+            result_metadata = processing_result.metadata
+
             for chunk_data in processing_result.chunks:
                 chunk = DocumentChunk(
                     document_id=document.id,
@@ -523,11 +527,15 @@ class StagePipeline:
                 db.add(chunk)
                 chunks_created.append(chunk)
 
+            # Free ChunkData pydantic objects — they held 182+ MB across files
+            processing_result.chunks.clear()
+            del processing_result
+
             await db.flush()
 
             document.status = DocumentStatus.READY
-            document.chunk_count = len(processing_result.chunks)
-            document.metadata_.update(processing_result.metadata)
+            document.chunk_count = chunk_count
+            document.metadata_.update(result_metadata)
             document.processed_at = datetime.now(timezone.utc)
             await db.commit()
 

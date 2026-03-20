@@ -9,6 +9,7 @@ from app.config import get_settings
 from app.domain.settings.schemas import (
     CHAT_MODELS,
     EMBEDDING_MODELS,
+    PROVIDER_DEFAULT_CHAT_MODEL,
     PROVIDER_KEY_MAP,
     AvailableModelsResponse,
     ModelCatalogResponse,
@@ -75,7 +76,15 @@ async def get_available_models(
     }
 
     filtered = [m for m in CHAT_MODELS if m["provider"] in available_providers]
-    return AvailableModelsResponse(models=filtered)
+
+    # Pick the best default based on provider priority
+    default_model: str | None = None
+    for provider, model_id in PROVIDER_DEFAULT_CHAT_MODEL:
+        if provider in available_providers:
+            default_model = model_id
+            break
+
+    return AvailableModelsResponse(models=filtered, default_model=default_model)
 
 
 @router.get("/models", response_model=ModelSettingsResponse)

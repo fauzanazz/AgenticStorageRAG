@@ -24,14 +24,14 @@ class TestRunIngestionTask:
         assert run_ingestion_task.name.startswith("app.domain.ingestion.tasks.")
 
     @patch("app.domain.ingestion.orchestrator.IngestionOrchestrator", autospec=True)
-    @patch("app.domain.ingestion.drive_connector.GoogleDriveConnector", autospec=True)
+    @patch("app.domain.ingestion.tasks._build_connector", new_callable=AsyncMock)
     @patch("app.domain.ingestion.tasks.storage_client")
     @patch("app.domain.ingestion.tasks.llm_provider")
     def test_run_ingestion_calls_orchestrator(
         self,
         mock_llm: MagicMock,
         mock_storage: MagicMock,
-        mock_connector_cls: MagicMock,
+        mock_build_connector: AsyncMock,
         mock_orchestrator_cls: MagicMock,
     ) -> None:
         """run_ingestion_task must instantiate orchestrator and call .run()."""
@@ -53,6 +53,9 @@ class TestRunIngestionTask:
         mock_job = MagicMock()
         mock_db.get = AsyncMock(return_value=mock_job)
 
+        mock_connector = AsyncMock()
+        mock_build_connector.return_value = mock_connector
+
         mock_orchestrator = AsyncMock()
         mock_orchestrator_cls.return_value = mock_orchestrator
 
@@ -69,6 +72,7 @@ class TestRunIngestionTask:
             job=mock_job,
             admin_user_id=uuid.UUID(admin_user_id),
             force=False,
+            retry=False,
         )
 
     @patch("app.infra.database._engine", None)

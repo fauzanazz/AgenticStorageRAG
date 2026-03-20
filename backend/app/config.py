@@ -61,7 +61,7 @@ class Settings(BaseSettings):
     dashscope_api_key: str = ""  # Alibaba Cloud DashScope (Qwen models)
     gemini_api_key: str = ""  # Google Gemini (via LiteLLM gemini/ prefix)
     openrouter_api_key: str = ""  # OpenRouter (via LiteLLM openrouter/ prefix)
-    default_model: str = "dashscope/qwen3-max"
+    default_model: str = "anthropic/claude-sonnet-4-6"
     fallback_model: str = "anthropic/claude-sonnet-4-6"
     # Dedicated model for ingestion/KG-extraction tasks.
     # These are pure JSON-structured-output tasks that do NOT need frontier
@@ -69,7 +69,7 @@ class Settings(BaseSettings):
     # gpt-5-mini: cheaper than gpt-4o-mini, high rate limits.
     ingestion_model: str = "openai/gpt-5-mini"
     # Cheap, fast model for auto-generating chat session titles.
-    title_model: str = "openrouter/openai/gpt-4.1-nano"
+    title_model: str = "openrouter/openai/gpt-oss-120b"
 
     # --- Embeddings ---
     # LiteLLM model string for embedding generation.

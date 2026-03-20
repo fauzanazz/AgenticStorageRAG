@@ -132,31 +132,35 @@ class GraphService(IGraphService):
     async def search_entities(
         self, request: GraphSearchRequest
     ) -> list[GraphSearchResult]:
-        """Search entities using Neo4j full-text or pattern matching."""
+        """Search entities using Neo4j full-text index."""
         try:
-            # Use Neo4j for graph-aware search
+            # Build a Lucene query from the user's search terms.
+            # Split into words and join with OR so any term can match.
+            terms = request.query.split()
+            lucene_query = " OR ".join(terms) if terms else request.query
+
+            # Use the fulltext index for natural-language search
             type_filter = ""
             if request.entity_types:
                 labels = " OR ".join(
                     f"n:{_sanitize_label(t)}" for t in request.entity_types
                 )
-                type_filter = f"AND ({labels})"
+                type_filter = f"WHERE ({labels})"
 
             cypher = f"""
-                MATCH (n)
-                WHERE (n.name CONTAINS $search_term OR n.description CONTAINS $search_term)
+                CALL db.index.fulltext.queryNodes('entity_fulltext_search', $search_term)
+                YIELD node AS n, score
                 {type_filter}
-                WITH n,
-                     CASE WHEN n.name CONTAINS $search_term THEN 2 ELSE 1 END AS score
+                WITH n, score
                 ORDER BY score DESC
                 LIMIT $limit
                 OPTIONAL MATCH (n)-[r]-(m)
-                RETURN n, collect(DISTINCT {{rel: type(r), target: m.name, target_type: m.entity_type}}) AS rels
+                RETURN n, score, collect(DISTINCT {{rel: type(r), target: m.name, target_type: m.entity_type}}) AS rels
             """
 
             records = await self._neo4j.execute_read(
                 cypher,
-                {"search_term": request.query, "limit": request.top_k},
+                {"search_term": lucene_query, "limit": request.top_k},
             )
 
             results = []
@@ -206,11 +210,15 @@ class GraphService(IGraphService):
                                 )
                             )
 
+                    # Use the fulltext score from Neo4j (normalise to 0-1 range)
+                    raw_score = record.get("score", 1.0)
+                    relevance = min(raw_score / 5.0, 1.0)
+
                     results.append(
                         GraphSearchResult(
                             entity=entity_resp,
                             relationships=rel_responses,
-                            relevance_score=1.0,
+                            relevance_score=relevance,
                         )
                     )
 

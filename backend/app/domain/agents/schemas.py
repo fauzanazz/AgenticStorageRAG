@@ -143,6 +143,7 @@ TOOL_FRIENDLY_NAMES: dict[str, str] = {
     "vector_search": "Searching documents",
     "graph_search": "Searching knowledge graph",
     "generate_document": "Generating document",
+    "fetch_document": "Fetching full document",
 }
 
 

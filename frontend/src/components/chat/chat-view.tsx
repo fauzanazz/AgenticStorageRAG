@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { MessageBubble } from "@/components/chat/message-bubble";
 import { ChatInput } from "@/components/chat/chat-input";
@@ -31,6 +31,7 @@ export function ChatView({ conversationId }: ChatViewProps) {
     deleteConversation,
     sendMessage,
     stopStreaming,
+    resetChat,
     setError,
     attachments,
     addAttachment,
@@ -40,22 +41,58 @@ export function ChatView({ conversationId }: ChatViewProps) {
 
   const activeArtifact = activeArtifactId ? artifacts.get(activeArtifactId) ?? null : null;
 
-  const { settings, availableModels } = useModelSettings();
+  const { settings, availableModels, defaultModel } = useModelSettings();
 
   const [showSidebar, setShowSidebar] = useState(false);
-  const [selectedModel, setSelectedModel] = useState<string | null>(null);
+  const [userSelectedModel, setUserSelectedModel] = useState<string | null>(null);
   const [enableThinking, setEnableThinking] = useState(false);
   const [showDriveBrowser, setShowDriveBrowser] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const hasScrolledRef = useRef<string | undefined>(undefined);
 
-  // Sync selectedModel from settings
-  useEffect(() => {
-    if (settings?.chat_model && !selectedModel) {
-      setSelectedModel(settings.chat_model);
+  // --- Resizable artifact panel ---
+  const MIN_PANEL_WIDTH = 320;
+  const [artifactWidth, setArtifactWidth] = useState(480);
+
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = artifactWidth;
+
+    const onMouseMove = (ev: MouseEvent) => {
+      const maxWidth = window.innerWidth * 0.4;
+      const delta = startX - ev.clientX; // dragging left = wider
+      const next = Math.min(maxWidth, Math.max(MIN_PANEL_WIDTH, startWidth + delta));
+      setArtifactWidth(next);
+    };
+
+    const onMouseUp = () => {
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+  }, [artifactWidth]);
+
+  // Resolve selected model: user's explicit pick > saved setting > provider-aware default
+  const selectedModel = useMemo(() => {
+    if (userSelectedModel && availableModels.some((m) => m.model_id === userSelectedModel)) {
+      return userSelectedModel;
     }
-  }, [settings?.chat_model, selectedModel]);
+    const saved = settings?.chat_model;
+    if (saved && availableModels.some((m) => m.model_id === saved)) {
+      return saved;
+    }
+    return defaultModel;
+  }, [userSelectedModel, settings?.chat_model, availableModels, defaultModel]);
 
-  // Navigate to the conversation URL when backend creates a new conversation during streaming.
+  // Update the URL when backend creates a new conversation during streaming.
+  // Uses history API to avoid a full page navigation / re-render.
   const lastNavigatedIdRef = useRef<string | undefined>(conversationId);
   useEffect(() => {
     if (
@@ -64,13 +101,24 @@ export function ChatView({ conversationId }: ChatViewProps) {
       activeConversation.id !== conversationId
     ) {
       lastNavigatedIdRef.current = activeConversation.id;
-      router.replace(`/chat/${activeConversation.id}`);
+      window.history.replaceState(null, "", `/chat/${activeConversation.id}`);
     }
-  }, [activeConversation?.id, conversationId, router]);
+  }, [activeConversation?.id, conversationId]);
 
+
+  // Scroll to bottom once when opening a history conversation
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    if (
+      conversationId &&
+      conversationId !== hasScrolledRef.current &&
+      messages.length > 0 &&
+      messagesContainerRef.current
+    ) {
+      hasScrolledRef.current = conversationId;
+      messagesContainerRef.current.scrollTop =
+        messagesContainerRef.current.scrollHeight;
+    }
+  }, [conversationId, messages]);
 
   const supportsThinking = availableModels?.find(
     (m) => m.model_id === selectedModel
@@ -84,7 +132,9 @@ export function ChatView({ conversationId }: ChatViewProps) {
   };
 
   const handleNewChat = () => {
-    router.push("/chat");
+    resetChat();
+    lastNavigatedIdRef.current = undefined;
+    window.history.pushState(null, "", "/chat");
     setShowSidebar(false);
   };
 
@@ -96,7 +146,8 @@ export function ChatView({ conversationId }: ChatViewProps) {
   const handleDeleteConversation = (id: string) => {
     deleteConversation(id);
     if (activeConversation?.id === id) {
-      router.replace("/chat");
+      lastNavigatedIdRef.current = undefined;
+      window.history.replaceState(null, "", "/chat");
     }
   };
 
@@ -158,7 +209,7 @@ export function ChatView({ conversationId }: ChatViewProps) {
           </div>
 
           {/* Messages area */}
-          <div className="flex-1 overflow-y-auto px-4 py-6">
+          <div ref={messagesContainerRef} className="flex-1 overflow-y-auto px-4 py-6">
             {messages.length === 0 ? (
               <div className="flex h-full flex-col items-center justify-center gap-4">
                 <div
@@ -243,7 +294,6 @@ export function ChatView({ conversationId }: ChatViewProps) {
                     </div>
                   );
                 })}
-                <div ref={messagesEndRef} />
               </div>
             )}
           </div>
@@ -275,7 +325,7 @@ export function ChatView({ conversationId }: ChatViewProps) {
             isStreaming={isStreaming}
             models={availableModels}
             selectedModel={selectedModel}
-            onModelChange={setSelectedModel}
+            onModelChange={setUserSelectedModel}
             enableThinking={enableThinking}
             onThinkingChange={setEnableThinking}
             supportsThinking={supportsThinking}
@@ -296,8 +346,13 @@ export function ChatView({ conversationId }: ChatViewProps) {
         {/* Artifact side panel — Claude-style */}
         {activeArtifact && (
           <>
-            {/* Desktop: side panel */}
-            <div className="hidden md:flex w-[480px] shrink-0">
+            {/* Desktop: resizable side panel */}
+            <div className="hidden md:flex shrink-0 relative" style={{ width: artifactWidth }}>
+              {/* Drag handle */}
+              <div
+                className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize z-10 hover:bg-primary/30 active:bg-primary/40 transition-colors"
+                onMouseDown={handleResizeStart}
+              />
               <ArtifactPanel
                 artifact={activeArtifact}
                 isStreaming={isStreaming}

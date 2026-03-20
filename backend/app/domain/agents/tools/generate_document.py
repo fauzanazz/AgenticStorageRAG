@@ -25,6 +25,16 @@ DOCUMENT_SYSTEM_PROMPT = """You are a document writer. Generate a well-structure
 4. Make the document comprehensive, well-organized, and professional.
 5. If context from prior searches is provided, incorporate that information with proper attribution."""
 
+HTML_SYSTEM_PROMPT = """You are a web developer. Generate a complete, self-contained HTML document based on the user's instructions.
+
+## Rules
+1. Output ONLY valid HTML — a complete document starting with <!DOCTYPE html>.
+2. Include ALL CSS in a <style> tag and ALL JavaScript in a <script> tag within the same file.
+3. Do NOT use any external resources (CDNs, images, fonts) — everything must be self-contained.
+4. Do NOT include meta-commentary — just output the HTML.
+5. Make the result visually polished, responsive, and interactive as appropriate.
+6. If context from prior searches is provided, incorporate that information."""
+
 
 class GenerateDocumentTool(IAgentTool):
     """Generate a structured markdown document as an artifact.
@@ -45,12 +55,15 @@ class GenerateDocumentTool(IAgentTool):
     @property
     def description(self) -> str:
         return (
-            "Generate a structured markdown document (report, summary, analysis, guide, etc.). "
+            "Generate a structured document as an artifact. "
             "Use this tool when the user asks you to write, create, draft, or generate a document, "
             "report, summary, or any long-form structured content. Also use it when your response "
             "would benefit from being a standalone document rather than a chat message "
             "(e.g., multi-section analysis, comparison tables, guides). "
+            "Set format to 'html' when the user asks for interactive content, games, apps, "
+            "visualizations, or anything that needs to run as a web page. "
             "Input: title (str), instructions (str describing what to write), "
+            "format (optional: 'markdown' or 'html', default 'markdown'), "
             "context (optional str with information from prior searches to incorporate)"
         )
 
@@ -66,6 +79,11 @@ class GenerateDocumentTool(IAgentTool):
                 "instructions": {
                     "type": "string",
                     "description": "Detailed instructions for what the document should contain.",
+                },
+                "format": {
+                    "type": "string",
+                    "enum": ["markdown", "html"],
+                    "description": "Output format. Use 'html' for interactive content, games, apps, or visualizations. Default: 'markdown'.",
                 },
                 "context": {
                     "type": "string",
@@ -84,17 +102,20 @@ class GenerateDocumentTool(IAgentTool):
         title = kwargs.get("title", "Untitled Document")
         instructions = kwargs.get("instructions", "")
         context = kwargs.get("context", "")
+        fmt = kwargs.get("format", "markdown")
 
         if not instructions:
             return {"result": {"error": "No instructions provided"}, "count": 0, "source": "generate_document"}
 
+        is_html = fmt == "html"
+        artifact_type = "text/html" if is_html else "markdown"
         artifact_id = str(uuid.uuid4())
 
         # Emit artifact_start
         if emit_event:
             emit_event(
                 "artifact_start",
-                json.dumps({"artifact_id": artifact_id, "title": title, "type": "markdown"}),
+                json.dumps({"artifact_id": artifact_id, "title": title, "type": artifact_type}),
             )
 
         # Build the generation prompt
@@ -102,8 +123,9 @@ class GenerateDocumentTool(IAgentTool):
         if context:
             user_prompt += f"\n\n## Context (from prior searches)\n{context}"
 
+        system_prompt = HTML_SYSTEM_PROMPT if is_html else DOCUMENT_SYSTEM_PROMPT
         messages = [
-            {"role": "system", "content": DOCUMENT_SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
 
@@ -114,7 +136,7 @@ class GenerateDocumentTool(IAgentTool):
                 messages=messages,
                 model=self._model_override,
                 temperature=0.3,
-                max_tokens=4000,
+                max_tokens=8000 if is_html else 4000,
                 stream=True,
             )
 
@@ -139,7 +161,7 @@ class GenerateDocumentTool(IAgentTool):
                     json.dumps({
                         "artifact_id": artifact_id,
                         "title": title,
-                        "type": "markdown",
+                        "type": artifact_type,
                         "content_length": len(full_content),
                         "error": str(e),
                     }),
@@ -153,7 +175,7 @@ class GenerateDocumentTool(IAgentTool):
                 json.dumps({
                     "artifact_id": artifact_id,
                     "title": title,
-                    "type": "markdown",
+                    "type": artifact_type,
                     "content_length": len(full_content),
                 }),
             )
@@ -163,7 +185,7 @@ class GenerateDocumentTool(IAgentTool):
                 "artifact_id": artifact_id,
                 "title": title,
                 "content": full_content,
-                "type": "markdown",
+                "type": artifact_type,
             },
             "count": 1,
             "source": "generate_document",

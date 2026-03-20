@@ -97,6 +97,12 @@ async function fetchMessages(conversationId: string): Promise<ChatMessage[]> {
   });
 }
 
+async function fetchArtifacts(conversationId: string): Promise<Artifact[]> {
+  return apiClient.get<Artifact[]>(
+    `/chat/conversations/${conversationId}/artifacts`,
+  );
+}
+
 // ── Hook ───────────────────────────────────────────────────────────────────
 
 export function useChat(conversationId?: string) {
@@ -120,6 +126,7 @@ export function useChat(conversationId?: string) {
   const [activeArtifactId, setActiveArtifactId] = useState<string | null>(null);
   const pendingArtifactContentRef = useRef<Map<string, string>>(new Map());
   const artifactRafIdRef = useRef<number | null>(null);
+  const currentAssistantIdRef = useRef<string>("");
 
   // Attachment state
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
@@ -148,6 +155,8 @@ export function useChat(conversationId?: string) {
     syncedConversationIdRef.current = undefined;
     setActiveConversation(null);
     setMessages([]);
+    setArtifacts(new Map());
+    setActiveArtifactId(null);
   }
 
   // ── Messages query (enabled only when a conversation is selected) ────────
@@ -163,6 +172,23 @@ export function useChat(conversationId?: string) {
   if (messagesQuery.data && activeConversation?.id && activeConversation.id !== lastConversationIdRef.current) {
     lastConversationIdRef.current = activeConversation.id;
     setMessages(messagesQuery.data);
+  }
+
+  // ── Artifacts query (load persisted artifacts on conversation open) ──────
+  const artifactsQuery = useQuery({
+    queryKey: queryKeys.conversations.artifacts(activeConversation?.id ?? ""),
+    queryFn: () => fetchArtifacts(activeConversation!.id),
+    enabled: !!activeConversation,
+  });
+
+  const lastArtifactSyncIdRef = useRef<string | null>(null);
+  if (artifactsQuery.data && activeConversation?.id && activeConversation.id !== lastArtifactSyncIdRef.current) {
+    lastArtifactSyncIdRef.current = activeConversation.id;
+    const map = new Map<string, Artifact>();
+    for (const a of artifactsQuery.data) {
+      map.set(a.id, a);
+    }
+    setArtifacts(map);
   }
 
   // ── Create conversation mutation ─────────────────────────────────────────
@@ -342,7 +368,10 @@ export function useChat(conversationId?: string) {
         steps: [],
         timestamp: new Date().toISOString(),
       };
+      currentAssistantIdRef.current = tempAssistantId;
       setMessages((prev) => [...prev, userMessage, assistantMessage]);
+      // Close artifact panel when sending a new message
+      setActiveArtifactId(null);
 
       const readyAttachmentIds = attachments
         .filter((a) => a.status === "ready")
@@ -541,6 +570,22 @@ export function useChat(conversationId?: string) {
                 try {
                   const data: MessageCreatedPayload = JSON.parse(sseEvent.data);
                   const tempId = data.role === "user" ? tempUserId : tempAssistantId;
+                  if (data.role === "assistant") {
+                    const oldId = currentAssistantIdRef.current;
+                    currentAssistantIdRef.current = data.message_id;
+                    // Update message_id on any artifacts that were created with the temp ID
+                    setArtifacts((prev) => {
+                      let changed = false;
+                      const next = new Map(prev);
+                      for (const [key, art] of next) {
+                        if (art.message_id === oldId) {
+                          next.set(key, { ...art, message_id: data.message_id });
+                          changed = true;
+                        }
+                      }
+                      return changed ? next : prev;
+                    });
+                  }
                   setMessages((prev) =>
                     prev.map((m) =>
                       m.id === tempId ? { ...m, id: data.message_id } : m
@@ -568,6 +613,7 @@ export function useChat(conversationId?: string) {
                   const newArtifact: Artifact = {
                     id: data.artifact_id,
                     conversation_id: activeConversation?.id ?? "",
+                    message_id: currentAssistantIdRef.current,
                     user_id: "",
                     type: data.type,
                     title: data.title,
@@ -706,6 +752,30 @@ export function useChat(conversationId?: string) {
     setIsStreaming(false);
   }, []);
 
+  // Reset chat to empty state (for "new chat" without page navigation).
+  const resetChat = useCallback(() => {
+    // Cancel in-flight RAFs to prevent stale flushes into the new chat.
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    }
+    if (artifactRafIdRef.current !== null) {
+      cancelAnimationFrame(artifactRafIdRef.current);
+      artifactRafIdRef.current = null;
+    }
+    pendingContentRef.current = "";
+    pendingArtifactContentRef.current.clear();
+
+    syncedConversationIdRef.current = undefined;
+    lastConversationIdRef.current = null;
+    setActiveConversation(null);
+    setMessages((prev) => (prev.length === 0 ? prev : []));
+    setArtifacts((prev) => (prev.size === 0 ? prev : new Map()));
+    setActiveArtifactId(null);
+    setAttachments((prev) => (prev.length === 0 ? prev : []));
+    setError(null);
+  }, []);
+
   // Legacy imperative refresh — kept for backward-compat with callers.
   const refreshConversations = useCallback(
     () =>
@@ -739,6 +809,9 @@ export function useChat(conversationId?: string) {
     deleteConversation: (id: string) => deleteMutation.mutate(id),
     sendMessage,
     stopStreaming,
+
+    // state management
+    resetChat,
 
     // legacy
     fetchConversations: refreshConversations,

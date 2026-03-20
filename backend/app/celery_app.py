@@ -23,10 +23,15 @@ Worker startup:
 
 from __future__ import annotations
 
+import gc
 import logging
+import resource
+import sys
+import threading
+import tracemalloc
 
 from celery import Celery
-from celery.signals import worker_ready
+from celery.signals import worker_ready, worker_shutdown
 
 from app.config import get_settings
 
@@ -93,6 +98,78 @@ def create_celery_app() -> Celery:
 
 celery_app = create_celery_app()
 
+_heartbeat_stop = threading.Event()
+
+HEARTBEAT_INTERVAL_SECONDS = 30
+MEMORY_SNAPSHOT_EVERY = 10  # detailed snapshot every 10th heartbeat (~5 min)
+
+
+def _get_rss_mb() -> float:
+    """Current process RSS in MB."""
+    usage = resource.getrusage(resource.RUSAGE_SELF)
+    # macOS reports ru_maxrss in bytes, Linux in KB
+    if sys.platform == "darwin":
+        return usage.ru_maxrss / (1024 * 1024)
+    return usage.ru_maxrss / 1024
+
+
+def _log_memory_snapshot() -> None:
+    """Log detailed memory breakdown: tracemalloc top allocs + gc object counts."""
+    # --- tracemalloc top allocations ---
+    snapshot = tracemalloc.take_snapshot()
+    # Filter out importlib/tracemalloc internals
+    snapshot = snapshot.filter_traces([
+        tracemalloc.Filter(False, "<frozen importlib._bootstrap>"),
+        tracemalloc.Filter(False, "<frozen importlib._bootstrap_external>"),
+        tracemalloc.Filter(False, tracemalloc.__file__),
+    ])
+    top = snapshot.statistics("lineno")
+    logger.info("── memory snapshot: tracemalloc top 15 allocations ──")
+    for stat in top[:15]:
+        logger.info("  %s", stat)
+
+    # --- gc object count by type ---
+    gc.collect()
+    type_counts: dict[type, int] = {}
+    type_sizes: dict[type, int] = {}
+    for obj in gc.get_objects():
+        t = type(obj)
+        type_counts[t] = type_counts.get(t, 0) + 1
+        try:
+            type_sizes[t] = type_sizes.get(t, 0) + sys.getsizeof(obj)
+        except (TypeError, ReferenceError):
+            pass
+
+    # Top 15 types by total size
+    ranked = sorted(type_sizes.items(), key=lambda kv: kv[1], reverse=True)[:15]
+    logger.info("── memory snapshot: top 15 types by total size ──")
+    for t, size in ranked:
+        count = type_counts.get(t, 0)
+        logger.info("  %-50s %8.1f MB  (%d objects)", t.__module__ + "." + t.__qualname__, size / (1024 * 1024), count)
+
+    logger.info("── end memory snapshot ──")
+
+
+def _heartbeat_loop() -> None:
+    """Log a heartbeat line every HEARTBEAT_INTERVAL_SECONDS."""
+    tick = 0
+    while not _heartbeat_stop.wait(HEARTBEAT_INTERVAL_SECONDS):
+        tick += 1
+        rss = _get_rss_mb()
+        active = threading.active_count()
+        logger.info("♥ worker alive | RSS %.0f MB | %d active threads", rss, active)
+
+        if tick % MEMORY_SNAPSHOT_EVERY == 0:
+            try:
+                _log_memory_snapshot()
+            except Exception:
+                logger.exception("Memory snapshot failed")
+
+
+@worker_shutdown.connect
+def _stop_heartbeat(**kwargs: object) -> None:
+    _heartbeat_stop.set()
+
 
 @worker_ready.connect
 def _init_worker_resources(**kwargs: object) -> None:
@@ -105,6 +182,9 @@ def _init_worker_resources(**kwargs: object) -> None:
     signal never runs.
     """
     import asyncio
+
+    # Start tracemalloc early to capture allocations from init onward
+    tracemalloc.start(25)  # 25 frames deep for useful stack traces
 
     from app.infra.database import init_db
     from app.infra.llm import llm_provider
@@ -144,6 +224,10 @@ def _init_worker_resources(**kwargs: object) -> None:
         asyncio.run(_fail_zombie_ingestion_jobs())
     except Exception as exc:
         logger.warning("Zombie job cleanup failed (non-fatal): %s", exc)
+
+    # Start heartbeat so tmux/logs show the worker is alive
+    t = threading.Thread(target=_heartbeat_loop, daemon=True, name="heartbeat")
+    t.start()
 
     logger.info("Worker process resources initialised")
 

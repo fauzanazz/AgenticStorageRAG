@@ -45,6 +45,7 @@ export function useModelSettings() {
     settings: settingsQuery.data ?? null,
     catalog: catalogQuery.data ?? null,
     availableModels: availableQuery.data?.models ?? [],
+    defaultModel: availableQuery.data?.default_model ?? null,
     isLoading: settingsQuery.isLoading,
     isSaving: updateMutation.isPending,
     error:
