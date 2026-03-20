@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import type {
+  AvailableModelsResponse,
   ModelCatalog,
   ModelSettings,
   UpdateModelSettingsRequest,
@@ -10,6 +11,7 @@ import type {
 
 const SETTINGS_KEY = ["settings", "models"] as const;
 const CATALOG_KEY = ["settings", "models", "catalog"] as const;
+const AVAILABLE_KEY = ["settings", "models", "available"] as const;
 
 export function useModelSettings() {
   const queryClient = useQueryClient();
@@ -25,6 +27,12 @@ export function useModelSettings() {
     staleTime: Infinity, // catalog never changes at runtime
   });
 
+  const availableQuery = useQuery<AvailableModelsResponse>({
+    queryKey: AVAILABLE_KEY,
+    queryFn: () =>
+      apiClient.get<AvailableModelsResponse>("/settings/models/available"),
+  });
+
   const updateMutation = useMutation({
     mutationFn: (data: UpdateModelSettingsRequest) =>
       apiClient.put<ModelSettings>("/settings/models", data),
@@ -36,6 +44,7 @@ export function useModelSettings() {
   return {
     settings: settingsQuery.data ?? null,
     catalog: catalogQuery.data ?? null,
+    availableModels: availableQuery.data?.models ?? [],
     isLoading: settingsQuery.isLoading,
     isSaving: updateMutation.isPending,
     error:

@@ -9,6 +9,7 @@ export interface ModelSettings {
   anthropic_api_key: ApiKeyStatus;
   openai_api_key: ApiKeyStatus;
   dashscope_api_key: ApiKeyStatus;
+  openrouter_api_key: ApiKeyStatus;
 }
 
 export interface UpdateModelSettingsRequest {
@@ -19,6 +20,7 @@ export interface UpdateModelSettingsRequest {
   anthropic_api_key?: string | null;
   openai_api_key?: string | null;
   dashscope_api_key?: string | null;
+  openrouter_api_key?: string | null;
 }
 
 export interface ModelOption {
@@ -30,4 +32,8 @@ export interface ModelOption {
 export interface ModelCatalog {
   chat_models: ModelOption[];
   embedding_models: ModelOption[];
+}
+
+export interface AvailableModelsResponse {
+  models: ModelOption[];
 }

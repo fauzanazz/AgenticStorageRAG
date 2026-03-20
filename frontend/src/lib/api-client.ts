@@ -31,6 +31,29 @@ class ApiClient {
   }
 
   /**
+   * If the response is a 401 and we haven't retried yet, attempt to refresh
+   * the access token and invoke `retryFn` with the new credentials.
+   */
+  private async tryRefreshAndRetry<T>(
+    response: Response,
+    isRetry: boolean,
+    retryFn: () => Promise<T>,
+  ): Promise<{ response: Response; retried?: T }> {
+    if (response.status === 401 && !isRetry && this.onUnauthorized) {
+      if (!this.refreshPromise) {
+        this.refreshPromise = this.onUnauthorized().finally(() => {
+          this.refreshPromise = null;
+        });
+      }
+      const refreshed = await this.refreshPromise;
+      if (refreshed) {
+        return { response, retried: await retryFn() };
+      }
+    }
+    return { response };
+  }
+
+  /**
    * Register a callback that the client will invoke when any request
    * receives a 401. The callback should refresh the access token and
    * return true on success or false if the session is unrecoverable.
@@ -62,20 +85,10 @@ class ApiClient {
       headers,
     });
 
-    if (response.status === 401 && !isRetry && this.onUnauthorized) {
-      // Deduplicate concurrent refresh attempts — only one in-flight at a time
-      if (!this.refreshPromise) {
-        this.refreshPromise = this.onUnauthorized().finally(() => {
-          this.refreshPromise = null;
-        });
-      }
-      const refreshed = await this.refreshPromise;
-      if (refreshed) {
-        // Retry once with the new access token
-        return this.request<T>(path, options, true);
-      }
-      // Refresh failed — fall through to throw the original 401
-    }
+    const { retried } = await this.tryRefreshAndRetry(response, isRetry, () =>
+      this.request<T>(path, options, true),
+    );
+    if (retried !== undefined) return retried;
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({
@@ -143,17 +156,10 @@ class ApiClient {
       signal,
     });
 
-    if (response.status === 401 && !isRetry && this.onUnauthorized) {
-      if (!this.refreshPromise) {
-        this.refreshPromise = this.onUnauthorized().finally(() => {
-          this.refreshPromise = null;
-        });
-      }
-      const refreshed = await this.refreshPromise;
-      if (refreshed) {
-        return this.stream(path, body, onEvent, signal, true);
-      }
-    }
+    const { retried } = await this.tryRefreshAndRetry(response, isRetry, () =>
+      this.stream(path, body, onEvent, signal, true),
+    );
+    if (retried !== undefined) return retried;
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({
@@ -168,6 +174,7 @@ class ApiClient {
     const decoder = new TextDecoder();
     let buffer = "";
     let currentEvent = "message"; // SSE default event type
+    let dataChunks: string[] = []; // accumulate multi-line data: fields
 
     while (true) {
       const { done, value } = await reader.read();
@@ -181,12 +188,15 @@ class ApiClient {
         if (line.startsWith("event: ")) {
           currentEvent = line.slice(7).trim();
         } else if (line.startsWith("data: ")) {
-          const data = line.slice(6);
-          if (data === "[DONE]") return;
-          onEvent?.({ event: currentEvent, data });
-          currentEvent = "message"; // reset after dispatch
+          dataChunks.push(line.slice(6));
         } else if (line === "") {
-          // Empty line = end of SSE block, reset event type
+          // Empty line = end of SSE block — dispatch accumulated data
+          if (dataChunks.length > 0) {
+            const data = dataChunks.join("\n");
+            dataChunks = [];
+            if (data === "[DONE]") return;
+            onEvent?.({ event: currentEvent, data });
+          }
           currentEvent = "message";
         }
       }
@@ -207,17 +217,10 @@ class ApiClient {
       body: formData,
     });
 
-    if (response.status === 401 && !isRetry && this.onUnauthorized) {
-      if (!this.refreshPromise) {
-        this.refreshPromise = this.onUnauthorized().finally(() => {
-          this.refreshPromise = null;
-        });
-      }
-      const refreshed = await this.refreshPromise;
-      if (refreshed) {
-        return this.upload<T>(path, formData, true);
-      }
-    }
+    const { retried } = await this.tryRefreshAndRetry(response, isRetry, () =>
+      this.upload<T>(path, formData, true),
+    );
+    if (retried !== undefined) return retried;
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({

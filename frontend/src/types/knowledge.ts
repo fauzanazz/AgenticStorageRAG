@@ -45,9 +45,18 @@ export interface GraphEdge {
   weight: number;
 }
 
+export interface GraphCluster {
+  id: string;
+  label: string;
+  parent_id: string | null;
+  node_ids: string[];
+  description: string | null;
+}
+
 export interface GraphVisualization {
   nodes: GraphNode[];
   edges: GraphEdge[];
+  clusters?: GraphCluster[];
   total_nodes: number;
   total_edges: number;
 }

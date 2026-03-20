@@ -3,7 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient, ApiError } from "@/lib/api-client";
 import { queryKeys } from "@/lib/query-keys";
-import type { Document } from "@/types/documents";
+import type { Document, DocumentSource } from "@/types/documents";
 
 interface DocumentListApiResponse {
   items: Document[];
@@ -16,22 +16,32 @@ interface DocumentListApiResponse {
 
 function fetchDocuments(
   page: number,
-  pageSize: number
+  pageSize: number,
+  source?: DocumentSource
 ): Promise<DocumentListApiResponse> {
+  const params = new URLSearchParams({
+    page: String(page),
+    page_size: String(pageSize),
+  });
+  if (source) params.set("source", source);
   return apiClient.get<DocumentListApiResponse>(
-    `/documents?page=${page}&page_size=${pageSize}`
+    `/documents?${params.toString()}`
   );
 }
 
 // ── Hook ──────────────────────────────────────────────────────────────────
 
-export function useDocuments(page = 1, pageSize = 20) {
+export function useDocuments(
+  page = 1,
+  pageSize = 20,
+  source?: DocumentSource
+) {
   const queryClient = useQueryClient();
 
   // ── List query ──────────────────────────────────────────────────────────
   const query = useQuery({
-    queryKey: queryKeys.documents.list(page, pageSize),
-    queryFn: () => fetchDocuments(page, pageSize),
+    queryKey: queryKeys.documents.list(page, pageSize, source),
+    queryFn: () => fetchDocuments(page, pageSize, source),
   });
 
   // ── Upload mutation ──────────────────────────────────────────────────────
@@ -42,9 +52,7 @@ export function useDocuments(page = 1, pageSize = 20) {
       return apiClient.upload<Document>("/documents", formData);
     },
     onSuccess: () => {
-      // Invalidate all document lists so any page reflects the new upload.
       queryClient.invalidateQueries({ queryKey: queryKeys.documents.lists() });
-      // Also invalidate the dashboard stats which count documents.
       queryClient.invalidateQueries({ queryKey: queryKeys.documents.stats() });
     },
   });
@@ -81,7 +89,7 @@ export function useDocuments(page = 1, pageSize = 20) {
     deleteDocument: (id: string) => deleteMutation.mutateAsync(id),
     isDeleting: deleteMutation.isPending,
 
-    // manual refresh (maps to refetch for backward-compat)
+    // manual refresh
     refresh: query.refetch,
   };
 }

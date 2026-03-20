@@ -20,9 +20,10 @@ export const queryKeys = {
   documents: {
     all: ["documents"] as const,
     lists: () => ["documents", "list"] as const,
-    list: (page: number, pageSize: number) =>
-      ["documents", "list", { page, pageSize }] as const,
+    list: (page: number, pageSize: number, source?: string) =>
+      ["documents", "list", { page, pageSize, source }] as const,
     stats: () => ["documents", "stats"] as const,
+    driveTree: () => ["documents", "drive-tree"] as const,
   },
 
   // ── Chat ──────────────────────────────────────────────────────────────────
@@ -40,6 +41,7 @@ export const queryKeys = {
       document_id?: string;
       entity_types?: string;
       limit?: number;
+      source?: string;
     }) => ["knowledge", "graph", params ?? {}] as const,
     stats: () => ["knowledge", "stats"] as const,
     search: (query: string, vectorWeight: number) =>
@@ -52,6 +54,9 @@ export const queryKeys = {
     jobs: (page: number) => ["ingestion", "jobs", { page }] as const,
     stats: () => ["ingestion", "stats"] as const,
     cost: () => ["ingestion", "cost"] as const,
+    driveFolders: (parentId: string) =>
+      ["ingestion", "drive-folders", { parentId }] as const,
+    defaultFolder: () => ["ingestion", "default-folder"] as const,
   },
 
   // ── Auth ──────────────────────────────────────────────────────────────────

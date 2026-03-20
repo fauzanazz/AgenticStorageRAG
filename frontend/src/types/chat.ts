@@ -8,6 +8,21 @@ export interface Citation {
   chunk_text: string;
   page_number?: number;
   relevance_score: number;
+  source_url: string | null;
+}
+
+export interface NarrativeStep {
+  type: "thinking" | "tool_call";
+  /** For thinking steps — the reasoning text */
+  content?: string;
+  /** For tool_call steps */
+  tool_name?: string;
+  tool_label?: string;
+  tool_args?: Record<string, unknown>;
+  tool_status?: "running" | "done" | "error";
+  tool_summary?: string;
+  tool_count?: number;
+  tool_duration_ms?: number;
 }
 
 export interface ChatMessage {
@@ -15,6 +30,7 @@ export interface ChatMessage {
   role: MessageRole;
   content: string;
   citations: Citation[];
+  steps: NarrativeStep[];
   timestamp: string;
   is_clarifying_question?: boolean;
 }
@@ -25,4 +41,47 @@ export interface ChatSession {
   created_at: string;
   updated_at: string;
   message_count: number;
+}
+
+// ---------------------------------------------------------------------------
+// SSE event payloads (match backend schemas)
+// ---------------------------------------------------------------------------
+
+export interface ToolStartPayload {
+  tool_name: string;
+  tool_label: string;
+  arguments: Record<string, unknown>;
+}
+
+export interface ToolResultPayload {
+  tool_name: string;
+  tool_label: string;
+  summary: string;
+  count: number;
+  duration_ms: number;
+  error: string | null;
+}
+
+export interface ConversationCreatedPayload {
+  conversation_id: string;
+}
+
+export interface DonePayload {
+  conversation_id: string;
+  citations_count: number;
+  tools_used: string[];
+}
+
+export interface CitationPayload {
+  document_id?: string;
+  document_name?: string;
+  entity_name?: string;
+  content_snippet?: string;
+  page_number?: number;
+  relevance_score?: number;
+  source_url?: string | null;
+}
+
+export interface ErrorPayload {
+  error: string;
 }

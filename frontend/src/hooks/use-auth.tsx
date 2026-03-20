@@ -46,6 +46,7 @@ interface AuthContextValue extends AuthState {
     password: string,
     fullName: string
   ) => Promise<void>;
+  loginWithOAuth: (provider: string) => Promise<void>;
   logout: () => void;
   refreshAuth: () => Promise<void>;
 }
@@ -112,6 +113,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     },
     [setTokens]
   );
+
+  const loginWithOAuth = useCallback(async (provider: string) => {
+    const response = await apiClient.get<{ authorization_url: string }>(
+      `/auth/oauth/${provider}/authorize`
+    );
+    // Full-page redirect to the OAuth provider's consent screen
+    window.location.href = response.authorization_url;
+  }, []);
 
   const logout = useCallback(() => {
     clearTokens();
@@ -193,8 +202,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [fetchUser, refreshAuth]);
 
   const value = useMemo(
-    () => ({ ...state, login, register, logout, refreshAuth }),
-    [state, login, register, logout, refreshAuth]
+    () => ({ ...state, login, register, loginWithOAuth, logout, refreshAuth }),
+    [state, login, register, loginWithOAuth, logout, refreshAuth]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

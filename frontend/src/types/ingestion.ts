@@ -76,6 +76,20 @@ export interface TriggerIngestionRequest {
   force?: boolean;
 }
 
+export interface DriveFolderEntry {
+  file_id: string;
+  name: string;
+  mime_type: string;
+  size: number | null;
+  modified_time: string | null;
+  is_folder: boolean;
+}
+
+export interface DefaultFolder {
+  folder_id: string | null;
+  folder_name: string | null;
+}
+
 export interface LLMModelCostStats {
   calls: number;
   input_tokens: number;

@@ -10,7 +10,7 @@
 # ============================================================
 
 # ---- Stage 1: install dependencies -------------------------
-FROM node:20-alpine AS deps
+FROM node:22-alpine AS deps
 
 WORKDIR /app
 
@@ -18,7 +18,7 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 # ---- Stage 2: development ----------------------------------
-FROM node:20-alpine AS development
+FROM node:22-alpine AS development
 
 WORKDIR /app
 
@@ -38,7 +38,7 @@ COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
-CMD ["npm", "run", "dev"]
+CMD ["npx", "next", "dev", "--webpack"]
 
 # ---- Stage 3: builder (production build) -------------------
 FROM deps AS builder
@@ -47,7 +47,7 @@ COPY . .
 RUN npm run build
 
 # ---- Stage 4: production -----------------------------------
-FROM node:20-alpine AS production
+FROM node:22-alpine AS production
 
 WORKDIR /app
 

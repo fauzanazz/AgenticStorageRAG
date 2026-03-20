@@ -20,14 +20,29 @@ function fetchGraph(params?: {
   document_id?: string;
   entity_types?: string;
   limit?: number;
+  source?: string;
 }): Promise<GraphVisualization> {
   const qs = new URLSearchParams();
   if (params?.document_id) qs.set("document_id", params.document_id);
   if (params?.entity_types) qs.set("entity_types", params.entity_types);
   if (params?.limit) qs.set("limit", String(params.limit));
+  if (params?.source) qs.set("source", params.source);
   const query = qs.toString();
   return apiClient.get<GraphVisualization>(
     `/knowledge/graph${query ? `?${query}` : ""}`
+  );
+}
+
+function fetchEntityNeighbors(
+  entityId: string,
+  depth: number = 1,
+  limit: number = 50
+): Promise<GraphVisualization> {
+  const qs = new URLSearchParams();
+  qs.set("depth", String(depth));
+  qs.set("limit", String(limit));
+  return apiClient.get<GraphVisualization>(
+    `/knowledge/entities/${entityId}/neighbors?${qs.toString()}`
   );
 }
 
@@ -54,6 +69,7 @@ interface UseKnowledgeOptions {
     document_id?: string;
     entity_types?: string;
     limit?: number;
+    source?: string;
   };
 }
 
@@ -113,6 +129,10 @@ export function useKnowledge(options: UseKnowledgeOptions = {}) {
     loading: graphQuery.isLoading || searchMutation.isPending,
     error:
       graphQuery.error?.message ?? searchMutation.error?.message ?? null,
+
+    // neighbor expansion for interactive graph
+    fetchNeighbors: (entityId: string, depth?: number, limit?: number) =>
+      fetchEntityNeighbors(entityId, depth, limit),
 
     // legacy imperative helpers (kept for backward-compat with pages)
     fetchGraph: (params?: {

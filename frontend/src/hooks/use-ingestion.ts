@@ -4,6 +4,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { queryKeys } from "@/lib/query-keys";
 import type {
+  DefaultFolder,
+  DriveFolderEntry,
   IngestionJob,
   IngestionJobList,
   IngestionStatsResponse,
@@ -34,6 +36,26 @@ function triggerIngestionRequest(
 function cancelJobRequest(jobId: string): Promise<IngestionJob> {
   return apiClient.post<IngestionJob>(
     `/admin/ingestion/jobs/${jobId}/cancel`
+  );
+}
+
+function fetchDriveFolders(parentId: string): Promise<DriveFolderEntry[]> {
+  return apiClient.get<DriveFolderEntry[]>(
+    `/admin/ingestion/drive/browse?parent_id=${encodeURIComponent(parentId)}`
+  );
+}
+
+function fetchDefaultFolder(): Promise<DefaultFolder> {
+  return apiClient.get<DefaultFolder>("/admin/ingestion/drive/default-folder");
+}
+
+function saveDefaultFolderRequest(data: {
+  folder_id: string;
+  folder_name: string;
+}): Promise<DefaultFolder> {
+  return apiClient.put<DefaultFolder>(
+    "/admin/ingestion/drive/default-folder",
+    data
   );
 }
 
@@ -118,6 +140,7 @@ export function useIngestion(page = 1) {
     totalJobs: jobsQuery.data?.total ?? 0,
     stats: statsQuery.data ?? null,
     costSummary: costQuery.data ?? null,
+    costError: costQuery.error?.message ?? null,
 
     // loading / error states
     isLoading: jobsQuery.isLoading,
@@ -150,5 +173,41 @@ export function useIngestion(page = 1) {
     setError: (_: string | null) => {
       // Kept for backward-compat; errors are now managed by TanStack Query.
     },
+  };
+}
+
+// ── Drive folder browsing hooks ─────────────────────────────────────────
+
+export function useDriveFolders(parentId: string, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.ingestion.driveFolders(parentId),
+    queryFn: () => fetchDriveFolders(parentId),
+    enabled,
+    staleTime: 60_000, // Cache folder listings for 1 min
+  });
+}
+
+export function useDefaultFolder() {
+  const queryClient = useQueryClient();
+
+  const query = useQuery({
+    queryKey: queryKeys.ingestion.defaultFolder(),
+    queryFn: fetchDefaultFolder,
+    staleTime: Infinity, // Only changes on explicit save
+  });
+
+  const saveMutation = useMutation({
+    mutationFn: saveDefaultFolderRequest,
+    onSuccess: (data) => {
+      queryClient.setQueryData(queryKeys.ingestion.defaultFolder(), data);
+    },
+  });
+
+  return {
+    defaultFolder: query.data ?? null,
+    isLoading: query.isLoading,
+    saveDefaultFolder: (folderId: string, folderName: string) =>
+      saveMutation.mutateAsync({ folder_id: folderId, folder_name: folderName }),
+    isSaving: saveMutation.isPending,
   };
 }
