@@ -19,6 +19,7 @@ from app.domain.auth.exceptions import (
     InactiveUserError,
     InvalidCredentialsError,
     InvalidTokenError,
+    OAuthLoginRequiredError,
     UserNotFoundError,
 )
 from app.domain.auth.interfaces import AbstractAuthService
@@ -106,6 +107,9 @@ class AuthService(AbstractAuthService):
         user = await self._get_user_by_email(data.email)
         if user is None:
             raise InvalidCredentialsError()
+
+        if user.hashed_password is None:
+            raise OAuthLoginRequiredError(provider="google")
 
         if not self._hasher.verify(data.password, user.hashed_password):
             raise InvalidCredentialsError()

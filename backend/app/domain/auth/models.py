@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import String, Boolean, DateTime, Text
+from sqlalchemy import DateTime, Boolean, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -37,9 +37,9 @@ class User(Base):
         nullable=False,
         index=True,
     )
-    hashed_password: Mapped[str] = mapped_column(
+    hashed_password: Mapped[str | None] = mapped_column(
         Text,
-        nullable=False,
+        nullable=True,
     )
     full_name: Mapped[str] = mapped_column(
         String(255),
@@ -75,3 +75,66 @@ class User(Base):
 
     def __repr__(self) -> str:
         return f"<User id={self.id} email={self.email}>"
+
+
+class OAuthAccount(Base):
+    """OAuth provider account linked to a user.
+
+    Stores encrypted OAuth tokens for external providers (Google, etc.).
+    A user can have multiple OAuth accounts (one per provider).
+    """
+
+    __tablename__ = "oauth_accounts"
+    __table_args__ = (
+        UniqueConstraint("provider", "provider_user_id", name="uq_oauth_provider_user"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    provider: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+    )
+    provider_user_id: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+    access_token_enc: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    refresh_token_enc: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    token_expiry: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    scopes: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    def __repr__(self) -> str:
+        return f"<OAuthAccount id={self.id} provider={self.provider} user_id={self.user_id}>"

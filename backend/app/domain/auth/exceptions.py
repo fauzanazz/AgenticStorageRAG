@@ -50,3 +50,22 @@ class InactiveUserError(AuthError):
 
     def __init__(self) -> None:
         super().__init__("User account is deactivated")
+
+
+class OAuthLoginRequiredError(AuthError):
+    """Raised when a Google-only user tries to use password login."""
+
+    def __init__(self, provider: str = "google") -> None:
+        self.provider = provider
+        super().__init__(
+            f"This account uses {provider.title()} Sign-In. "
+            f"Please use the {provider.title()} button to log in."
+        )
+
+
+class OAuthError(AuthError):
+    """Raised when an OAuth flow fails."""
+
+    def __init__(self, provider: str, reason: str) -> None:
+        self.provider = provider
+        super().__init__(f"OAuth error ({provider}): {reason}")
