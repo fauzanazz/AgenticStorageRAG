@@ -11,6 +11,19 @@ export interface Citation {
   source_url: string | null;
 }
 
+export interface ToolResultItem {
+  content?: string;
+  entity_name?: string;
+  entity_type?: string;
+  description?: string;
+  source?: string;
+  score?: number;
+  similarity?: number;
+  relevance?: number;
+  document_id?: string;
+  relationships?: { type: string; target: string }[];
+}
+
 export interface NarrativeStep {
   type: "thinking" | "tool_call";
   /** For thinking steps — the reasoning text */
@@ -23,6 +36,7 @@ export interface NarrativeStep {
   tool_summary?: string;
   tool_count?: number;
   tool_duration_ms?: number;
+  tool_results?: ToolResultItem[];
 }
 
 export interface ChatMessage {
@@ -60,10 +74,16 @@ export interface ToolResultPayload {
   count: number;
   duration_ms: number;
   error: string | null;
+  results?: ToolResultItem[];
 }
 
 export interface ConversationCreatedPayload {
   conversation_id: string;
+}
+
+export interface MessageCreatedPayload {
+  message_id: string;
+  role: "user" | "assistant";
 }
 
 export interface DonePayload {

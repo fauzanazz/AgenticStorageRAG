@@ -97,6 +97,10 @@ class ApiClient {
       throw new ApiError(response.status, error.detail || "Unknown error");
     }
 
+    if (response.status === 204 || response.headers.get("content-length") === "0") {
+      return undefined as T;
+    }
+
     return response.json() as Promise<T>;
   }
 
@@ -227,6 +231,10 @@ class ApiClient {
         detail: response.statusText,
       }));
       throw new ApiError(response.status, error.detail || "Unknown error");
+    }
+
+    if (response.status === 204 || response.headers.get("content-length") === "0") {
+      return undefined as T;
     }
 
     return response.json() as Promise<T>;
