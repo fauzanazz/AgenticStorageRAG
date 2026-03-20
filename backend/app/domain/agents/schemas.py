@@ -51,6 +51,7 @@ class MessageResponse(BaseModel):
     content: str
     citations: list[Citation] = []
     tool_calls: list[dict] | None = None
+    thinking_blocks: list[str] | None = None
     token_count: int = 0
     created_at: datetime
 
@@ -111,7 +112,7 @@ class ChatStreamEvent(BaseModel):
     """Server-sent event for streaming chat responses."""
 
     event: str = Field(
-        ..., description="Event type: thinking | tool_start | tool_result | token | citation | done | error"
+        ..., description="Event type: thinking | tool_start | tool_result | token | citation | message_created | done | error"
     )
     data: str = Field("", description="Event payload")
 
@@ -123,6 +124,7 @@ class AgentToolCall(BaseModel):
     arguments: dict = {}
     result_summary: str = ""
     duration_ms: int = 0
+    results: list[dict] = []
 
 
 # ---------------------------------------------------------------------------
@@ -163,3 +165,4 @@ class ToolResultData(BaseModel):
     count: int = 0
     duration_ms: int = 0
     error: str | None = None
+    results: list[dict] = []

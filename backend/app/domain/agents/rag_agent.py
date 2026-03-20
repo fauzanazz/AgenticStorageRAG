@@ -127,10 +127,17 @@ class RAGAgent(IRAGAgent):
                 )
 
             # Save user message
-            await self._chat.add_message(
+            user_msg = await self._chat.add_message(
                 conversation_id=conversation_id,
                 role="user",
                 content=request.message,
+            )
+            yield ChatStreamEvent(
+                event="message_created",
+                data=json.dumps({
+                    "message_id": str(user_msg.id),
+                    "role": "user",
+                }),
             )
 
             # Get conversation history
@@ -161,6 +168,7 @@ class RAGAgent(IRAGAgent):
             accumulated_answer = ""
             all_tool_results: list[dict[str, Any]] = []
             tool_call_records: list[AgentToolCall] = []
+            thinking_blocks: list[str] = []
 
             async for event in self._narrative_react_loop(
                 messages=messages,
@@ -170,6 +178,8 @@ class RAGAgent(IRAGAgent):
             ):
                 if event.event == "token":
                     accumulated_answer += event.data
+                elif event.event == "thinking":
+                    thinking_blocks.append(event.data)
                 yield event
 
             # Extract and emit citations from tool results
@@ -183,12 +193,20 @@ class RAGAgent(IRAGAgent):
                 )
 
             # Save assistant message
-            await self._chat.add_message(
+            assistant_msg = await self._chat.add_message(
                 conversation_id=conversation_id,
                 role="assistant",
                 content=accumulated_answer,
                 citations=citations if citations else None,
                 tool_calls=[tc.model_dump() for tc in tool_call_records] if tool_call_records else None,
+                thinking_blocks=thinking_blocks if thinking_blocks else None,
+            )
+            yield ChatStreamEvent(
+                event="message_created",
+                data=json.dumps({
+                    "message_id": str(assistant_msg.id),
+                    "role": "assistant",
+                }),
             )
 
             # Update conversation title from first user message
@@ -357,6 +375,16 @@ class RAGAgent(IRAGAgent):
                 count = result.get("count", 0) if result else 0
                 summary = f"Found {count} results" if result else f"Error: {error}"
 
+                # Truncate content fields for the SSE payload to keep it lean
+                raw_items = result.get("result", []) if result else []
+                truncated_items: list[dict] = []
+                for item in raw_items:
+                    entry = dict(item)
+                    for key in ("content", "description"):
+                        if key in entry and isinstance(entry[key], str) and len(entry[key]) > 200:
+                            entry[key] = entry[key][:200] + "..."
+                    truncated_items.append(entry)
+
                 yield ChatStreamEvent(
                     event="tool_result",
                     data=json.dumps({
@@ -366,6 +394,7 @@ class RAGAgent(IRAGAgent):
                         "count": count,
                         "duration_ms": elapsed_ms,
                         "error": error,
+                        "results": truncated_items,
                     }),
                 )
 
@@ -377,6 +406,7 @@ class RAGAgent(IRAGAgent):
                     arguments=args,
                     result_summary=summary,
                     duration_ms=elapsed_ms,
+                    results=truncated_items,
                 ))
 
                 # Append tool result to messages so LLM sees the observation
