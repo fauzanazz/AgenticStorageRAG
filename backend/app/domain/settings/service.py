@@ -49,6 +49,9 @@ class SettingsService(AbstractSettingsService):
         row.dashscope_api_key_enc = self._apply_key(
             request.dashscope_api_key, row.dashscope_api_key_enc
         )
+        row.openrouter_api_key_enc = self._apply_key(
+            request.openrouter_api_key, row.openrouter_api_key_enc
+        )
 
         await self._db.commit()
         await self._db.refresh(row)
@@ -100,4 +103,5 @@ class SettingsService(AbstractSettingsService):
             anthropic_api_key=ApiKeyStatus(has_key=row.anthropic_api_key_enc is not None),
             openai_api_key=ApiKeyStatus(has_key=row.openai_api_key_enc is not None),
             dashscope_api_key=ApiKeyStatus(has_key=row.dashscope_api_key_enc is not None),
+            openrouter_api_key=ApiKeyStatus(has_key=row.openrouter_api_key_enc is not None),
         )

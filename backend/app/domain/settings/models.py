@@ -39,6 +39,7 @@ class UserModelSettings(Base):
     anthropic_api_key_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
     openai_api_key_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
     dashscope_api_key_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
+    openrouter_api_key_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

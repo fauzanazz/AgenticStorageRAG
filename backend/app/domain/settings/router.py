@@ -4,9 +4,12 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user_id, get_db
+from app.config import get_settings
 from app.domain.settings.schemas import (
     CHAT_MODELS,
     EMBEDDING_MODELS,
+    PROVIDER_KEY_MAP,
+    AvailableModelsResponse,
     ModelCatalogResponse,
     ModelSettingsResponse,
     UpdateModelSettingsRequest,
@@ -27,6 +30,46 @@ async def get_model_catalog() -> ModelCatalogResponse:
         chat_models=CHAT_MODELS,
         embedding_models=EMBEDDING_MODELS,
     )
+
+
+@router.get("/models/available", response_model=AvailableModelsResponse)
+async def get_available_models(
+    user_id: uuid.UUID = Depends(get_current_user_id),
+    service: SettingsService = Depends(_get_settings_service),
+) -> AvailableModelsResponse:
+    """Return chat models filtered by which providers have API keys.
+
+    Combines server-level env vars with user-level keys to determine
+    which providers are available, then filters the catalog accordingly.
+    """
+    settings = get_settings()
+
+    # Server-level keys (from env / .env)
+    server_keys = {
+        "anthropic": bool(settings.anthropic_api_key),
+        "openai": bool(settings.openai_api_key),
+        "dashscope": bool(settings.dashscope_api_key),
+        "openrouter": bool(settings.openrouter_api_key),
+    }
+
+    # User-level keys
+    user_settings = await service.get_raw_settings(user_id)
+    user_keys = {
+        "anthropic": bool(getattr(user_settings, "anthropic_api_key_enc", None)) if user_settings else False,
+        "openai": bool(getattr(user_settings, "openai_api_key_enc", None)) if user_settings else False,
+        "dashscope": bool(getattr(user_settings, "dashscope_api_key_enc", None)) if user_settings else False,
+        "openrouter": bool(getattr(user_settings, "openrouter_api_key_enc", None)) if user_settings else False,
+    }
+
+    # A provider is available if either source has a key
+    available_providers = {
+        provider
+        for provider, key_prefix in PROVIDER_KEY_MAP.items()
+        if server_keys.get(key_prefix) or user_keys.get(key_prefix)
+    }
+
+    filtered = [m for m in CHAT_MODELS if m["provider"] in available_providers]
+    return AvailableModelsResponse(models=filtered)
 
 
 @router.get("/models", response_model=ModelSettingsResponse)

@@ -52,7 +52,7 @@ class TestApplyKey:
 
 
 class TestToResponse:
-    def _make_row(self, anthropic=None, openai=None, dashscope=None):
+    def _make_row(self, anthropic=None, openai=None, dashscope=None, openrouter=None):
         row = MagicMock()
         row.chat_model = "anthropic/claude-sonnet-4-20250514"
         row.ingestion_model = "dashscope/qwen3-max"
@@ -60,6 +60,7 @@ class TestToResponse:
         row.anthropic_api_key_enc = anthropic
         row.openai_api_key_enc = openai
         row.dashscope_api_key_enc = dashscope
+        row.openrouter_api_key_enc = openrouter
         return row
 
     def test_has_key_true_when_enc_present(self):
@@ -68,6 +69,7 @@ class TestToResponse:
         assert resp.anthropic_api_key.has_key is True
         assert resp.openai_api_key.has_key is False
         assert resp.dashscope_api_key.has_key is False
+        assert resp.openrouter_api_key.has_key is False
 
     def test_has_key_false_when_all_none(self):
         row = self._make_row()
@@ -75,13 +77,15 @@ class TestToResponse:
         assert resp.anthropic_api_key.has_key is False
         assert resp.openai_api_key.has_key is False
         assert resp.dashscope_api_key.has_key is False
+        assert resp.openrouter_api_key.has_key is False
 
     def test_all_keys_set(self):
-        row = self._make_row(anthropic="a", openai="b", dashscope="c")
+        row = self._make_row(anthropic="a", openai="b", dashscope="c", openrouter="d")
         resp = SettingsService._to_response(row)
         assert resp.anthropic_api_key.has_key is True
         assert resp.openai_api_key.has_key is True
         assert resp.dashscope_api_key.has_key is True
+        assert resp.openrouter_api_key.has_key is True
 
     def test_model_fields_match(self):
         row = self._make_row()
@@ -110,6 +114,7 @@ class TestSettingsServiceUpsert:
         mock_row.anthropic_api_key_enc = None
         mock_row.openai_api_key_enc = None
         mock_row.dashscope_api_key_enc = "old_dashscope_enc"
+        mock_row.openrouter_api_key_enc = None
 
         with patch.object(service, "_get_or_create", new_callable=AsyncMock) as mock_create:
             mock_create.return_value = mock_row
@@ -123,6 +128,7 @@ class TestSettingsServiceUpsert:
                 anthropic_api_key="",        # unchanged
                 openai_api_key="sk-test-key", # set new
                 dashscope_api_key=None,       # clear
+                openrouter_api_key="",        # unchanged
             )
 
             with patch(
@@ -147,6 +153,7 @@ class TestSettingsServiceUpsert:
         mock_row.anthropic_api_key_enc = None
         mock_row.openai_api_key_enc = None
         mock_row.dashscope_api_key_enc = None
+        mock_row.openrouter_api_key_enc = None
 
         with patch.object(service, "_get_or_create", new_callable=AsyncMock) as mock_create:
             mock_create.return_value = mock_row

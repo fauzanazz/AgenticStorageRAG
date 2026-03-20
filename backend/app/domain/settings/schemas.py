@@ -12,12 +12,16 @@ CHAT_MODELS: list[dict[str, str]] = [
     {"provider": "Anthropic", "model_id": "anthropic/claude-haiku-4-5-20251001", "label": "Claude Haiku 4.5"},
     {"provider": "Anthropic", "model_id": "anthropic/claude-3-5-haiku-20241022", "label": "Claude 3.5 Haiku"},
     {"provider": "OpenAI", "model_id": "openai/gpt-4o", "label": "GPT-4o"},
-    {"provider": "OpenAI", "model_id": "openai/gpt-4o-mini", "label": "GPT-4o mini"},
+    {"provider": "OpenAI", "model_id": "openai/gpt-5-mini", "label": "GPT-5 mini"},
     {"provider": "OpenAI", "model_id": "openai/o3", "label": "o3"},
     {"provider": "OpenAI", "model_id": "openai/o4-mini", "label": "o4-mini"},
     {"provider": "DashScope", "model_id": "dashscope/qwen3-max", "label": "Qwen3 Max"},
     {"provider": "DashScope", "model_id": "dashscope/qwen3-plus", "label": "Qwen3 Plus"},
     {"provider": "DashScope", "model_id": "dashscope/qwen3-turbo", "label": "Qwen3 Turbo"},
+    {"provider": "OpenRouter", "model_id": "openrouter/anthropic/claude-sonnet-4-20250514", "label": "Claude Sonnet 4 (OR)"},
+    {"provider": "OpenRouter", "model_id": "openrouter/google/gemini-2.5-pro-preview-06-05", "label": "Gemini 2.5 Pro (OR)"},
+    {"provider": "OpenRouter", "model_id": "openrouter/deepseek/deepseek-r1", "label": "DeepSeek R1 (OR)"},
+    {"provider": "OpenRouter", "model_id": "openrouter/meta-llama/llama-4-maverick", "label": "Llama 4 Maverick (OR)"},
 ]
 
 EMBEDDING_MODELS: list[dict[str, str]] = [
@@ -31,6 +35,7 @@ PROVIDER_KEY_MAP: dict[str, str] = {
     "Anthropic": "anthropic",
     "OpenAI": "openai",
     "DashScope": "dashscope",
+    "OpenRouter": "openrouter",
 }
 
 # ---------------------------------------------------------------------------
@@ -49,6 +54,7 @@ class ModelSettingsResponse(BaseModel):
     anthropic_api_key: ApiKeyStatus
     openai_api_key: ApiKeyStatus
     dashscope_api_key: ApiKeyStatus
+    openrouter_api_key: ApiKeyStatus
 
     model_config = {"from_attributes": True}
 
@@ -67,8 +73,15 @@ class UpdateModelSettingsRequest(BaseModel):
     dashscope_api_key: str | None = Field(
         default="", description="Empty string = unchanged, null = clear"
     )
+    openrouter_api_key: str | None = Field(
+        default="", description="Empty string = unchanged, null = clear"
+    )
 
 
 class ModelCatalogResponse(BaseModel):
     chat_models: list[dict[str, Any]]
     embedding_models: list[dict[str, Any]]
+
+
+class AvailableModelsResponse(BaseModel):
+    models: list[dict[str, Any]]
