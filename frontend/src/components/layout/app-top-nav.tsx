@@ -60,12 +60,10 @@ export function AppTopNav() {
   return (
     <>
       <header
-        className="sticky top-0 z-50 flex items-center h-16 px-4 lg:px-6 shrink-0"
+        className="sticky top-0 z-50 flex items-center h-16 px-4 lg:px-6 shrink-0 backdrop-blur-sm"
         style={{
           background: "var(--glass-bg)",
           borderBottom: "1px solid var(--border)",
-          backdropFilter: "blur(12px)",
-          WebkitBackdropFilter: "blur(12px)",
         }}
       >
         {/* Logo */}
@@ -162,6 +160,9 @@ export function AppTopNav() {
         <div className="md:hidden fixed inset-0 z-[60]" role="dialog" aria-modal="true">
           <div
             className="absolute inset-0 bg-black/40"
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " " || e.key === "Escape") { e.preventDefault(); setMobileOpen(false); } }}
             onClick={() => setMobileOpen(false)}
           />
           <div

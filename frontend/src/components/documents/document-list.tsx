@@ -58,8 +58,8 @@ export function DocumentList({
   if (isLoading) {
     return (
       <div className="space-y-3">
-        {[1, 2, 3].map((i) => (
-          <Skeleton key={i} className="h-20 rounded-2xl" />
+        {[1, 2, 3].map((n) => (
+          <Skeleton key={n} className="h-20 rounded-2xl" />
         ))}
       </div>
     );

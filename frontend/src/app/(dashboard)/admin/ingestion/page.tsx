@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { redirect } from "next/navigation";
 import { RefreshCw, ChevronDown, ChevronUp, ChevronRight, DollarSign, FileText, CheckCircle2, Clock, XCircle, SkipForward, FolderOpen, Folder, Check, Save, Loader2 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
@@ -652,11 +652,13 @@ export default function IngestionPage() {
   const { defaultFolder, saveDefaultFolder, isSaving } = useDefaultFolder();
 
   // Local selection state (may differ from saved default)
+  const syncedRef = useRef(false);
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   const [selectedFolderName, setSelectedFolderName] = useState<string | null>(null);
 
-  // Sync selection with saved default (render-time init, no useEffect needed)
-  if (defaultFolder && selectedFolderId === null) {
+  // Sync selection with saved default (once)
+  if (defaultFolder && !syncedRef.current) {
+    syncedRef.current = true;
     setSelectedFolderId(defaultFolder.folder_id);
     setSelectedFolderName(defaultFolder.folder_name);
   }
@@ -774,8 +776,8 @@ export default function IngestionPage() {
 
           {isLoading && jobs.length === 0 ? (
             <div className="space-y-3">
-              {[1, 2, 3].map((i) => (
-                <Skeleton key={i} className="h-24 rounded-2xl" />
+              {[1, 2, 3].map((n) => (
+                <Skeleton key={n} className="h-24 rounded-2xl" />
               ))}
             </div>
           ) : jobs.length === 0 ? (

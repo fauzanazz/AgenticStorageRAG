@@ -454,6 +454,7 @@ class LLMProvider:
             openai_api_key=_safe_decrypt(user_settings.openai_api_key_enc),
             dashscope_api_key=_safe_decrypt(user_settings.dashscope_api_key_enc),
             openrouter_api_key=_safe_decrypt(user_settings.openrouter_api_key_enc),
+            claude_oauth_token=_safe_decrypt(user_settings.claude_oauth_token_enc),
         )
 
 
@@ -473,10 +474,12 @@ class ScopedLLMProvider:
         openai_api_key: str | None = None,
         dashscope_api_key: str | None = None,
         openrouter_api_key: str | None = None,
+        claude_oauth_token: str | None = None,
     ) -> None:
         self._base = base
         self._chat_model = chat_model
         self._ingestion_model = ingestion_model
+        self._claude_oauth_token = claude_oauth_token
         self._api_keys: dict[str, str] = {}
         if anthropic_api_key:
             self._api_keys["anthropic"] = anthropic_api_key
@@ -499,6 +502,24 @@ class ScopedLLMProvider:
             return self._api_keys.get("openrouter")
         return None
 
+    def _inject_auth(self, model: str, kwargs: dict[str, Any]) -> None:
+        """Inject the appropriate auth for the model into kwargs.
+
+        For Anthropic models: OAuth Bearer token takes priority over API key.
+        Bearer auth uses extra_headers (not api_key) so LiteLLM sends
+        Authorization: Bearer instead of X-Api-Key.
+        """
+        if model.startswith("anthropic/") and self._claude_oauth_token:
+            kwargs.setdefault("extra_headers", {})
+            kwargs["extra_headers"]["Authorization"] = f"Bearer {self._claude_oauth_token}"
+        else:
+            api_key = self._get_api_key_for_model(model)
+            if api_key:
+                kwargs["api_key"] = api_key
+
+        if model.startswith("dashscope/"):
+            kwargs.setdefault("api_base", DASHSCOPE_API_BASE)
+
     async def complete(
         self,
         messages: list[dict],
@@ -508,12 +529,7 @@ class ScopedLLMProvider:
     ) -> Any:
         """Chat completion using the user's model and API key."""
         effective_model = model or self._chat_model
-        api_key = self._get_api_key_for_model(effective_model)
-        if api_key:
-            kwargs["api_key"] = api_key
-        # For DashScope, always inject the API base
-        if effective_model.startswith("dashscope/"):
-            kwargs.setdefault("api_base", DASHSCOPE_API_BASE)
+        self._inject_auth(effective_model, kwargs)
         return await self._base.complete(
             messages=messages,
             model=effective_model,
@@ -541,11 +557,7 @@ class ScopedLLMProvider:
         **kwargs: Any,
     ) -> Any:
         effective_model = model or self._chat_model
-        api_key = self._get_api_key_for_model(effective_model)
-        if api_key:
-            kwargs["api_key"] = api_key
-        if effective_model.startswith("dashscope/"):
-            kwargs.setdefault("api_base", DASHSCOPE_API_BASE)
+        self._inject_auth(effective_model, kwargs)
         return await self._base.complete_with_retry(
             messages=messages,
             model=effective_model,

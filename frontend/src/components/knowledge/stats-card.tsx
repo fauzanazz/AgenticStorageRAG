@@ -20,8 +20,8 @@ export function StatsCard({ stats }: StatsCardProps) {
   if (!stats) {
     return (
       <div className="grid grid-cols-3 lg:grid-cols-1 gap-4">
-        {[1, 2, 3].map((i) => (
-          <Skeleton key={i} className="h-24 rounded-2xl" />
+        {[1, 2, 3].map((n) => (
+          <Skeleton key={n} className="h-24 rounded-2xl" />
         ))}
       </div>
     );

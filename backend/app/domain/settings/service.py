@@ -7,6 +7,7 @@ from app.domain.settings.interfaces import AbstractSettingsService
 from app.domain.settings.models import UserModelSettings
 from app.domain.settings.schemas import (
     ApiKeyStatus,
+    ClaudeOAuthStatus,
     ModelSettingsResponse,
     UpdateModelSettingsRequest,
 )
@@ -104,4 +105,8 @@ class SettingsService(AbstractSettingsService):
             openai_api_key=ApiKeyStatus(has_key=row.openai_api_key_enc is not None),
             dashscope_api_key=ApiKeyStatus(has_key=row.dashscope_api_key_enc is not None),
             openrouter_api_key=ApiKeyStatus(has_key=row.openrouter_api_key_enc is not None),
+            claude_oauth=ClaudeOAuthStatus(
+                connected=row.claude_oauth_token_enc is not None,
+                expires_at=row.claude_oauth_token_expiry.isoformat() if row.claude_oauth_token_expiry else None,
+            ),
         )

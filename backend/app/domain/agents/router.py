@@ -29,11 +29,7 @@ from app.domain.agents.schemas import (
     ConversationResponse,
     MessageResponse,
 )
-from app.domain.agents.tools import (
-    GraphSearchTool,
-    HybridSearchTool,
-    VectorSearchTool,
-)
+from app.domain.agents.tools import HybridSearchTool
 from app.domain.auth.models import User
 from app.domain.knowledge.graph_service import GraphService
 from app.domain.knowledge.hybrid_retriever import HybridRetriever
@@ -80,8 +76,6 @@ def _build_agent(
     )
 
     tools = [
-        GraphSearchTool(graph_service),
-        VectorSearchTool(vector_service),
         HybridSearchTool(hybrid_retriever),
     ]
 

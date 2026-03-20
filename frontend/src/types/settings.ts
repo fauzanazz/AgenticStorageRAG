@@ -2,6 +2,11 @@ export interface ApiKeyStatus {
   has_key: boolean;
 }
 
+export interface ClaudeOAuthStatus {
+  connected: boolean;
+  expires_at: string | null;
+}
+
 export interface ModelSettings {
   chat_model: string;
   ingestion_model: string;
@@ -10,6 +15,7 @@ export interface ModelSettings {
   openai_api_key: ApiKeyStatus;
   dashscope_api_key: ApiKeyStatus;
   openrouter_api_key: ApiKeyStatus;
+  claude_oauth: ClaudeOAuthStatus;
 }
 
 export interface UpdateModelSettingsRequest {

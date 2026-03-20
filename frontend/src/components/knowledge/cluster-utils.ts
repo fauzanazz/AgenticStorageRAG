@@ -4,7 +4,7 @@ import type { GraphCluster, GraphEdge, GraphNode } from "@/types/knowledge";
 // Exported interfaces
 // ---------------------------------------------------------------------------
 
-export interface ClusterTreeNode extends GraphCluster {
+interface ClusterTreeNode extends GraphCluster {
   children: string[]; // child cluster IDs
   totalNodeCount: number; // total leaf nodes in this cluster (recursive)
 }
@@ -18,7 +18,7 @@ export interface FGNode {
   clusterCount?: number;
 }
 
-export interface FGLink {
+interface FGLink {
   source: string;
   target: string;
   label: string;
@@ -93,7 +93,7 @@ export function buildClusterTree(clusters: GraphCluster[]): {
  *           If a top-level cluster has no children it maps to itself.
  * Tier 3 — empty map (nodes rendered individually).
  */
-export function getNodeToClusterMap(
+function getNodeToClusterMap(
   tier: 1 | 2 | 3,
   tree: Map<string, ClusterTreeNode>,
   topLevelIds: string[],
@@ -159,7 +159,7 @@ export function getNodeToClusterMap(
  * Remaps edge endpoints using nodeToCluster, drops intra-cluster edges, and
  * merges duplicate cluster-to-cluster edges by summing weights.
  */
-export function aggregateEdges(
+function aggregateEdges(
   edges: GraphEdge[],
   nodeToCluster: Map<string, string>,
 ): FGLink[] {

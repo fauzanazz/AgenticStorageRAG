@@ -9,17 +9,13 @@ import { ApiError } from "@/lib/api-client";
 export default function RegisterPage() {
   const router = useRouter();
   const { register, loginWithOAuth } = useAuth();
-  const [fullName, setFullName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
+  const [form, setForm] = useState({ fullName: "", email: "", password: "", confirmPassword: "" });
   const [error, setError] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isOAuthLoading, setIsOAuthLoading] = useState(false);
+  const [status, setStatus] = useState<"idle" | "submitting" | "oauth">("idle");
 
   async function handleGoogleLogin() {
     setError("");
-    setIsOAuthLoading(true);
+    setStatus("oauth");
     try {
       await loginWithOAuth("google");
     } catch (err) {
@@ -28,7 +24,7 @@ export default function RegisterPage() {
       } else {
         setError("Failed to start Google sign-in");
       }
-      setIsOAuthLoading(false);
+      setStatus("idle");
     }
   }
 
@@ -36,15 +32,15 @@ export default function RegisterPage() {
     e.preventDefault();
     setError("");
 
-    if (password !== confirmPassword) {
+    if (form.password !== form.confirmPassword) {
       setError("Passwords do not match");
       return;
     }
 
-    setIsSubmitting(true);
+    setStatus("submitting");
 
     try {
-      await register(email, password, fullName);
+      await register(form.email, form.password, form.fullName);
       router.push("/");
     } catch (err) {
       if (err instanceof ApiError) {
@@ -53,7 +49,7 @@ export default function RegisterPage() {
         setError("An unexpected error occurred");
       }
     } finally {
-      setIsSubmitting(false);
+      setStatus("idle");
     }
   }
 
@@ -110,8 +106,8 @@ export default function RegisterPage() {
             id="fullName"
             type="text"
             placeholder="Jane Doe"
-            value={fullName}
-            onChange={(e) => setFullName(e.target.value)}
+            value={form.fullName}
+            onChange={(e) => setForm((f) => ({ ...f, fullName: e.target.value }))}
             required
             autoComplete="name"
             className={inputClassName}
@@ -131,8 +127,8 @@ export default function RegisterPage() {
             id="email"
             type="email"
             placeholder="you@example.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            value={form.email}
+            onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
             required
             autoComplete="email"
             className={inputClassName}
@@ -152,8 +148,8 @@ export default function RegisterPage() {
             id="password"
             type="password"
             placeholder="At least 8 characters"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            value={form.password}
+            onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
             required
             autoComplete="new-password"
             minLength={8}
@@ -174,8 +170,8 @@ export default function RegisterPage() {
             id="confirmPassword"
             type="password"
             placeholder="Repeat your password"
-            value={confirmPassword}
-            onChange={(e) => setConfirmPassword(e.target.value)}
+            value={form.confirmPassword}
+            onChange={(e) => setForm((f) => ({ ...f, confirmPassword: e.target.value }))}
             required
             autoComplete="new-password"
             minLength={8}
@@ -186,13 +182,13 @@ export default function RegisterPage() {
 
         <button
           type="submit"
-          disabled={isSubmitting}
+          disabled={status === "submitting"}
           className="w-full h-12 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
           style={{
             background: "var(--primary)",
           }}
         >
-          {isSubmitting ? "Creating account..." : "Create Account"}
+          {status === "submitting" ? "Creating account..." : "Create Account"}
         </button>
 
         <p className="text-center text-sm" style={{ color: "var(--muted-foreground)" }}>
@@ -220,7 +216,7 @@ export default function RegisterPage() {
       <button
         type="button"
         onClick={handleGoogleLogin}
-        disabled={isOAuthLoading || isSubmitting}
+        disabled={status !== "idle"}
         className="w-full h-12 rounded-xl text-sm font-medium transition-all hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3"
         style={{
           background: "var(--muted)",
@@ -246,7 +242,7 @@ export default function RegisterPage() {
             fill="#EA4335"
           />
         </svg>
-        {isOAuthLoading ? "Redirecting..." : "Sign up with Google"}
+        {status === "oauth" ? "Redirecting..." : "Sign up with Google"}
       </button>
     </div>
   );

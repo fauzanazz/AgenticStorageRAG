@@ -189,14 +189,14 @@ export function MessageBubble({ message, isStreaming }: MessageBubbleProps) {
                 const isLastStep = i === message.steps.length - 1;
                 return (
                   <ThinkingBlock
-                    key={`thinking-${i}`}
+                    key={`thinking-${step.content?.slice(0, 20) ?? i}`}
                     content={step.content || ""}
                     isActive={isLastStep && isStreaming && !hasContent}
                   />
                 );
               }
               if (step.type === "tool_call") {
-                return <ToolCallBlock key={`tool-${i}`} step={step} />;
+                return <ToolCallBlock key={`tool-${step.tool_name}-${i}`} step={step} />;
               }
               return null;
             })}

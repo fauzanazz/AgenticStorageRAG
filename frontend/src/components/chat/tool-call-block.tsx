@@ -88,9 +88,9 @@ function ResultItem({ item }: { item: ToolResultItem }) {
         )}
         {item.relationships && item.relationships.length > 0 && (
           <div className="mt-1 flex flex-wrap gap-1">
-            {item.relationships.map((rel, i) => (
+            {item.relationships.map((rel) => (
               <span
-                key={i}
+                key={`${rel.type}-${rel.target}`}
                 className="rounded px-1 py-0.5 text-[10px]"
                 style={{ background: "var(--muted)", color: "var(--muted-foreground)" }}
               >
@@ -213,7 +213,7 @@ export function ToolCallBlock({ step }: ToolCallBlockProps) {
           {hasResults ? (
             <div className="mt-2 space-y-2">
               {step.tool_results!.map((item, idx) => (
-                <ResultItem key={idx} item={item} />
+                <ResultItem key={`${item.entity_name ?? item.source ?? ''}-${idx}`} item={item} />
               ))}
             </div>
           ) : step.tool_count != null ? (

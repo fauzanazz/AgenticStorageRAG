@@ -41,6 +41,13 @@ class UserModelSettings(Base):
     dashscope_api_key_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
     openrouter_api_key_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Claude OAuth (for Claude Pro/Max subscribers — Bearer token auth)
+    claude_oauth_token_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
+    claude_oauth_refresh_token_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
+    claude_oauth_token_expiry: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

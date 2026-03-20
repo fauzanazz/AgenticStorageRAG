@@ -54,5 +54,9 @@ export function useModelSettings() {
     isSuccess: updateMutation.isSuccess,
     updateSettings: (data: UpdateModelSettingsRequest) =>
       updateMutation.mutateAsync(data),
+    refetch: () => {
+      settingsQuery.refetch();
+      availableQuery.refetch();
+    },
   };
 }

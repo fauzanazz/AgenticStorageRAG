@@ -223,7 +223,7 @@ export default function KnowledgePage() {
               </h3>
               {searchResults.map((result, index) => (
                 <div
-                  key={`${result.source}-${index}-${result.score}`}
+                  key={result.chunk_id ?? result.entity_id ?? `${result.source}-${index}`}
                   className="rounded-2xl p-4"
                   style={{
                     background: "var(--card)",

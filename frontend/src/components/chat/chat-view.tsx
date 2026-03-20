@@ -34,10 +34,12 @@ export function ChatView({ conversationId }: ChatViewProps) {
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Sync selectedModel from settings (render-time, no useEffect needed)
-  if (settings?.chat_model && !selectedModel) {
-    setSelectedModel(settings.chat_model);
-  }
+  // Sync selectedModel from settings
+  useEffect(() => {
+    if (settings?.chat_model && !selectedModel) {
+      setSelectedModel(settings.chat_model);
+    }
+  }, [settings?.chat_model, selectedModel]);
 
   // Navigate to the conversation URL when backend creates a new conversation during streaming.
   const lastNavigatedIdRef = useRef<string | undefined>(conversationId);

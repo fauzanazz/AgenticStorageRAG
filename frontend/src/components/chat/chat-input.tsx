@@ -93,6 +93,9 @@ export function ChatInput({
               {/* Backdrop */}
               <div
                 className="fixed inset-0 z-40"
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " " || e.key === "Escape") { e.preventDefault(); setShowModelMenu(false); } }}
                 onClick={() => setShowModelMenu(false)}
               />
               {/* Dropdown */}
@@ -159,6 +162,7 @@ export function ChatInput({
           placeholder={placeholder}
           disabled={disabled}
           rows={1}
+          aria-label="Chat message"
           className="max-h-[200px] min-h-[40px] flex-1 resize-none bg-transparent py-2 text-sm outline-none placeholder:text-outline-variant"
         />
 

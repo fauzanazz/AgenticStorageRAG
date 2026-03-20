@@ -9,15 +9,13 @@ import { ApiError } from "@/lib/api-client";
 export default function LoginPage() {
   const router = useRouter();
   const { login, loginWithOAuth } = useAuth();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [form, setForm] = useState({ email: "", password: "" });
   const [error, setError] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isOAuthLoading, setIsOAuthLoading] = useState(false);
+  const [status, setStatus] = useState<"idle" | "submitting" | "oauth">("idle");
 
   async function handleGoogleLogin() {
     setError("");
-    setIsOAuthLoading(true);
+    setStatus("oauth");
     try {
       await loginWithOAuth("google");
     } catch (err) {
@@ -26,17 +24,17 @@ export default function LoginPage() {
       } else {
         setError("Failed to start Google sign-in");
       }
-      setIsOAuthLoading(false);
+      setStatus("idle");
     }
   }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError("");
-    setIsSubmitting(true);
+    setStatus("submitting");
 
     try {
-      await login(email, password);
+      await login(form.email, form.password);
       router.push("/");
     } catch (err) {
       if (err instanceof ApiError) {
@@ -45,7 +43,7 @@ export default function LoginPage() {
         setError("An unexpected error occurred");
       }
     } finally {
-      setIsSubmitting(false);
+      setStatus("idle");
     }
   }
 
@@ -95,8 +93,8 @@ export default function LoginPage() {
             id="email"
             type="email"
             placeholder="you@example.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            value={form.email}
+            onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
             required
             autoComplete="email"
             className="w-full h-12 rounded-xl px-4 text-sm placeholder:text-outline-variant outline-none focus:ring-2 focus:ring-primary/50 transition-all"
@@ -119,8 +117,8 @@ export default function LoginPage() {
             id="password"
             type="password"
             placeholder="Enter your password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            value={form.password}
+            onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
             required
             autoComplete="current-password"
             minLength={8}
@@ -134,13 +132,13 @@ export default function LoginPage() {
 
         <button
           type="submit"
-          disabled={isSubmitting}
+          disabled={status === "submitting"}
           className="w-full h-12 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
           style={{
             background: "var(--primary)",
           }}
         >
-          {isSubmitting ? "Signing in..." : "Sign In"}
+          {status === "submitting" ? "Signing in..." : "Sign In"}
         </button>
 
         <p className="text-center text-sm" style={{ color: "var(--muted-foreground)" }}>
@@ -168,7 +166,7 @@ export default function LoginPage() {
       <button
         type="button"
         onClick={handleGoogleLogin}
-        disabled={isOAuthLoading || isSubmitting}
+        disabled={status !== "idle"}
         className="w-full h-12 rounded-xl text-sm font-medium transition-all hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3"
         style={{
           background: "var(--muted)",
@@ -194,7 +192,7 @@ export default function LoginPage() {
             fill="#EA4335"
           />
         </svg>
-        {isOAuthLoading ? "Redirecting..." : "Sign in with Google"}
+        {status === "oauth" ? "Redirecting..." : "Sign in with Google"}
       </button>
     </div>
   );

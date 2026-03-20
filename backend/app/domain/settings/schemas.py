@@ -47,6 +47,11 @@ class ApiKeyStatus(BaseModel):
     has_key: bool
 
 
+class ClaudeOAuthStatus(BaseModel):
+    connected: bool
+    expires_at: str | None = None
+
+
 class ModelSettingsResponse(BaseModel):
     chat_model: str
     ingestion_model: str
@@ -55,6 +60,7 @@ class ModelSettingsResponse(BaseModel):
     openai_api_key: ApiKeyStatus
     dashscope_api_key: ApiKeyStatus
     openrouter_api_key: ApiKeyStatus
+    claude_oauth: ClaudeOAuthStatus
 
     model_config = {"from_attributes": True}
 

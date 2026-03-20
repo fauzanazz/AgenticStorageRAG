@@ -53,7 +53,7 @@ export default function OAuthCallbackPage() {
     }
 
     handleCallback();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [router, refreshAuth]);
 
   if (error) {
     return (
