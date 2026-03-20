@@ -1,7 +1,7 @@
 # DingDong RAG - Makefile
 # Run `make help` to see all available commands.
 
-.PHONY: help dev dev-supabase dev-backend dev-worker dev-frontend test test-backend test-frontend lint lint-backend lint-frontend build migrate migrate-local migration seed graph-schema graph-seed graph-seed-clean graph-export clean down logs ps
+.PHONY: help dev dev-supabase dev-backend dev-worker dev-frontend test test-backend test-frontend lint lint-backend lint-frontend typecheck typecheck-frontend build migrate migrate-local migration seed graph-schema graph-seed graph-seed-clean graph-export clean down logs ps
 
 # Default
 help: ## Show this help message
@@ -49,6 +49,11 @@ lint-backend: ## Lint + format + type-check backend
 
 lint-frontend: ## Lint frontend
 	cd frontend && npm run lint
+
+typecheck-frontend: ## Type-check frontend with tsc
+	cd frontend && pnpm tsc --noEmit
+
+typecheck: typecheck-frontend ## Run all type checks
 
 # --- Database ---
 migrate: ## Run migrations against Supabase (uses DATABASE_URL from .env)

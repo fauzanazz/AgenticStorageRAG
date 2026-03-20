@@ -4,6 +4,7 @@ Creates and configures the FastAPI application instance.
 Use create_app() to get a fully configured application.
 """
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from collections.abc import AsyncGenerator
@@ -22,14 +23,21 @@ from app.infra.llm import llm_provider
 from app.infra.middleware import RequestLoggingMiddleware
 from app.scripts.graph_schema import apply_schema
 from app.domain.auth.router import router as auth_router
+from app.domain.auth.oauth.router import router as oauth_router
 from app.domain.documents.router import router as documents_router
 from app.domain.knowledge.router import router as knowledge_router
 from app.domain.agents.router import router as agents_router
 from app.domain.ingestion.router import router as ingestion_router
 from app.domain.settings.router import router as settings_router
+from app.domain.auth.models import OAuthAccount  # noqa: F401 — needed for Alembic
 from app.domain.settings.models import UserModelSettings  # noqa: F401 — needed for Alembic
 
 logger = logging.getLogger(__name__)
+
+# Timeout (seconds) for each infra connect/close during lifespan.
+# Prevents reload-triggered shutdowns from hanging indefinitely.
+_SHUTDOWN_TIMEOUT = 5.0
+_STARTUP_CONNECT_TIMEOUT = 10.0
 
 
 async def _auto_seed_graph_if_empty() -> None:
@@ -80,6 +88,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     Handles startup and shutdown events for external connections
     (database, Neo4j, Redis, Storage, LLM).
+
+    All connect/close calls are wrapped with timeouts so that
+    uvicorn --reload never freezes waiting for a hung driver.
     """
     settings = get_settings()
     logger.info("Starting %s v%s (%s)", settings.app_name, settings.app_version, settings.environment)
@@ -90,16 +101,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     neo4j_connected = False
     try:
-        await neo4j_client.connect()
+        await asyncio.wait_for(
+            neo4j_client.connect(), timeout=_STARTUP_CONNECT_TIMEOUT,
+        )
         neo4j_connected = True
+    except asyncio.TimeoutError:
+        logger.warning("Neo4j connection timed out after %.0fs (non-fatal)", _STARTUP_CONNECT_TIMEOUT)
     except Exception as e:
         logger.warning("Neo4j connection failed (non-fatal): %s", e)
 
     # Apply Neo4j schema (indexes/constraints) and auto-seed if graph is empty
     if neo4j_connected:
         try:
-            await apply_schema(neo4j_client.driver)
+            await asyncio.wait_for(
+                apply_schema(neo4j_client.driver), timeout=_STARTUP_CONNECT_TIMEOUT,
+            )
             logger.info("Neo4j schema applied")
+        except asyncio.TimeoutError:
+            logger.warning("Neo4j schema init timed out (non-fatal)")
         except Exception as e:
             logger.warning("Neo4j schema init failed (non-fatal): %s", e)
 
@@ -109,7 +128,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.warning("Neo4j auto-seed failed (non-fatal): %s", e)
 
     try:
-        await redis_client.connect()
+        await asyncio.wait_for(
+            redis_client.connect(), timeout=_STARTUP_CONNECT_TIMEOUT,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("Redis connection timed out after %.0fs (non-fatal)", _STARTUP_CONNECT_TIMEOUT)
     except Exception as e:
         logger.warning("Redis connection failed (non-fatal): %s", e)
 
@@ -123,10 +146,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     yield
 
-    # Shutdown infrastructure
-    await close_db()
-    await neo4j_client.close()
-    await redis_client.close()
+    # Shutdown infrastructure — run all teardowns concurrently with a hard
+    # timeout so that a single hung driver cannot freeze the entire process
+    # (critical for uvicorn --reload).
+    async def _safe_close(name: str, coro) -> None:  # noqa: ANN001
+        try:
+            await asyncio.wait_for(coro, timeout=_SHUTDOWN_TIMEOUT)
+        except asyncio.TimeoutError:
+            logger.warning("Shutdown: %s close timed out after %.0fs — skipping", name, _SHUTDOWN_TIMEOUT)
+        except Exception as e:
+            logger.warning("Shutdown: %s close failed: %s", name, e)
+
+    await asyncio.gather(
+        _safe_close("database", close_db()),
+        _safe_close("neo4j", neo4j_client.close()),
+        _safe_close("redis", redis_client.close()),
+    )
     logger.info("Application shutdown complete")
 
 
@@ -154,12 +189,23 @@ def create_app() -> FastAPI:
         allow_headers=settings.cors_allow_headers,
     )
 
-    # Health check endpoint with full service status
+    # Health check endpoint with quick Redis ping
     @app.get(f"{settings.api_prefix}/health")
     async def health_check() -> dict[str, Any]:
-        """Health check endpoint for monitoring and load balancers."""
+        """Health check endpoint for monitoring and load balancers.
+
+        Performs a fast Redis ping to detect degraded state.
+        """
+        status = "healthy"
+        try:
+            pong = await redis_client.client.ping()
+            if not pong:
+                status = "degraded"
+        except Exception:
+            status = "degraded"
+
         return {
-            "status": "healthy",
+            "status": status,
             "version": settings.app_version,
             "environment": settings.environment,
         }
@@ -199,6 +245,7 @@ def create_app() -> FastAPI:
 
     # Domain routers
     app.include_router(auth_router, prefix=settings.api_prefix)
+    app.include_router(oauth_router, prefix=settings.api_prefix)
     app.include_router(documents_router, prefix=settings.api_prefix)
     app.include_router(knowledge_router, prefix=settings.api_prefix)
     app.include_router(agents_router, prefix=settings.api_prefix)

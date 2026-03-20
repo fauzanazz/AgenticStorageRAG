@@ -144,13 +144,13 @@ services:
     profiles: ["local"]
     ports:
       - "3000:3000"
+    command: ["npx", "next", "dev", "--webpack"]
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
       - WATCHPACK_POLLING=true
     volumes:
       - ./frontend:/app
       - /app/node_modules
-      - /app/.next
     depends_on:
       - backend-local
     restart: unless-stopped
@@ -198,6 +198,10 @@ services:
       --queues=documents,ingestion
       --concurrency=4
       --pool=threads
+    deploy:
+      resources:
+        limits:
+          memory: 4G
     environment:
       - DEBUG=true
       - ENVIRONMENT=development
@@ -225,13 +229,13 @@ services:
     profiles: ["supabase"]
     ports:
       - "3000:3000"
+    command: ["npx", "next", "dev", "--webpack"]
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
       - WATCHPACK_POLLING=true
     volumes:
       - ./frontend:/app
       - /app/node_modules
-      - /app/.next
     depends_on:
       - backend-supabase
     restart: unless-stopped

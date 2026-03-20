@@ -19,8 +19,11 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 WORKDIR /app
 
 # System deps needed to compile some packages (e.g. cryptography, asyncpg)
+# poppler-utils provides pdftotext; qpdf provides page splitting
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    poppler-utils \
+    qpdf \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy only the dependency manifest + lockfile.
@@ -53,9 +56,11 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 # Non-root user for security
 RUN groupadd -r appuser && useradd -r -g appuser appuser
 
-# Minimal runtime system dep (libpq for asyncpg)
+# Minimal runtime system dep (libpq for asyncpg, poppler-utils for pdftotext, qpdf for page splitting)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
+    poppler-utils \
+    qpdf \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

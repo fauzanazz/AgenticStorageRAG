@@ -10,6 +10,7 @@ API server share a single, consistent usage ledger.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from dataclasses import dataclass, field
@@ -27,8 +28,19 @@ logger = logging.getLogger(__name__)
 _REDIS_USAGE_KEY = "llm:usage:totals"
 _REDIS_MODEL_PREFIX = "llm:usage:model:"
 
+# Timeout (seconds) for individual LLM calls — prevents indefinite hangs.
+_LLM_TIMEOUT = 60.0
+
 # DashScope international endpoint (Singapore region)
 DASHSCOPE_API_BASE = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+
+# Fallback per-token pricing (USD) for models where LiteLLM returns $0.
+# Format: { model: (input_per_token, output_per_token) }
+# Same rates as dashscope/qwen-max per DashScope docs.
+_FALLBACK_PRICING: dict[str, tuple[float, float]] = {
+    "dashscope/qwen3-max": (1.6e-06, 6.4e-06),
+    "dashscope/qwen3-plus": (0.4e-06, 1.2e-06),
+}
 
 
 @dataclass
@@ -88,11 +100,15 @@ class LLMProvider:
         if settings.gemini_api_key:
             # LiteLLM reads GEMINI_API_KEY env var for the gemini/ prefix
             os.environ["GEMINI_API_KEY"] = settings.gemini_api_key
+        if settings.openrouter_api_key:
+            # LiteLLM reads OPENROUTER_API_KEY env var for the openrouter/ prefix
+            os.environ["OPENROUTER_API_KEY"] = settings.openrouter_api_key
 
         # Configure LiteLLM behavior
-        litellm.set_verbose = settings.debug
+        litellm.set_verbose = False  # Disable verbose logging to reduce memory from log strings
         litellm.drop_params = True  # Drop unsupported params silently
         litellm.modify_params = True  # Auto-adapt params per provider
+        litellm.cache = None  # Disable response caching to prevent memory accumulation
 
         self._initialized = True
         logger.info(
@@ -152,15 +168,28 @@ class LLMProvider:
         target_model = model or self.default_model
 
         try:
-            response = await acompletion(
-                model=target_model,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                stream=stream,
-                **kwargs,
-            )
-            if not stream:
+            if stream:
+                response = await acompletion(
+                    model=target_model,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    stream=True,
+                    timeout=_LLM_TIMEOUT,
+                    **kwargs,
+                )
+            else:
+                response = await asyncio.wait_for(
+                    acompletion(
+                        model=target_model,
+                        messages=messages,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        stream=False,
+                        **kwargs,
+                    ),
+                    timeout=_LLM_TIMEOUT,
+                )
                 self._record_usage(target_model, response)
             return response
 
@@ -175,17 +204,35 @@ class LLMProvider:
                 self.fallback_model,
             )
 
-            response = await acompletion(
-                model=self.fallback_model,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                stream=stream,
-                **kwargs,
-            )
-            if not stream:
-                self._record_usage(self.fallback_model, response)
-            return response
+            try:
+                if stream:
+                    response = await acompletion(
+                        model=self.fallback_model,
+                        messages=messages,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        stream=True,
+                        timeout=_LLM_TIMEOUT,
+                        **kwargs,
+                    )
+                else:
+                    response = await asyncio.wait_for(
+                        acompletion(
+                            model=self.fallback_model,
+                            messages=messages,
+                            temperature=temperature,
+                            max_tokens=max_tokens,
+                            stream=False,
+                            **kwargs,
+                        ),
+                        timeout=_LLM_TIMEOUT,
+                    )
+                    self._record_usage(self.fallback_model, response)
+                return response
+            except asyncio.TimeoutError:
+                raise asyncio.TimeoutError(
+                    f"LLM call to fallback model {self.fallback_model} timed out after {_LLM_TIMEOUT}s"
+                )
 
     def _record_usage(self, model: str, response: ModelResponse) -> None:
         """Extract token usage and cost from a LiteLLM response and accumulate.
@@ -202,15 +249,18 @@ class LLMProvider:
             try:
                 cost = litellm_completion_cost(completion_response=response)
             except Exception:
-                # Cost lookup may fail for providers without pricing data
                 cost = 0.0
+
+            # Fallback: compute from known rates if LiteLLM returned 0
+            if cost == 0.0:
+                pricing = _FALLBACK_PRICING.get(model)
+                if pricing:
+                    cost = input_tokens * pricing[0] + output_tokens * pricing[1]
 
             # In-memory accumulation (for local process reads)
             self.usage.record(model, input_tokens, output_tokens, cost)
 
             # Async Redis push — fire and forget via the event loop
-            import asyncio
-
             try:
                 loop = asyncio.get_running_loop()
                 loop.create_task(self._push_usage_to_redis(model, input_tokens, output_tokens, cost))
@@ -304,6 +354,7 @@ class LLMProvider:
             "anthropic_key_set": bool(settings.anthropic_api_key),
             "openai_key_set": bool(settings.openai_api_key),
             "gemini_key_set": bool(settings.gemini_api_key),
+            "openrouter_key_set": bool(settings.openrouter_api_key),
         }
 
     def get_cost_summary(self) -> dict[str, Any]:
@@ -402,6 +453,7 @@ class LLMProvider:
             anthropic_api_key=_safe_decrypt(user_settings.anthropic_api_key_enc),
             openai_api_key=_safe_decrypt(user_settings.openai_api_key_enc),
             dashscope_api_key=_safe_decrypt(user_settings.dashscope_api_key_enc),
+            openrouter_api_key=_safe_decrypt(user_settings.openrouter_api_key_enc),
         )
 
 
@@ -420,6 +472,7 @@ class ScopedLLMProvider:
         anthropic_api_key: str | None = None,
         openai_api_key: str | None = None,
         dashscope_api_key: str | None = None,
+        openrouter_api_key: str | None = None,
     ) -> None:
         self._base = base
         self._chat_model = chat_model
@@ -431,6 +484,8 @@ class ScopedLLMProvider:
             self._api_keys["openai"] = openai_api_key
         if dashscope_api_key:
             self._api_keys["dashscope"] = dashscope_api_key
+        if openrouter_api_key:
+            self._api_keys["openrouter"] = openrouter_api_key
 
     def _get_api_key_for_model(self, model: str) -> str | None:
         """Return the user's API key for the given model's provider prefix."""
@@ -440,6 +495,8 @@ class ScopedLLMProvider:
             return self._api_keys.get("openai")
         if model.startswith("dashscope/"):
             return self._api_keys.get("dashscope")
+        if model.startswith("openrouter/"):
+            return self._api_keys.get("openrouter")
         return None
 
     async def complete(

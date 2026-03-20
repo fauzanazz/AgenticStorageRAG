@@ -21,7 +21,7 @@ class TestHealthEndpoint:
         """Health response should contain status, version, and environment."""
         response = self.client.get("/api/v1/health")
         data = response.json()
-        assert data["status"] == "healthy"
+        assert data["status"] in ("healthy", "degraded")
         assert "version" in data
         assert "environment" in data
 

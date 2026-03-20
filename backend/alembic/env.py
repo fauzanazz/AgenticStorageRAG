@@ -74,10 +74,16 @@ async def run_async_migrations() -> None:
         poolclass=pool.NullPool,
         # Supabase uses pgbouncer in transaction mode, which doesn't support
         # prepared statements. Disable asyncpg's statement cache.
-        connect_args={"statement_cache_size": 0, "prepared_statement_cache_size": 0},
+        connect_args={
+            "statement_cache_size": 0,
+            "prepared_statement_cache_size": 0,
+            "server_settings": {"statement_timeout": "120000"},  # 120s for DDL
+        },
     )
 
     async with connectable.connect() as connection:
+        # Override Supabase's default statement timeout for DDL migrations
+        await connection.exec_driver_sql("SET statement_timeout = '120s'")
         await connection.run_sync(do_run_migrations)
 
     await connectable.dispose()

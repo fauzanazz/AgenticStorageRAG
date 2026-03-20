@@ -69,6 +69,11 @@ def create_celery_app() -> Celery:
         # Reject and requeue on worker crash (SIGKILL / OOM)
         task_reject_on_worker_lost=True,
 
+        # Only prefetch 1 task per thread — prevents the worker from grabbing
+        # multiple ingestion tasks and running them concurrently, which causes
+        # OOM when 4 IngestionOrchestrators run in parallel.
+        worker_prefetch_multiplier=1,
+
         # Serialisation
         task_serializer="json",
         result_serializer="json",
@@ -99,8 +104,11 @@ def _init_worker_resources(**kwargs: object) -> None:
     *forked* child processes — with threads there are no forks, so that
     signal never runs.
     """
+    import asyncio
+
     from app.infra.database import init_db
     from app.infra.llm import llm_provider
+    from app.infra.neo4j_client import neo4j_client
     from app.infra.storage import storage_client
 
     # Register ALL domain models with Base.metadata before init_db() creates the
@@ -119,4 +127,68 @@ def _init_worker_resources(**kwargs: object) -> None:
     storage_client.connect()
     llm_provider.initialize()
 
+    # Neo4j connect() is async — run it in a one-shot event loop.
+    # The async driver manages its own connection pool internally and is
+    # safe to use from the per-task asyncio.run() loops that threads create.
+    try:
+        asyncio.run(neo4j_client.connect())
+    except Exception as exc:
+        logger.warning("Neo4j connection failed during worker init (non-fatal): %s", exc)
+
+    # Fail any ingestion jobs that were left in an active state by a previous
+    # worker process (e.g. container restart killed a running task).  Without
+    # this, zombie jobs block the UI and prevent new triggers until someone
+    # manually cleans them up or the stale-job detector runs on the next
+    # trigger_ingestion() call.
+    try:
+        asyncio.run(_fail_zombie_ingestion_jobs())
+    except Exception as exc:
+        logger.warning("Zombie job cleanup failed (non-fatal): %s", exc)
+
     logger.info("Worker process resources initialised")
+
+
+async def _fail_zombie_ingestion_jobs() -> None:
+    """Mark any active ingestion jobs as FAILED on worker startup.
+
+    When the worker container restarts, any in-flight Celery tasks are lost.
+    Their DB rows remain in PENDING/SCANNING/PROCESSING indefinitely.  This
+    function cleans them up immediately so the admin UI reflects reality and
+    new ingestion triggers are not blocked.
+    """
+    from datetime import datetime, timezone
+
+    from sqlalchemy import update as sa_update
+
+    from app.domain.ingestion.models import IngestionJob, IngestionStatus
+    from app.infra.database import _session_factory
+
+    if _session_factory is None:
+        return
+
+    active_statuses = [
+        IngestionStatus.PENDING,
+        IngestionStatus.SCANNING,
+        IngestionStatus.PROCESSING,
+    ]
+
+    async with _session_factory() as db:
+        stmt = (
+            sa_update(IngestionJob)
+            .where(IngestionJob.status.in_(active_statuses))
+            .values(
+                status=IngestionStatus.FAILED,
+                error_message="Auto-failed: worker restarted while job was in-flight",
+                completed_at=datetime.now(timezone.utc),
+            )
+            .execution_options(synchronize_session=False)
+        )
+        result = await db.execute(stmt)
+        if result.rowcount:
+            await db.commit()
+            logger.warning(
+                "Auto-failed %d zombie ingestion job(s) on worker startup",
+                result.rowcount,
+            )
+        else:
+            logger.info("No zombie ingestion jobs found on startup")

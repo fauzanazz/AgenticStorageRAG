@@ -37,6 +37,7 @@ def create_engine() -> "AsyncEngine":  # noqa: F821
         pool_pre_ping=True,
         pool_size=10,
         max_overflow=20,
+        pool_recycle=300,  # Recycle connections every 5 min to avoid stale pgbouncer conns
         # Supabase uses pgbouncer in transaction mode, which doesn't support
         # prepared statements. Disable asyncpg's statement cache.
         connect_args={"statement_cache_size": 0, "prepared_statement_cache_size": 0},
@@ -95,6 +96,7 @@ def build_session_factory(
         pool_pre_ping=True,
         pool_size=5,
         max_overflow=10,
+        pool_recycle=300,
         connect_args={"statement_cache_size": 0, "prepared_statement_cache_size": 0},
     )
     session_factory = create_session_factory(engine)

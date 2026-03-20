@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     cors_allow_headers: list[str] = ["Authorization", "Content-Type"]
 
     # --- Auth ---
+    frontend_url: str = "http://localhost:3000"  # For OAuth callback redirects
     jwt_secret_key: str = "change-me-in-production"
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 30
@@ -57,13 +58,14 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     dashscope_api_key: str = ""  # Alibaba Cloud DashScope (Qwen models)
     gemini_api_key: str = ""  # Google Gemini (via LiteLLM gemini/ prefix)
+    openrouter_api_key: str = ""  # OpenRouter (via LiteLLM openrouter/ prefix)
     default_model: str = "dashscope/qwen3-max"
     fallback_model: str = "anthropic/claude-sonnet-4-20250514"
     # Dedicated model for ingestion/KG-extraction tasks.
     # These are pure JSON-structured-output tasks that do NOT need frontier
     # reasoning — a fast, cheap model with high throughput limits is optimal.
-    # gpt-4o-mini: $0.15/1M input — 16× cheaper than gpt-4o, very high rate limits.
-    ingestion_model: str = "openai/gpt-4o-mini"
+    # gpt-5-mini: cheaper than gpt-4o-mini, high rate limits.
+    ingestion_model: str = "openai/gpt-5-mini"
 
     # --- Embeddings ---
     # LiteLLM model string for embedding generation.
@@ -91,7 +93,16 @@ class Settings(BaseSettings):
     # --- Worker / Ingestion concurrency ---
     # Number of worker replicas is controlled via docker-compose deploy.replicas
     # (default: 2 -- each handles one ingestion job at a time)
-    file_concurrency: int = 3  # Max parallel files within a single orchestrator run
+    file_concurrency: int = 1  # Sequential file processing to prevent OOM on large PDFs
+    max_ingest_file_size_mb: int = 50  # Drive files larger than this are skipped
+
+    # --- Pipeline stage concurrency ---
+    pipeline_download_workers: int = 5
+    pipeline_extract_workers: int = 3
+    pipeline_embed_workers: int = 2
+    pipeline_embed_batch_size: int = 100  # Max chunks per embedding API call
+    pipeline_embed_max_retries: int = 2
+    pipeline_queue_multiplier: int = 2  # Queue maxsize = workers * multiplier
 
 
 @lru_cache
