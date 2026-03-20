@@ -28,6 +28,7 @@ class Citation(BaseModel):
     page_number: int | None = None
     source_type: str = "vector"  # vector | graph | both
     relevance_score: float = 0.0
+    source_url: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -97,6 +98,9 @@ class ChatRequest(BaseModel):
     conversation_id: uuid.UUID | None = Field(
         None, description="Existing conversation ID, or None to create new"
     )
+    model: str | None = Field(
+        None, description="Model override for this request (e.g. 'anthropic/claude-sonnet-4-20250514')"
+    )
     vector_weight: float = Field(
         0.5, ge=0.0, le=1.0,
         description="Weight for vector vs graph retrieval"
@@ -107,7 +111,7 @@ class ChatStreamEvent(BaseModel):
     """Server-sent event for streaming chat responses."""
 
     event: str = Field(
-        ..., description="Event type: token | citation | tool_call | done | error"
+        ..., description="Event type: thinking | tool_start | tool_result | token | citation | done | error"
     )
     data: str = Field("", description="Event payload")
 
@@ -119,3 +123,43 @@ class AgentToolCall(BaseModel):
     arguments: dict = {}
     result_summary: str = ""
     duration_ms: int = 0
+
+
+# ---------------------------------------------------------------------------
+# Friendly tool name mapping (for narrative UX)
+# ---------------------------------------------------------------------------
+
+TOOL_FRIENDLY_NAMES: dict[str, str] = {
+    "hybrid_search": "Searching documents and knowledge graph",
+    "vector_search": "Searching documents",
+    "graph_search": "Searching knowledge graph",
+}
+
+
+def friendly_tool_name(tool_name: str) -> str:
+    """Return a user-friendly label for a tool name."""
+    return TOOL_FRIENDLY_NAMES.get(tool_name, f"Using {tool_name}")
+
+
+# ---------------------------------------------------------------------------
+# Narrative SSE event data schemas
+# ---------------------------------------------------------------------------
+
+
+class ToolStartData(BaseModel):
+    """Payload for a ``tool_start`` SSE event."""
+
+    tool_name: str
+    tool_label: str  # friendly name
+    arguments: dict = {}
+
+
+class ToolResultData(BaseModel):
+    """Payload for a ``tool_result`` SSE event."""
+
+    tool_name: str
+    tool_label: str
+    summary: str = ""
+    count: int = 0
+    duration_ms: int = 0
+    error: str | None = None

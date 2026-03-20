@@ -168,7 +168,7 @@ class ChatService(IChatService):
             role=role,
             content=content,
             citations_json=(
-                json.dumps([c.model_dump() for c in citations])
+                json.dumps([c.model_dump(mode="json") for c in citations])
                 if citations
                 else None
             ),

@@ -11,7 +11,7 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -52,6 +52,7 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 def _build_agent(
     db: AsyncSession,
     user_settings: UserModelSettings | None = None,
+    model_override: str | None = None,
 ) -> RAGAgent:
     """Build the RAG agent with all tools wired up.
 
@@ -85,7 +86,13 @@ def _build_agent(
     ]
 
     chat_service = ChatService(db=db)
-    return RAGAgent(llm=effective_llm, chat_service=chat_service, tools=tools)
+    return RAGAgent(
+        llm=effective_llm,
+        chat_service=chat_service,
+        tools=tools,
+        db=db,
+        model_override=model_override,
+    )
 
 
 def _get_chat_service(db: AsyncSession = Depends(get_db)) -> ChatService:
@@ -97,7 +104,8 @@ def _get_chat_service(db: AsyncSession = Depends(get_db)) -> ChatService:
 
 @router.post("/stream")
 async def chat_stream(
-    request: ChatRequest,
+    chat_request: ChatRequest,
+    request: Request,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     user_settings: UserModelSettings | None = Depends(get_user_model_settings),
@@ -115,11 +123,18 @@ async def chat_stream(
     - `done`: Final event with metadata
     - `error`: Error event
     """
-    agent = _build_agent(db, user_settings=user_settings)
+    agent = _build_agent(db, user_settings=user_settings, model_override=chat_request.model)
 
     async def event_generator():
-        async for event in agent.chat(request, user.id):
-            yield f"event: {event.event}\ndata: {event.data}\n\n"
+        async for event in agent.chat(chat_request, user.id):
+            if await request.is_disconnected():
+                logger.info("SSE client disconnected, stopping stream")
+                break
+            # SSE spec: multi-line data needs each line prefixed with "data: "
+            data_lines = "\n".join(
+                f"data: {line}" for line in event.data.split("\n")
+            )
+            yield f"event: {event.event}\n{data_lines}\n\n"
 
     return StreamingResponse(
         event_generator(),
@@ -146,7 +161,7 @@ async def chat_message(
 
     Useful for programmatic clients that don't support SSE.
     """
-    agent = _build_agent(db, user_settings=user_settings)
+    agent = _build_agent(db, user_settings=user_settings, model_override=request.model)
     chat_service = ChatService(db=db)
 
     # Collect all events
