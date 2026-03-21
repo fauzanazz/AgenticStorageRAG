@@ -5,6 +5,7 @@ export type MessageRole = "user" | "assistant" | "system";
 export interface Citation {
   document_id: string;
   document_name: string;
+  entity_id?: string;
   chunk_text: string;
   page_number?: number;
   relevance_score: number;
@@ -95,6 +96,7 @@ export interface DonePayload {
 export interface CitationPayload {
   document_id?: string;
   document_name?: string;
+  entity_id?: string;
   entity_name?: string;
   content_snippet?: string;
   page_number?: number;

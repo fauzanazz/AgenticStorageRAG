@@ -82,7 +82,7 @@ class IngestionJob(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
-        default=uuid.uuid7,
+        default=uuid.uuid4,
     )
     triggered_by: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -170,7 +170,7 @@ class IndexedFile(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
-        default=uuid.uuid7,
+        default=uuid.uuid4,
     )
     job_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),

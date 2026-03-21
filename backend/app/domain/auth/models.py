@@ -29,7 +29,7 @@ class User(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
-        default=uuid.uuid7,
+        default=uuid.uuid4,
     )
     email: Mapped[str] = mapped_column(
         String(255),
@@ -92,7 +92,7 @@ class OAuthAccount(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
-        default=uuid.uuid7,
+        default=uuid.uuid4,
     )
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),

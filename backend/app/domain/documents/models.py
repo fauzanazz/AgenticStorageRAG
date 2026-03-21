@@ -53,7 +53,7 @@ class Document(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
-        default=uuid.uuid7,
+        default=uuid.uuid4,
     )
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -154,7 +154,7 @@ class DocumentChunk(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
-        default=uuid.uuid7,
+        default=uuid.uuid4,
     )
     document_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),

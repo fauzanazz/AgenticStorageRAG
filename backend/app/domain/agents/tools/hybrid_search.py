@@ -93,6 +93,7 @@ class HybridSearchTool(IAgentTool):
                     "document_id": str(r.document_id) if r.document_id else None,
                     "chunk_id": str(r.chunk_id) if r.chunk_id else None,
                     "entity_id": str(r.entity_id) if r.entity_id else None,
+                    "entity_name": r.entity_name,
                     "metadata": r.metadata,
                 }
                 formatted.append(entry)

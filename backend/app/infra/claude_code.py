@@ -289,6 +289,7 @@ class ClaudeCodeAgent(IRAGAgent):
 
             # State for streaming tool lifecycle
             accumulated_answer = ""
+            narrative_steps: list[dict[str, Any]] = []
             emitted_tool_idx = 0
             in_tool = False
             current_tool_name: str | None = None
@@ -335,6 +336,21 @@ class ClaudeCodeAgent(IRAGAgent):
 
                                 label = friendly_tool_name(current_tool_name)
 
+                                # Flush pre-tool text as narration
+                                if accumulated_answer.strip():
+                                    narrative_steps.append({"type": "narration", "content": accumulated_answer})
+                                    accumulated_answer = ""
+
+                                narrative_steps.append(
+                                    {
+                                        "type": "tool_call",
+                                        "tool_name": current_tool_name,
+                                        "tool_label": label,
+                                        "tool_args": tool_args,
+                                        "tool_status": "running",
+                                    }
+                                )
+
                                 yield ChatStreamEvent(
                                     event="tool_start",
                                     data=json.dumps(
@@ -348,6 +364,18 @@ class ClaudeCodeAgent(IRAGAgent):
 
                                 while emitted_tool_idx < len(tool_call_records):
                                     rec = tool_call_records[emitted_tool_idx]
+                                    # Update the corresponding narrative step
+                                    for step in reversed(narrative_steps):
+                                        if (
+                                            step["type"] == "tool_call"
+                                            and step.get("tool_name") == rec.tool_name
+                                            and step.get("tool_status") == "running"
+                                        ):
+                                            step["tool_status"] = "done"
+                                            step["tool_summary"] = rec.result_summary
+                                            step["tool_duration_ms"] = rec.duration_ms
+                                            step["tool_results"] = rec.results
+                                            break
                                     yield ChatStreamEvent(
                                         event="tool_result",
                                         data=json.dumps(
@@ -396,6 +424,17 @@ class ClaudeCodeAgent(IRAGAgent):
             # Emit any remaining tool_result events
             while emitted_tool_idx < len(tool_call_records):
                 rec = tool_call_records[emitted_tool_idx]
+                for step in reversed(narrative_steps):
+                    if (
+                        step["type"] == "tool_call"
+                        and step.get("tool_name") == rec.tool_name
+                        and step.get("tool_status") == "running"
+                    ):
+                        step["tool_status"] = "done"
+                        step["tool_summary"] = rec.result_summary
+                        step["tool_duration_ms"] = rec.duration_ms
+                        step["tool_results"] = rec.results
+                        break
                 yield ChatStreamEvent(
                     event="tool_result",
                     data=json.dumps(
@@ -432,6 +471,7 @@ class ClaudeCodeAgent(IRAGAgent):
                 tool_calls=[tc.model_dump() for tc in tool_call_records]
                 if tool_call_records
                 else None,
+                steps=narrative_steps if narrative_steps else None,
             )
             yield ChatStreamEvent(
                 event="message_created",

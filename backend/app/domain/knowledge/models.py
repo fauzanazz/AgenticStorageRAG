@@ -25,7 +25,7 @@ class DocumentEmbedding(Base):
 
     __tablename__ = "document_embeddings"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid7)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     chunk_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("document_chunks.id", ondelete="CASCADE"),
@@ -62,7 +62,7 @@ class KnowledgeEntity(Base):
 
     __tablename__ = "knowledge_entities"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid7)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     neo4j_id: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     entity_type: Mapped[str] = mapped_column(String(100), nullable=False)
     name: Mapped[str] = mapped_column(String(500), nullable=False)
@@ -106,7 +106,7 @@ class KnowledgeRelationship(Base):
 
     __tablename__ = "knowledge_relationships"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid7)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     neo4j_id: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     relationship_type: Mapped[str] = mapped_column(String(100), nullable=False)
     source_entity_id: Mapped[uuid.UUID] = mapped_column(

@@ -509,6 +509,11 @@ async def enrich_citations(
 
     citations = [Citation(**c) for c in raw_citations]
 
+    # For graph-only citations (no document_id), use entity_name as document_name
+    for citation in citations:
+        if not citation.document_id and citation.entity_name:
+            citation.document_name = citation.entity_name
+
     doc_ids = list({c.document_id for c in citations if c.document_id})
     if doc_ids:
         result = await db.execute(sa_select(Document).where(Document.id.in_(doc_ids)))

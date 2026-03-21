@@ -150,6 +150,7 @@ class HybridRetriever(IHybridRetriever):
                     document_id=existing.document_id,
                     chunk_id=existing.chunk_id,
                     entity_id=gr.entity.id,
+                    entity_name=gr.entity.name,
                     metadata=existing.metadata,
                 )
             else:
@@ -158,6 +159,7 @@ class HybridRetriever(IHybridRetriever):
                     source="graph",
                     score=gr.relevance_score * graph_weight,
                     entity_id=gr.entity.id,
+                    entity_name=gr.entity.name,
                     metadata={
                         "entity_type": gr.entity.entity_type,
                         "relationship_count": len(gr.relationships),

@@ -219,6 +219,9 @@ class RAGAgent(IRAGAgent):
                     narrative_steps.append({"type": "thinking", "content": event.data})
                 elif event.event == "narration_end":
                     narrative_steps.append({"type": "narration", "content": event.data})
+                    # Reset so content only holds the final answer, not narration.
+                    # The frontend does the same reset on narration_end.
+                    accumulated_answer = ""
                 elif event.event == "tool_start":
                     parsed = json.loads(event.data)
                     narrative_steps.append(
@@ -713,7 +716,7 @@ class RAGAgent(IRAGAgent):
                 if content:
                     citation = Citation(
                         content_snippet=content[:200],
-                        source_type=result.get("source", "unknown"),
+                        source_type=item.get("source", result.get("source", "unknown")),
                         relevance_score=item.get(
                             "similarity", item.get("score", item.get("relevance", 0.0))
                         ),
@@ -756,7 +759,15 @@ class RAGAgent(IRAGAgent):
 
     async def _enrich_citations(self, citations: list[Citation]) -> None:
         """Populate document_name and source_url on each citation."""
-        if not self._db or not citations:
+        if not citations:
+            return
+
+        # For graph-only citations (no document_id), use entity_name as document_name
+        for citation in citations:
+            if not citation.document_id and citation.entity_name:
+                citation.document_name = citation.entity_name
+
+        if not self._db:
             return
 
         doc_ids = list({c.document_id for c in citations if c.document_id})

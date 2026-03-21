@@ -10,7 +10,7 @@ from app.infra.database import Base
 class UserModelSettings(Base):
     __tablename__ = "user_model_settings"
 
-    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid7)
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"),
         unique=True,

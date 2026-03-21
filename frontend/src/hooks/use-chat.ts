@@ -541,6 +541,7 @@ export function useChat(conversationId?: string, useClaudeCode = false) {
                   const citation: Citation = {
                     document_id: raw.document_id ?? "",
                     document_name: raw.document_name ?? raw.entity_name ?? "Source",
+                    entity_id: raw.entity_id ?? undefined,
                     chunk_text: raw.content_snippet ?? "",
                     page_number: raw.page_number ?? undefined,
                     relevance_score: raw.relevance_score ?? 0,

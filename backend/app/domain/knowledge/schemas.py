@@ -151,6 +151,7 @@ class HybridSearchResult(BaseModel):
     document_id: uuid.UUID | None = None
     chunk_id: uuid.UUID | None = None
     entity_id: uuid.UUID | None = None
+    entity_name: str | None = None
     metadata: dict | None = None
 
 

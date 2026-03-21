@@ -4,6 +4,20 @@ An agentic Knowledge Graph RAG application that ingests documents into a hybrid 
 
 <img src="scorecard.png" width="100%">
 
+## Screenshots
+
+| Chat | Agent Reasoning |
+|------|-----------------|
+| <img src="images/ChatPage.png" width="400"> | <img src="images/ChatPage2.png" width="400"> |
+
+| Documents | Knowledge Graph |
+|-----------|-----------------|
+| <img src="images/DocumentPage.png" width="400"> | <img src="images/KGPage.png" width="400"> |
+
+| Base Knowledge Ingestion |
+|--------------------------|
+| <img src="images/BaseKnowledge.png" width="400"> |
+
 ## Architecture
 
 ```
