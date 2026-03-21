@@ -18,7 +18,6 @@ from app.domain.documents.models import Document, DocumentSource, DocumentStatus
 from app.domain.ingestion.drive_connector import SUPPORTED_MIME_TYPES
 from app.domain.ingestion.interfaces import SourceConnector
 from app.domain.ingestion.models import (
-    IndexedFile,
     IndexedFileStatus,
     IngestionJob,
     IngestionStatus,
@@ -98,13 +97,15 @@ class DriveScanner:
                 return total_indexed
 
             try:
-                entries: list[DriveFolderEntry] = (
-                    await self._connector.list_folder_children(folder_id)
+                entries: list[DriveFolderEntry] = await self._connector.list_folder_children(
+                    folder_id
                 )
             except Exception as e:
                 logger.error(
                     "Failed to scan folder %s (%s): %s — skipping",
-                    folder_id, parent_path, e,
+                    folder_id,
+                    parent_path,
+                    e,
                 )
                 continue
 
@@ -130,25 +131,29 @@ class DriveScanner:
             if not files:
                 logger.info(
                     "Scanned folder %s (%s): 0 ingestible files, %d subfolders",
-                    folder_id, parent_path or "(root)", len(folders),
+                    folder_id,
+                    parent_path or "(root)",
+                    len(folders),
                 )
                 continue
 
             # Classify all files in this folder via LLM (one call per folder)
             classifications = await self._classify_folder_files(
-                files, parent_path,
+                files,
+                parent_path,
             )
 
             # Dedup check: if not force, check which files are already ingested
             skip_file_ids: set[str] = set()
             if not force:
-                skip_file_ids = await self._find_already_ingested(
-                    [f.file_id for f in files]
-                )
+                skip_file_ids = await self._find_already_ingested([f.file_id for f in files])
 
             # Insert into indexed_files
             count = await self._insert_indexed_files(
-                files, parent_path, classifications, skip_file_ids,
+                files,
+                parent_path,
+                classifications,
+                skip_file_ids,
             )
             total_indexed += count
 
@@ -179,10 +184,7 @@ class DriveScanner:
 
         Returns a dict mapping file_id -> classification dict.
         """
-        file_list = "\n".join(
-            f"- {f.name} (MIME: {f.mime_type}, ID: {f.file_id})"
-            for f in files
-        )
+        file_list = "\n".join(f"- {f.name} (MIME: {f.mime_type}, ID: {f.file_id})" for f in files)
         user_message = (
             f"Folder path: {folder_path or '(root)'}\n\n"
             f"Classify ALL of these files. Return a JSON array where each element has "
@@ -193,7 +195,11 @@ class DriveScanner:
         try:
             response = await self._llm.complete_for_ingestion(
                 messages=[
-                    {"role": "system", "content": CLASSIFY_SYSTEM_PROMPT + "\n\nWhen given multiple files, return a JSON array of objects. Each object MUST include a \"file_id\" field matching the provided ID, plus the classification fields (major, course_code, course_name, year, category, additional_context)."},
+                    {
+                        "role": "system",
+                        "content": CLASSIFY_SYSTEM_PROMPT
+                        + '\n\nWhen given multiple files, return a JSON array of objects. Each object MUST include a "file_id" field matching the provided ID, plus the classification fields (major, course_code, course_name, year, category, additional_context).',
+                    },
                     {"role": "user", "content": user_message},
                 ],
                 temperature=0.0,
@@ -206,9 +212,7 @@ class DriveScanner:
             # Handle both array and single-object responses
             if isinstance(parsed, list):
                 return {
-                    item.get("file_id", ""): {
-                        k: v for k, v in item.items() if k != "file_id"
-                    }
+                    item.get("file_id", ""): {k: v for k, v in item.items() if k != "file_id"}
                     for item in parsed
                     if isinstance(item, dict) and item.get("file_id")
                 }
@@ -223,7 +227,8 @@ class DriveScanner:
         except Exception as e:
             logger.warning(
                 "Classification failed for folder %s: %s — using empty classification",
-                folder_path, e,
+                folder_path,
+                e,
             )
 
         # Fallback: empty classification for all files
@@ -240,8 +245,7 @@ class DriveScanner:
             return set()
 
         result = await self._db.execute(
-            select(Document.metadata_["drive_file_id"].astext)
-            .where(
+            select(Document.metadata_["drive_file_id"].astext).where(
                 Document.source == DocumentSource.GOOGLE_DRIVE,
                 Document.is_base_knowledge.is_(True),
                 sa_or(
@@ -268,23 +272,23 @@ class DriveScanner:
         for f in files:
             is_skipped = f.file_id in skip_file_ids
             status = (
-                IndexedFileStatus.SKIPPED.value
-                if is_skipped
-                else IndexedFileStatus.PENDING.value
+                IndexedFileStatus.SKIPPED.value if is_skipped else IndexedFileStatus.PENDING.value
             )
             stage = "skipped" if is_skipped else "pending"
             classification = classifications.get(f.file_id, {})
-            rows.append({
-                "job_id": str(self._job.id),
-                "drive_file_id": f.file_id,
-                "file_name": f.name,
-                "mime_type": f.mime_type,
-                "size_bytes": f.size,
-                "folder_path": folder_path,
-                "classification": json.dumps(classification),
-                "status": status,
-                "stage": stage,
-            })
+            rows.append(
+                {
+                    "job_id": str(self._job.id),
+                    "drive_file_id": f.file_id,
+                    "file_name": f.name,
+                    "mime_type": f.mime_type,
+                    "size_bytes": f.size,
+                    "folder_path": folder_path,
+                    "classification": json.dumps(classification),
+                    "status": status,
+                    "stage": stage,
+                }
+            )
 
         # Batch insert with ON CONFLICT DO NOTHING for idempotency
         placeholders = []

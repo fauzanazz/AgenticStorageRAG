@@ -16,11 +16,12 @@ import gc
 import logging
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import sqlalchemy.exc
-from sqlalchemy import select, text, update as sa_update
+from sqlalchemy import select, text
+from sqlalchemy import update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.documents.models import (
@@ -31,8 +32,8 @@ from app.domain.documents.models import (
 )
 from app.domain.documents.processors import get_processor
 from app.domain.ingestion.drive_connector import (
-    SUPPORTED_MIME_TYPES,
     _GOOGLE_WORKSPACE_EXPORT_MAP,
+    SUPPORTED_MIME_TYPES,
 )
 from app.domain.ingestion.interfaces import SourceConnector
 from app.domain.ingestion.models import (
@@ -51,9 +52,11 @@ logger = logging.getLogger(__name__)
 # Data types flowing through the pipeline queues
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class DownloadResult:
     """Output of the download stage, input to the extract stage."""
+
     indexed_file_id: uuid.UUID
     drive_file_id: str
     file_name: str
@@ -67,6 +70,7 @@ class DownloadResult:
 @dataclass
 class ExtractResult:
     """Output of the extract stage, input to the embed stage."""
+
     indexed_file_id: uuid.UUID
     document_id: uuid.UUID
     document: Document
@@ -76,6 +80,7 @@ class ExtractResult:
 @dataclass
 class PipelineConfig:
     """Configurable pipeline parameters."""
+
     download_workers: int = 5
     extract_workers: int = 3
     embed_workers: int = 2
@@ -87,6 +92,7 @@ class PipelineConfig:
     @classmethod
     def from_settings(cls) -> PipelineConfig:
         from app.config import get_settings
+
         s = get_settings()
         return cls(
             download_workers=s.pipeline_download_workers,
@@ -102,6 +108,7 @@ class PipelineConfig:
 @dataclass
 class PipelineStats:
     """Mutable counters for pipeline progress."""
+
     downloaded: int = 0
     extracted: int = 0
     embedded: int = 0
@@ -192,25 +199,17 @@ class StagePipeline:
         c = self._config
 
         workers = [
-            asyncio.create_task(
-                self._feeder(scanning_done, is_cancelled), name="feeder"
-            ),
+            asyncio.create_task(self._feeder(scanning_done, is_cancelled), name="feeder"),
             *[
-                asyncio.create_task(
-                    self._download_worker(i, is_cancelled), name=f"dl-{i}"
-                )
+                asyncio.create_task(self._download_worker(i, is_cancelled), name=f"dl-{i}")
                 for i in range(c.download_workers)
             ],
             *[
-                asyncio.create_task(
-                    self._extract_worker(i, is_cancelled), name=f"ext-{i}"
-                )
+                asyncio.create_task(self._extract_worker(i, is_cancelled), name=f"ext-{i}")
                 for i in range(c.extract_workers)
             ],
             *[
-                asyncio.create_task(
-                    self._embed_worker(i, is_cancelled), name=f"emb-{i}"
-                )
+                asyncio.create_task(self._embed_worker(i, is_cancelled), name=f"emb-{i}")
                 for i in range(c.embed_workers)
             ],
         ]
@@ -229,9 +228,7 @@ class StagePipeline:
         if self._retry_file_ids:
             await self._retry_pass(is_cancelled)
 
-        logger.info(
-            "Pipeline complete (job %s): %s", self._job.id, self._stats.to_dict()
-        )
+        logger.info("Pipeline complete (job %s): %s", self._job.id, self._stats.to_dict())
         return self._stats.to_dict()
 
     # ------------------------------------------------------------------
@@ -276,9 +273,7 @@ class StagePipeline:
         for _ in range(self._config.download_workers):
             await self._download_q.put(_SENTINEL)
 
-    async def _fetch_pending(
-        self, db: AsyncSession, limit: int = 20
-    ) -> list[IndexedFile]:
+    async def _fetch_pending(self, db: AsyncSession, limit: int = 20) -> list[IndexedFile]:
         """Fetch pending files and atomically mark them as downloading."""
         result = await db.execute(
             select(IndexedFile)
@@ -336,7 +331,8 @@ class StagePipeline:
                     if any(skip in err_str for skip in self._SKIP_ERRORS):
                         logger.info(
                             "Skipping unexportable file %s: %s",
-                            indexed_file.file_name, err_str[:200],
+                            indexed_file.file_name,
+                            err_str[:200],
                         )
                         await self._update_stage(
                             indexed_file.id,
@@ -350,7 +346,8 @@ class StagePipeline:
 
                     logger.warning(
                         "Download failed for %s (will retry): %s",
-                        indexed_file.file_name, e,
+                        indexed_file.file_name,
+                        e,
                     )
                     await self._update_stage(
                         indexed_file.id,
@@ -401,8 +398,7 @@ class StagePipeline:
                         Document.status == DocumentStatus.READY,
                         Document.status == DocumentStatus.PROCESSING,
                     ),
-                    Document.metadata_["drive_file_id"].astext
-                    == indexed_file.drive_file_id,
+                    Document.metadata_["drive_file_id"].astext == indexed_file.drive_file_id,
                 )
                 .limit(1)
             )
@@ -418,18 +414,12 @@ class StagePipeline:
                 return None
 
         # Download
-        file_bytes, filename = await self._connector.download_file(
-            indexed_file.drive_file_id
-        )
+        file_bytes, filename = await self._connector.download_file(indexed_file.drive_file_id)
 
-        await self._update_stage(
-            indexed_file.id, IndexedFileStage.DOWNLOADED.value
-        )
+        await self._update_stage(indexed_file.id, IndexedFileStage.DOWNLOADED.value)
         await self._stats.increment(downloaded=1)
 
-        logger.info(
-            "Downloaded %s (%d bytes)", indexed_file.file_name, len(file_bytes)
-        )
+        logger.info("Downloaded %s (%d bytes)", indexed_file.file_name, len(file_bytes))
 
         return DownloadResult(
             indexed_file_id=indexed_file.id,
@@ -466,7 +456,8 @@ class StagePipeline:
                 except Exception as e:
                     logger.warning(
                         "Extract failed for %s (will retry): %s",
-                        dl_result.file_name, e,
+                        dl_result.file_name,
+                        e,
                     )
                     await self._update_stage(
                         dl_result.indexed_file_id,
@@ -490,9 +481,7 @@ class StagePipeline:
 
     async def _extract_one(self, dl: DownloadResult) -> ExtractResult | None:
         """Extract text and create Document + chunks."""
-        await self._update_stage(
-            dl.indexed_file_id, IndexedFileStage.EXTRACTING.value
-        )
+        await self._update_stage(dl.indexed_file_id, IndexedFileStage.EXTRACTING.value)
 
         # Determine target MIME
         target_mime = dl.mime_type
@@ -568,7 +557,7 @@ class StagePipeline:
             document.status = DocumentStatus.READY
             document.chunk_count = chunk_count
             document.metadata_.update(result_metadata)
-            document.processed_at = datetime.now(timezone.utc)
+            document.processed_at = datetime.now(UTC)
             await db.commit()
 
         await self._update_stage(
@@ -601,10 +590,8 @@ class StagePipeline:
         while True:
             # Try to get with timeout so we can flush partial batches
             try:
-                item = await asyncio.wait_for(
-                    self._embed_q.get(), timeout=2.0
-                )
-            except asyncio.TimeoutError:
+                item = await asyncio.wait_for(self._embed_q.get(), timeout=2.0)
+            except TimeoutError:
                 if buffer:
                     await self._flush_embed_batch(buffer)
                     buffer.clear()
@@ -625,10 +612,7 @@ class StagePipeline:
             chunk_count += len(ext_result.chunks)
 
             # Flush when batch is large enough
-            if (
-                chunk_count >= self._config.embed_batch_size
-                or len(buffer) >= 5
-            ):
+            if chunk_count >= self._config.embed_batch_size or len(buffer) >= 5:
                 await self._flush_embed_batch(buffer)
                 buffer.clear()
                 chunk_count = 0
@@ -643,15 +627,15 @@ class StagePipeline:
         chunk_to_doc: list[tuple[int, uuid.UUID]] = []  # (chunk_idx_in_all, doc_id)
 
         for ext in batch:
-            await self._update_stage(
-                ext.indexed_file_id, IndexedFileStage.EMBEDDING.value
-            )
+            await self._update_stage(ext.indexed_file_id, IndexedFileStage.EMBEDDING.value)
             for c in ext.chunks:
-                all_chunks.append({
-                    "id": c.id,
-                    "content": c.content,
-                    "metadata": c.metadata_ or {},
-                })
+                all_chunks.append(
+                    {
+                        "id": c.id,
+                        "content": c.content,
+                        "metadata": c.metadata_ or {},
+                    }
+                )
                 chunk_to_doc.append((len(all_chunks) - 1, ext.document_id))
 
         embed_success = False
@@ -668,7 +652,8 @@ class StagePipeline:
                     await db.commit()
                     logger.info(
                         "Batch embedded %d chunks across %d files",
-                        count, len(batch),
+                        count,
+                        len(batch),
                     )
                     embed_success = True
             except Exception as e:
@@ -677,9 +662,7 @@ class StagePipeline:
         # --- Per-file KG extraction ---
         for ext in batch:
             if embed_success:
-                await self._update_stage(
-                    ext.indexed_file_id, IndexedFileStage.EMBEDDED.value
-                )
+                await self._update_stage(ext.indexed_file_id, IndexedFileStage.EMBEDDED.value)
                 await self._stats.increment(embedded=1)
 
             kg_success = await self._extract_kg_for_file(ext)
@@ -692,15 +675,11 @@ class StagePipeline:
                 )
                 await self._stats.increment(kg_done=1)
             elif embed_success and not kg_success:
-                await self._update_stage(
-                    ext.indexed_file_id, IndexedFileStage.KG_FAILED.value
-                )
+                await self._update_stage(ext.indexed_file_id, IndexedFileStage.KG_FAILED.value)
                 async with self._retry_lock:
                     self._retry_file_ids.append(ext.indexed_file_id)
             elif not embed_success:
-                await self._update_stage(
-                    ext.indexed_file_id, IndexedFileStage.EMBED_FAILED.value
-                )
+                await self._update_stage(ext.indexed_file_id, IndexedFileStage.EMBED_FAILED.value)
                 async with self._retry_lock:
                     self._retry_file_ids.append(ext.indexed_file_id)
 
@@ -718,6 +697,7 @@ class StagePipeline:
         """
         if self._neo4j_client is None:
             from app.infra.neo4j_client import Neo4jClient
+
             self._neo4j_client = Neo4jClient()
             await self._neo4j_client.connect()
         return self._neo4j_client
@@ -738,16 +718,15 @@ class StagePipeline:
 
         try:
             async with self._session_factory() as db:
-                from app.domain.knowledge.kg_builder import KGBuilder
                 from app.domain.knowledge.graph_service import GraphService
+                from app.domain.knowledge.kg_builder import KGBuilder
 
                 neo4j = await self._get_neo4j()
                 graph_service = GraphService(db=db, neo4j=neo4j)
                 kg_builder = KGBuilder(graph_service=graph_service, llm=self._llm)
 
                 chunk_dicts = [
-                    {"content": c.content, "metadata": c.metadata_ or {}}
-                    for c in ext.chunks
+                    {"content": c.content, "metadata": c.metadata_ or {}} for c in ext.chunks
                 ]
                 result = await kg_builder.build_from_chunks(
                     chunks=chunk_dicts, document_id=ext.document_id
@@ -763,7 +742,8 @@ class StagePipeline:
         except Exception as e:
             logger.error(
                 "KG extraction failed for %s (non-fatal): %s",
-                ext.document_id, e,
+                ext.document_id,
+                e,
             )
             return False
 
@@ -778,9 +758,7 @@ class StagePipeline:
         - FAILED (download/extract): re-downloads and re-processes from scratch
         - EMBED_FAILED / KG_FAILED: re-embeds and re-runs KG from existing chunks
         """
-        logger.info(
-            "Retry pass: %d files to retry", len(self._retry_file_ids)
-        )
+        logger.info("Retry pass: %d files to retry", len(self._retry_file_ids))
 
         _REDOWNLOAD_STAGES = {
             IndexedFileStage.FAILED.value,
@@ -796,9 +774,7 @@ class StagePipeline:
                 if is_cancelled and await is_cancelled():
                     break
 
-                result = await db.execute(
-                    select(IndexedFile).where(IndexedFile.id == file_id)
-                )
+                result = await db.execute(select(IndexedFile).where(IndexedFile.id == file_id))
                 indexed_file = result.scalar_one_or_none()
                 if not indexed_file:
                     continue
@@ -812,7 +788,9 @@ class StagePipeline:
                 if indexed_file.retry_count >= max_retries:
                     logger.info(
                         "Max retries (%d) reached for %s (stage=%s)",
-                        max_retries, indexed_file.file_name, stage,
+                        max_retries,
+                        indexed_file.file_name,
+                        stage,
                     )
                     await self._stats.increment(retry_failed=1)
                     await self._stats.increment(failed=1)
@@ -829,11 +807,14 @@ class StagePipeline:
                 )
                 await db.commit()
 
-                backoff = min(2 ** indexed_file.retry_count, 30)
+                backoff = min(2**indexed_file.retry_count, 30)
                 logger.info(
                     "Retry %d/%d for %s (stage=%s, backoff=%.0fs)",
-                    new_count, max_retries,
-                    indexed_file.file_name, stage, backoff,
+                    new_count,
+                    max_retries,
+                    indexed_file.file_name,
+                    stage,
+                    backoff,
                 )
                 await asyncio.sleep(backoff)
 
@@ -875,16 +856,15 @@ class StagePipeline:
             # Check final stage
             async with self._session_factory() as db:
                 refreshed = await db.execute(
-                    select(IndexedFile.stage).where(
-                        IndexedFile.id == indexed_file.id
-                    )
+                    select(IndexedFile.stage).where(IndexedFile.id == indexed_file.id)
                 )
                 final_stage = refreshed.scalar_one_or_none()
                 return final_stage == IndexedFileStage.KG_DONE.value
         except Exception as e:
             logger.error(
                 "Retry download/extract failed for %s: %s",
-                indexed_file.file_name, e,
+                indexed_file.file_name,
+                e,
             )
             await self._update_stage(
                 indexed_file.id,
@@ -894,9 +874,7 @@ class StagePipeline:
             )
             return False
 
-    async def _retry_embed_kg(
-        self, db: AsyncSession, indexed_file: IndexedFile
-    ) -> bool:
+    async def _retry_embed_kg(self, db: AsyncSession, indexed_file: IndexedFile) -> bool:
         """Re-embed and re-run KG for a file that already has chunks."""
         if not indexed_file.document_id:
             await self._stats.increment(failed=1)
@@ -904,9 +882,7 @@ class StagePipeline:
             return False
 
         doc_result = await db.execute(
-            select(Document).where(
-                Document.id == indexed_file.document_id
-            )
+            select(Document).where(Document.id == indexed_file.document_id)
         )
         document = doc_result.scalar_one_or_none()
         if not document:
@@ -931,9 +907,7 @@ class StagePipeline:
         await self._flush_embed_batch([ext])
 
         refreshed = await db.execute(
-            select(IndexedFile.stage).where(
-                IndexedFile.id == indexed_file.id
-            )
+            select(IndexedFile.stage).where(IndexedFile.id == indexed_file.id)
         )
         stage = refreshed.scalar_one_or_none()
         return stage == IndexedFileStage.KG_DONE.value
@@ -969,7 +943,7 @@ class StagePipeline:
             IndexedFileStage.EMBED_FAILED.value,
             IndexedFileStage.KG_FAILED.value,
         ):
-            values["processed_at"] = datetime.now(timezone.utc)
+            values["processed_at"] = datetime.now(UTC)
 
         for attempt in range(2):
             try:
@@ -991,9 +965,10 @@ class StagePipeline:
                     await asyncio.sleep(0.5)
                 else:
                     logger.error(
-                        "DB error updating stage for %s (attempt 2), giving up: "
-                        "stage=%s status=%s",
-                        indexed_file_id, stage, status,
+                        "DB error updating stage for %s (attempt 2), giving up: stage=%s status=%s",
+                        indexed_file_id,
+                        stage,
+                        status,
                         exc_info=True,
                     )
 
@@ -1018,7 +993,8 @@ class StagePipeline:
         except Exception:
             logger.warning(
                 "Failed to increment job counter %s for job %s",
-                column, self._job.id,
+                column,
+                self._job.id,
                 exc_info=True,
             )
 

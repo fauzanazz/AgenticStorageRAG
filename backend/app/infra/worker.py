@@ -19,7 +19,8 @@ import register_handler) does not break before those files are cleaned up.
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 # Queue name constants — kept for backward compatibility
 QUEUE_DOCUMENTS = "jobs:documents"

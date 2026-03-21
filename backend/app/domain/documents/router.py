@@ -84,6 +84,7 @@ async def upload_document(
     # Queue background processing job via Celery -- fail gracefully
     try:
         from app.domain.documents.tasks import process_document_task
+
         process_document_task.delay(document_id=str(result.id))
     except Exception:
         logger.exception("Failed to dispatch document processing task: %s", result.id)

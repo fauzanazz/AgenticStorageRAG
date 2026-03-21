@@ -25,9 +25,7 @@ class DocumentEmbedding(Base):
 
     __tablename__ = "document_embeddings"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid7)
     chunk_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("document_chunks.id", ondelete="CASCADE"),
@@ -40,17 +38,13 @@ class DocumentEmbedding(Base):
     )
     content: Mapped[str] = mapped_column(Text, nullable=False)
     # Store embedding as float array; pgvector extension handles similarity ops
-    embedding: Mapped[list[float]] = mapped_column(
-        ARRAY(Float), nullable=True
-    )
+    embedding: Mapped[list[float]] = mapped_column(ARRAY(Float), nullable=True)
     embedding_model: Mapped[str] = mapped_column(
         String(100), nullable=False, default="text-embedding-3-small"
     )
     token_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
         Index("idx_embeddings_document_id", "document_id"),
@@ -68,12 +62,8 @@ class KnowledgeEntity(Base):
 
     __tablename__ = "knowledge_entities"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
-    neo4j_id: Mapped[str] = mapped_column(
-        String(255), nullable=False, unique=True
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid7)
+    neo4j_id: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     entity_type: Mapped[str] = mapped_column(String(100), nullable=False)
     name: Mapped[str] = mapped_column(String(500), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -83,9 +73,7 @@ class KnowledgeEntity(Base):
         ForeignKey("documents.id", ondelete="SET NULL"),
         nullable=True,
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
@@ -118,12 +106,8 @@ class KnowledgeRelationship(Base):
 
     __tablename__ = "knowledge_relationships"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
-    neo4j_id: Mapped[str] = mapped_column(
-        String(255), nullable=False, unique=True
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid7)
+    neo4j_id: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     relationship_type: Mapped[str] = mapped_column(String(100), nullable=False)
     source_entity_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -142,9 +126,7 @@ class KnowledgeRelationship(Base):
         ForeignKey("documents.id", ondelete="SET NULL"),
         nullable=True,
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     source_entity: Mapped[KnowledgeEntity] = relationship(
         "KnowledgeEntity",

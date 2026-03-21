@@ -10,9 +10,9 @@ import json
 import logging
 import uuid
 
-from sqlalchemy import select, func as sa_func, desc, literal_column
+from sqlalchemy import desc, select
+from sqlalchemy import func as sa_func
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.domain.agents.exceptions import (
     ConversationAccessDenied,
@@ -126,9 +126,7 @@ class ChatService(IChatService):
             for conv, msg_count in rows
         ]
 
-    async def delete_conversation(
-        self, conversation_id: uuid.UUID, user_id: uuid.UUID
-    ) -> None:
+    async def delete_conversation(self, conversation_id: uuid.UUID, user_id: uuid.UUID) -> None:
         """Delete a conversation (cascades to messages)."""
         conversation = await self._db.get(Conversation, conversation_id)
 
@@ -141,9 +139,7 @@ class ChatService(IChatService):
         await self._db.flush()
         logger.info("Deleted conversation %s", conversation_id)
 
-    async def update_conversation_title(
-        self, conversation_id: uuid.UUID, title: str
-    ) -> None:
+    async def update_conversation_title(self, conversation_id: uuid.UUID, title: str) -> None:
         """Update a conversation's title.
 
         Used to set the title from the first user message.
@@ -171,9 +167,7 @@ class ChatService(IChatService):
             role=role,
             content=content,
             citations_json=(
-                json.dumps([c.model_dump(mode="json") for c in citations])
-                if citations
-                else None
+                json.dumps([c.model_dump(mode="json") for c in citations]) if citations else None
             ),
             tool_calls_json=json.dumps(tool_calls) if tool_calls else None,
             thinking_blocks_json=json.dumps(thinking_blocks) if thinking_blocks else None,
@@ -228,21 +222,11 @@ class ChatService(IChatService):
                     if msg.citations_json
                     else []
                 ),
-                tool_calls=(
-                    json.loads(msg.tool_calls_json)
-                    if msg.tool_calls_json
-                    else None
-                ),
+                tool_calls=(json.loads(msg.tool_calls_json) if msg.tool_calls_json else None),
                 thinking_blocks=(
-                    json.loads(msg.thinking_blocks_json)
-                    if msg.thinking_blocks_json
-                    else None
+                    json.loads(msg.thinking_blocks_json) if msg.thinking_blocks_json else None
                 ),
-                steps=(
-                    json.loads(msg.steps_json)
-                    if msg.steps_json
-                    else None
-                ),
+                steps=(json.loads(msg.steps_json) if msg.steps_json else None),
                 token_count=msg.token_count,
                 created_at=msg.created_at,
             )
@@ -324,13 +308,12 @@ class ChatService(IChatService):
             for a in artifacts
         ]
 
-    async def get_artifact(
-        self, artifact_id: uuid.UUID, user_id: uuid.UUID
-    ) -> ArtifactResponse:
+    async def get_artifact(self, artifact_id: uuid.UUID, user_id: uuid.UUID) -> ArtifactResponse:
         """Get a single artifact with ownership check."""
         artifact = await self._db.get(Artifact, artifact_id)
         if not artifact:
             from app.domain.agents.exceptions import ArtifactNotFoundError
+
             raise ArtifactNotFoundError(str(artifact_id))
         if artifact.user_id != user_id:
             raise ConversationAccessDenied()

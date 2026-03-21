@@ -9,7 +9,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from neo4j import AsyncGraphDatabase, AsyncDriver, AsyncSession as Neo4jAsyncSession
+from neo4j import AsyncDriver, AsyncGraphDatabase
+from neo4j import AsyncSession as Neo4jAsyncSession
 
 from app.config import get_settings
 

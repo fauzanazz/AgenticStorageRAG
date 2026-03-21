@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -52,9 +52,7 @@ class TestHybridSearch:
             )
         ]
 
-        results = await retriever.search(
-            HybridSearchRequest(query="test", vector_weight=1.0)
-        )
+        results = await retriever.search(HybridSearchRequest(query="test", vector_weight=1.0))
 
         assert len(results) == 1
         assert results[0].source == "vector"
@@ -66,7 +64,7 @@ class TestHybridSearch:
         self, retriever: HybridRetriever, mock_vector: AsyncMock, mock_graph: AsyncMock
     ) -> None:
         """With vector_weight=0.0, only graph results should appear."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         mock_graph.search_entities.return_value = [
             GraphSearchResult(
@@ -82,9 +80,7 @@ class TestHybridSearch:
             )
         ]
 
-        results = await retriever.search(
-            HybridSearchRequest(query="test", vector_weight=0.0)
-        )
+        results = await retriever.search(HybridSearchRequest(query="test", vector_weight=0.0))
 
         assert len(results) == 1
         assert results[0].source == "graph"
@@ -96,7 +92,7 @@ class TestHybridSearch:
         self, retriever: HybridRetriever, mock_vector: AsyncMock, mock_graph: AsyncMock
     ) -> None:
         """With balanced weights, both results should appear sorted by score."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         chunk_id = uuid.uuid4()
         doc_id = uuid.uuid4()
 
@@ -123,9 +119,7 @@ class TestHybridSearch:
             )
         ]
 
-        results = await retriever.search(
-            HybridSearchRequest(query="test", vector_weight=0.5)
-        )
+        results = await retriever.search(HybridSearchRequest(query="test", vector_weight=0.5))
 
         assert len(results) == 2
         # Vector: 0.95 * 0.5 = 0.475, Graph: 0.7 * 0.5 = 0.35
@@ -137,7 +131,7 @@ class TestHybridSearch:
         self, retriever: HybridRetriever, mock_vector: AsyncMock, mock_graph: AsyncMock
     ) -> None:
         """If vector search fails, graph results should still be returned."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         mock_vector.search.side_effect = Exception("Vector DB down")
         mock_graph.search_entities.return_value = [
@@ -154,9 +148,7 @@ class TestHybridSearch:
             )
         ]
 
-        results = await retriever.search(
-            HybridSearchRequest(query="test", vector_weight=0.5)
-        )
+        results = await retriever.search(HybridSearchRequest(query="test", vector_weight=0.5))
 
         assert len(results) == 1
         assert results[0].source == "graph"

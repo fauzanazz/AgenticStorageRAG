@@ -68,17 +68,13 @@ class TestChatIntegration:
     """Integration tests for chat endpoints."""
 
     @pytest.mark.asyncio
-    async def test_list_conversations_empty(
-        self, app, auth_token: str, mock_db: AsyncMock
-    ) -> None:
+    async def test_list_conversations_empty(self, app, auth_token: str, mock_db: AsyncMock) -> None:
         """Should return empty list for new user."""
         mock_result = MagicMock()
         mock_result.scalars.return_value.all.return_value = []
         mock_db.execute.return_value = mock_result
 
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get(
                 "/api/v1/chat/conversations",
                 headers={"Authorization": f"Bearer {auth_token}"},
@@ -93,9 +89,7 @@ class TestChatIntegration:
         """Getting a nonexistent conversation should return 404."""
         mock_db.get.return_value = None
 
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get(
                 f"/api/v1/chat/conversations/{uuid.uuid4()}",
                 headers={"Authorization": f"Bearer {auth_token}"},
@@ -109,9 +103,7 @@ class TestChatIntegration:
         """Deleting a nonexistent conversation should return 404."""
         mock_db.get.return_value = None
 
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.delete(
                 f"/api/v1/chat/conversations/{uuid.uuid4()}",
                 headers={"Authorization": f"Bearer {auth_token}"},
@@ -119,13 +111,9 @@ class TestChatIntegration:
             assert response.status_code == 404
 
     @pytest.mark.asyncio
-    async def test_stream_requires_message(
-        self, app, auth_token: str
-    ) -> None:
+    async def test_stream_requires_message(self, app, auth_token: str) -> None:
         """Stream endpoint should require message field."""
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 "/api/v1/chat/stream",
                 headers={"Authorization": f"Bearer {auth_token}"},
@@ -134,13 +122,9 @@ class TestChatIntegration:
             assert response.status_code == 422
 
     @pytest.mark.asyncio
-    async def test_message_requires_content(
-        self, app, auth_token: str
-    ) -> None:
+    async def test_message_requires_content(self, app, auth_token: str) -> None:
         """Message endpoint should require message field."""
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 "/api/v1/chat/message",
                 headers={"Authorization": f"Bearer {auth_token}"},
@@ -149,23 +133,15 @@ class TestChatIntegration:
             assert response.status_code == 422
 
     @pytest.mark.asyncio
-    async def test_conversations_limit_validation(
-        self, app, auth_token: str
-    ) -> None:
+    async def test_conversations_limit_validation(self, app, auth_token: str) -> None:
         """Limit must be within valid range."""
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             headers = {"Authorization": f"Bearer {auth_token}"}
 
             # limit < 1
-            resp = await client.get(
-                "/api/v1/chat/conversations?limit=0", headers=headers
-            )
+            resp = await client.get("/api/v1/chat/conversations?limit=0", headers=headers)
             assert resp.status_code == 422
 
             # limit > 100
-            resp = await client.get(
-                "/api/v1/chat/conversations?limit=200", headers=headers
-            )
+            resp = await client.get("/api/v1/chat/conversations?limit=200", headers=headers)
             assert resp.status_code == 422

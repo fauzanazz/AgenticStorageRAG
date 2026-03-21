@@ -29,6 +29,7 @@ import resource
 import sys
 import threading
 import tracemalloc
+from datetime import UTC
 
 from celery import Celery
 from celery.signals import worker_ready, worker_shutdown
@@ -61,31 +62,26 @@ def create_celery_app() -> Celery:
     app.conf.update(
         broker_url=broker,
         result_backend=broker,
-
         # Route tasks to dedicated queues by module prefix
         task_routes={
             "app.domain.documents.tasks.*": {"queue": "documents"},
             "app.domain.ingestion.tasks.*": {"queue": "ingestion"},
             "app.domain.knowledge.tasks.*": {"queue": "knowledge"},
         },
-
         # Acknowledge task only after it completes (at-least-once delivery)
         task_acks_late=True,
         # Reject and requeue on worker crash (SIGKILL / OOM)
         task_reject_on_worker_lost=True,
-
         # Only prefetch 1 task per thread — prevents the worker from grabbing
         # multiple ingestion tasks and running them concurrently, which causes
         # OOM when 4 IngestionOrchestrators run in parallel.
         worker_prefetch_multiplier=1,
-
         # Serialisation
         task_serializer="json",
         result_serializer="json",
         accept_content=["json"],
         timezone="UTC",
         enable_utc=True,
-
         # Autodiscover tasks from domain task modules
         imports=[
             "app.domain.documents.tasks",
@@ -116,11 +112,13 @@ def _get_rss_mb() -> float:
 def _log_memory_snapshot() -> None:
     """Log tracemalloc top allocations. Lightweight — no gc object scan."""
     snapshot = tracemalloc.take_snapshot()
-    snapshot = snapshot.filter_traces([
-        tracemalloc.Filter(False, "<frozen importlib._bootstrap>"),
-        tracemalloc.Filter(False, "<frozen importlib._bootstrap_external>"),
-        tracemalloc.Filter(False, tracemalloc.__file__),
-    ])
+    snapshot = snapshot.filter_traces(
+        [
+            tracemalloc.Filter(False, "<frozen importlib._bootstrap>"),
+            tracemalloc.Filter(False, "<frozen importlib._bootstrap_external>"),
+            tracemalloc.Filter(False, tracemalloc.__file__),
+        ]
+    )
     top = snapshot.statistics("lineno")
     logger.info("── tracemalloc top 10 ──")
     for stat in top[:10]:
@@ -131,7 +129,10 @@ def _log_memory_snapshot() -> None:
     collected = gc.collect()
     logger.info(
         "── gc: gen0=%d gen1=%d gen2=%d | collected %d ──",
-        counts[0], counts[1], counts[2], collected,
+        counts[0],
+        counts[1],
+        counts[2],
+        collected,
     )
 
 
@@ -171,22 +172,22 @@ def _init_worker_resources(**kwargs: object) -> None:
     # Start tracemalloc early to capture allocations from init onward
     tracemalloc.start(5)  # 5 frames — enough to identify call sites
 
-    from app.infra.database import init_db
-    from app.infra.llm import llm_provider
-    from app.infra.neo4j_client import neo4j_client
-    from app.infra.storage import storage_client
+    import app.domain.agents.models
 
     # Register ALL domain models with Base.metadata before init_db() creates the
     # engine. SQLAlchemy resolves cross-domain FK strings (e.g.
     # IngestionJob.triggered_by → "users.id") by scanning Base.metadata at mapper
     # configuration time. Without these imports the worker's metadata is incomplete
     # and raises NoReferencedTableError on the first DB query.
-    import app.domain.auth.models          # noqa: F401
-    import app.domain.documents.models     # noqa: F401
-    import app.domain.knowledge.models     # noqa: F401
-    import app.domain.agents.models        # noqa: F401
-    import app.domain.ingestion.models     # noqa: F401
-    import app.domain.settings.models      # noqa: F401
+    import app.domain.auth.models
+    import app.domain.documents.models
+    import app.domain.ingestion.models
+    import app.domain.knowledge.models
+    import app.domain.settings.models  # noqa: F401
+    from app.infra.database import init_db
+    from app.infra.llm import llm_provider
+    from app.infra.neo4j_client import neo4j_client
+    from app.infra.storage import storage_client
 
     init_db()
     storage_client.connect()
@@ -225,7 +226,7 @@ async def _fail_zombie_ingestion_jobs() -> None:
     function cleans them up immediately so the admin UI reflects reality and
     new ingestion triggers are not blocked.
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from sqlalchemy import update as sa_update
 
@@ -248,7 +249,7 @@ async def _fail_zombie_ingestion_jobs() -> None:
             .values(
                 status=IngestionStatus.FAILED,
                 error_message="Auto-failed: worker restarted while job was in-flight",
-                completed_at=datetime.now(timezone.utc),
+                completed_at=datetime.now(UTC),
             )
             .execution_options(synchronize_session=False)
         )

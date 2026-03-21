@@ -2,23 +2,20 @@
 
 from __future__ import annotations
 
-import json
 import uuid
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.domain.knowledge.graph_service import GraphService, _sanitize_label
 from app.domain.knowledge.exceptions import (
     EntityNotFoundError,
     GraphBuildError,
-    GraphQueryError,
 )
+from app.domain.knowledge.graph_service import GraphService, _sanitize_label
 from app.domain.knowledge.models import KnowledgeEntity, KnowledgeRelationship
 from app.domain.knowledge.schemas import (
     EntityCreate,
-    GraphSearchRequest,
     RelationshipCreate,
 )
 
@@ -69,7 +66,7 @@ class TestCreateEntity:
             description="A test entity",
         )
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         def set_entity_defaults(entity: KnowledgeEntity) -> None:
             entity.id = uuid.uuid4()
@@ -97,7 +94,7 @@ class TestCreateEntity:
             properties={"founded": "1990", "industry": "Tech"},
         )
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         def set_defaults(entity: KnowledgeEntity) -> None:
             entity.id = uuid.uuid4()
@@ -118,18 +115,14 @@ class TestCreateEntity:
         mock_neo4j.execute_write.side_effect = Exception("Connection refused")
 
         with pytest.raises(GraphBuildError, match="Failed to create entity"):
-            await service.create_entity(
-                EntityCreate(entity_type="Person", name="Test")
-            )
+            await service.create_entity(EntityCreate(entity_type="Person", name="Test"))
 
 
 class TestGetEntity:
     """Tests for entity retrieval."""
 
     @pytest.mark.asyncio
-    async def test_get_entity_not_found(
-        self, service: GraphService, mock_db: AsyncMock
-    ) -> None:
+    async def test_get_entity_not_found(self, service: GraphService, mock_db: AsyncMock) -> None:
         entity_id = uuid.uuid4()
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = None
@@ -143,7 +136,7 @@ class TestGetEntity:
         self, service: GraphService, mock_db: AsyncMock, mock_neo4j: AsyncMock
     ) -> None:
         entity_id = uuid.uuid4()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         mock_entity = MagicMock(spec=KnowledgeEntity)
         mock_entity.id = entity_id
@@ -171,9 +164,7 @@ class TestCreateRelationship:
     """Tests for relationship creation."""
 
     @pytest.mark.asyncio
-    async def test_source_not_found(
-        self, service: GraphService, mock_db: AsyncMock
-    ) -> None:
+    async def test_source_not_found(self, service: GraphService, mock_db: AsyncMock) -> None:
         mock_db.get.return_value = None
 
         with pytest.raises(EntityNotFoundError):
@@ -191,7 +182,7 @@ class TestCreateRelationship:
     ) -> None:
         source_id = uuid.uuid4()
         target_id = uuid.uuid4()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         source = MagicMock(spec=KnowledgeEntity)
         source.neo4j_id = "src-neo4j"
@@ -236,9 +227,7 @@ class TestGetGraphVisualization:
     """Tests for graph visualization."""
 
     @pytest.mark.asyncio
-    async def test_empty_graph(
-        self, service: GraphService, mock_db: AsyncMock
-    ) -> None:
+    async def test_empty_graph(self, service: GraphService, mock_db: AsyncMock) -> None:
         # Mock entities query
         entities_result = MagicMock()
         entities_result.scalars.return_value.all.return_value = []
@@ -267,9 +256,7 @@ class TestGetStats:
     """Tests for knowledge graph statistics."""
 
     @pytest.mark.asyncio
-    async def test_get_stats(
-        self, service: GraphService, mock_db: AsyncMock
-    ) -> None:
+    async def test_get_stats(self, service: GraphService, mock_db: AsyncMock) -> None:
         entity_types_result = MagicMock()
         entity_types_result.all.return_value = [("Person", 5), ("Organization", 3)]
 
@@ -279,7 +266,11 @@ class TestGetStats:
         embedding_count_result = MagicMock()
         embedding_count_result.scalar.return_value = 42
 
-        mock_db.execute.side_effect = [entity_types_result, rel_types_result, embedding_count_result]
+        mock_db.execute.side_effect = [
+            entity_types_result,
+            rel_types_result,
+            embedding_count_result,
+        ]
 
         result = await service.get_stats()
         assert result.total_entities == 8
@@ -293,9 +284,7 @@ class TestDeleteDocumentEntities:
     """Tests for deleting document entities."""
 
     @pytest.mark.asyncio
-    async def test_delete_no_entities(
-        self, service: GraphService, mock_db: AsyncMock
-    ) -> None:
+    async def test_delete_no_entities(self, service: GraphService, mock_db: AsyncMock) -> None:
         mock_result = MagicMock()
         mock_result.scalars.return_value.all.return_value = []
         mock_db.execute.return_value = mock_result

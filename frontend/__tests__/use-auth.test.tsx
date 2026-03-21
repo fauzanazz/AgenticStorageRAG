@@ -35,6 +35,7 @@ vi.stubGlobal("localStorage", mockLocalStorage);
 // ---- Import AFTER mocks ----
 
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
+import { getAccessToken, setAccessToken } from "@/lib/token-store";
 
 /** Backend AuthResponse shape -- the source of truth */
 const MOCK_AUTH_RESPONSE = {
@@ -82,6 +83,8 @@ function mockFetchResponse(status: number, body: unknown) {
   return Promise.resolve({
     ok: status >= 200 && status < 300,
     status,
+    statusText: status === 200 ? "OK" : "Error",
+    headers: new Headers({ "content-type": "application/json" }),
     json: () => Promise.resolve(body),
   });
 }
@@ -90,6 +93,7 @@ describe("useAuth - contract validation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     Object.keys(store).forEach((key) => delete store[key]);
+    setAccessToken(null);
 
     // Default: no stored token, so useEffect won't call /auth/me
     mockLocalStorage.getItem.mockImplementation((key: string) => store[key] ?? null);
@@ -124,7 +128,9 @@ describe("useAuth - contract validation", () => {
     });
 
     // Verify tokens were stored correctly
-    expect(store["access_token"]).toBe("mock-access-token");
+    // access_token is stored in-memory (token-store), not localStorage
+    expect(getAccessToken()).toBe("mock-access-token");
+    // refresh_token is stored in localStorage
     expect(store["refresh_token"]).toBe("mock-refresh-token");
 
     // Verify user state was set from the response
@@ -156,7 +162,7 @@ describe("useAuth - contract validation", () => {
       );
     });
 
-    expect(store["access_token"]).toBe("mock-access-token");
+    expect(getAccessToken()).toBe("mock-access-token");
     expect(store["refresh_token"]).toBe("mock-refresh-token");
     expect(result.current.isAuthenticated).toBe(true);
     expect(result.current.user?.full_name).toBe("Test User");
@@ -219,7 +225,7 @@ describe("useAuth - contract validation", () => {
     });
 
     // Verify new tokens stored
-    expect(store["access_token"]).toBe("new-access-token");
+    expect(getAccessToken()).toBe("new-access-token");
     expect(store["refresh_token"]).toBe("new-refresh-token");
   });
 

@@ -24,7 +24,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from app.celery_app import celery_app
@@ -72,12 +72,11 @@ async def _build_connector(
         if account and account.access_token_enc:
             access_token = decrypt_value(account.access_token_enc)
             refresh_token = (
-                decrypt_value(account.refresh_token_enc)
-                if account.refresh_token_enc
-                else None
+                decrypt_value(account.refresh_token_enc) if account.refresh_token_enc else None
             )
             logger.info(
-                "Using per-user OAuth tokens for ingestion (user=%s)", user_id,
+                "Using per-user OAuth tokens for ingestion (user=%s)",
+                user_id,
             )
             return GoogleDriveConnector.from_user_tokens(
                 access_token=access_token,
@@ -93,11 +92,11 @@ async def _build_connector(
 @celery_app.task(
     name="app.domain.ingestion.tasks.run_ingestion_task",
     bind=True,
-    max_retries=0,   # No auto-retry — orchestrator handles its own failure state
+    max_retries=0,  # No auto-retry — orchestrator handles its own failure state
     acks_late=False,  # Acknowledge IMMEDIATELY so OOM kills don't requeue the task
-    time_limit=7200,       # 2-hour hard kill for runaway jobs
+    time_limit=7200,  # 2-hour hard kill for runaway jobs
     soft_time_limit=6900,  # 115-min soft limit (raises SoftTimeLimitExceeded first)
-    rate_limit="1/m",      # Only 1 ingestion task per minute — prevents concurrent runs
+    rate_limit="1/m",  # Only 1 ingestion task per minute — prevents concurrent runs
 )
 def run_ingestion_task(  # type: ignore[misc]
     self,
@@ -123,9 +122,10 @@ def run_ingestion_task(  # type: ignore[misc]
     admin_uuid = uuid.UUID(admin_user_id)
 
     async def _run() -> None:
+        from sqlalchemy import update as sa_update
+
         import app.infra.database as _db_module
         from app.infra.database import build_session_factory
-        from sqlalchemy import update as sa_update
 
         if _db_module._engine is None:
             logger.error("Database not initialised before ingestion task")
@@ -161,7 +161,9 @@ def run_ingestion_task(  # type: ignore[misc]
                 )
 
                 try:
-                    await orchestrator.run(job=job, admin_user_id=admin_uuid, force=force, retry=retry)
+                    await orchestrator.run(
+                        job=job, admin_user_id=admin_uuid, force=force, retry=retry
+                    )
                     logger.info("Ingestion job completed: %s", job_uuid)
                 except Exception:
                     logger.exception("Ingestion job failed: %s", job_uuid)
@@ -177,23 +179,26 @@ def run_ingestion_task(  # type: ignore[misc]
                                 sa_update(IngestionJob)
                                 .where(
                                     IngestionJob.id == job_uuid,
-                                    IngestionJob.status.in_([
-                                        IngestionStatus.PENDING,
-                                        IngestionStatus.SCANNING,
-                                        IngestionStatus.PROCESSING,
-                                    ]),
+                                    IngestionJob.status.in_(
+                                        [
+                                            IngestionStatus.PENDING,
+                                            IngestionStatus.SCANNING,
+                                            IngestionStatus.PROCESSING,
+                                        ]
+                                    ),
                                 )
                                 .values(
                                     status=IngestionStatus.FAILED,
                                     error_message="Task crashed unexpectedly",
-                                    completed_at=datetime.now(timezone.utc),
+                                    completed_at=datetime.now(UTC),
                                 )
                                 .execution_options(synchronize_session=False)
                             )
                             await fallback_db.execute(stmt)
                             await fallback_db.commit()
                             logger.info(
-                                "Fallback: marked job %s as FAILED", job_uuid,
+                                "Fallback: marked job %s as FAILED",
+                                job_uuid,
                             )
                     except Exception:
                         logger.exception(

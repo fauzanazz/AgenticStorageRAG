@@ -50,8 +50,6 @@ class DuplicateEntityError(KnowledgeBaseError):
     """Raised when attempting to create a duplicate entity."""
 
     def __init__(self, name: str, entity_type: str):
-        super().__init__(
-            f"Entity '{name}' of type '{entity_type}' already exists"
-        )
+        super().__init__(f"Entity '{name}' of type '{entity_type}' already exists")
         self.name = name
         self.entity_type = entity_type

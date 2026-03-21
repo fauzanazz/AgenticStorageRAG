@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { FileText, Folder, Image, X } from "lucide-react";
+import { FileText, Folder, Image as ImageIcon, X } from "lucide-react";
 import { apiClient } from "@/lib/api-client";
 import type { DriveBrowseEntry } from "@/types/chat";
 
@@ -25,7 +25,7 @@ function formatFileSize(bytes: number | null): string {
 
 function getFileIcon(entry: DriveBrowseEntry) {
   if (entry.is_folder) return <Folder size={18} />;
-  if (entry.mime_type.startsWith("image/")) return <Image size={18} />;
+  if (entry.mime_type.startsWith("image/")) return <ImageIcon size={18} />;
   return <FileText size={18} />;
 }
 
@@ -61,21 +61,21 @@ export function DriveFileBrowser({ open, onClose, onAttach }: DriveFileBrowserPr
     if (!open) return;
 
     let cancelled = false;
-    setLoading(true);
-    setError(null);
 
-    const params = currentFolderId ? `?folder_id=${encodeURIComponent(currentFolderId)}` : "";
-    apiClient
-      .get<DriveBrowseEntry[]>(`/admin/ingestion/drive/browse-files${params}`)
-      .then((data) => {
+    const fetchEntries = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const params = currentFolderId ? `?folder_id=${encodeURIComponent(currentFolderId)}` : "";
+        const data = await apiClient.get<DriveBrowseEntry[]>(`/admin/ingestion/drive/browse-files${params}`);
         if (!cancelled) setEntries(sortEntries(data));
-      })
-      .catch((err) => {
-        if (!cancelled) setError(err?.message || "Failed to load files");
-      })
-      .finally(() => {
+      } catch (err: unknown) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load files");
+      } finally {
         if (!cancelled) setLoading(false);
-      });
+      }
+    };
+    void fetchEntries();
 
     return () => {
       cancelled = true;
@@ -83,8 +83,10 @@ export function DriveFileBrowser({ open, onClose, onAttach }: DriveFileBrowserPr
   }, [open, currentFolderId]);
 
   // Reset when modal closes
+  const prevOpenRef = useRef(open);
   useEffect(() => {
-    if (!open) resetState();
+    if (prevOpenRef.current && !open) resetState();
+    prevOpenRef.current = open;
   }, [open, resetState]);
 
   const handleFolderClick = (folder: DriveBrowseEntry) => {

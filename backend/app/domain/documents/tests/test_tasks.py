@@ -12,10 +12,7 @@ class TestProcessDocumentTask:
         from app.domain.documents.tasks import process_document_task
 
         assert process_document_task is not None
-        assert (
-            process_document_task.name
-            == "app.domain.documents.tasks.process_document_task"
-        )
+        assert process_document_task.name == "app.domain.documents.tasks.process_document_task"
 
     def test_task_queue_route(self) -> None:
         """Task name must match the documents queue route prefix."""
@@ -58,10 +55,7 @@ class TestCleanupExpiredTask:
         from app.domain.documents.tasks import cleanup_expired_task
 
         assert cleanup_expired_task is not None
-        assert (
-            cleanup_expired_task.name
-            == "app.domain.documents.tasks.cleanup_expired_task"
-        )
+        assert cleanup_expired_task.name == "app.domain.documents.tasks.cleanup_expired_task"
 
     @patch("app.domain.documents.service.DocumentService", autospec=True)
     @patch("app.domain.documents.tasks.storage_client")

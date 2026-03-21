@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -173,9 +172,7 @@ class AuthService(AbstractAuthService):
 
         return UserResponse.model_validate(user)
 
-    async def update_profile(
-        self, user_id: uuid.UUID, data: UpdateProfileRequest
-    ) -> UserResponse:
+    async def update_profile(self, user_id: uuid.UUID, data: UpdateProfileRequest) -> UserResponse:
         """Update user profile fields.
 
         Args:

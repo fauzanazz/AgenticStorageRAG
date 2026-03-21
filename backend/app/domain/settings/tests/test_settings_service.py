@@ -4,12 +4,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.domain.settings.schemas import (
-    ApiKeyStatus,
-    ModelSettingsResponse,
     UpdateModelSettingsRequest,
 )
 from app.domain.settings.service import SettingsService
-
 
 # -----------------------------------------------------------------------
 # Unit tests for SettingsService._apply_key
@@ -31,17 +28,13 @@ class TestApplyKey:
         assert SettingsService._apply_key(None, None) is None
 
     def test_new_value_encrypts(self):
-        with patch(
-            "app.domain.settings.service.encrypt_value", return_value="enc"
-        ) as mock_enc:
+        with patch("app.domain.settings.service.encrypt_value", return_value="enc") as mock_enc:
             result = SettingsService._apply_key("sk-new-key", None)
             mock_enc.assert_called_once_with("sk-new-key")
             assert result == "enc"
 
     def test_new_value_replaces_existing(self):
-        with patch(
-            "app.domain.settings.service.encrypt_value", return_value="new_enc"
-        ):
+        with patch("app.domain.settings.service.encrypt_value", return_value="new_enc"):
             result = SettingsService._apply_key("sk-new-key", "old_enc")
             assert result == "new_enc"
 
@@ -125,16 +118,14 @@ class TestSettingsServiceUpsert:
                 chat_model="openai/gpt-4o",
                 ingestion_model="openai/gpt-4o",
                 embedding_model="openai/text-embedding-3-small",
-                anthropic_api_key="",        # unchanged
-                openai_api_key="sk-test-key", # set new
-                dashscope_api_key=None,       # clear
-                openrouter_api_key="",        # unchanged
+                anthropic_api_key="",  # unchanged
+                openai_api_key="sk-test-key",  # set new
+                dashscope_api_key=None,  # clear
+                openrouter_api_key="",  # unchanged
             )
 
-            with patch(
-                "app.domain.settings.service.encrypt_value", return_value="enc_openai"
-            ):
-                result = await service.upsert_model_settings(user_id, request)
+            with patch("app.domain.settings.service.encrypt_value", return_value="enc_openai"):
+                await service.upsert_model_settings(user_id, request)
 
         assert mock_row.openai_api_key_enc == "enc_openai"
         assert mock_row.dashscope_api_key_enc is None
@@ -165,6 +156,6 @@ class TestSettingsServiceUpsert:
                 # all keys unchanged (empty string default)
             )
 
-            result = await service.upsert_model_settings(user_id, request)
+            await service.upsert_model_settings(user_id, request)
 
         assert mock_row.chat_model == "anthropic/claude-sonnet-4-20250514"

@@ -1,13 +1,13 @@
 """Tests for Google Drive connector (dual auth: Service Account + OAuth2)."""
 
 import json
-
-import pytest
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from app.domain.ingestion.drive_connector import (
-    GoogleDriveConnector,
     SUPPORTED_MIME_TYPES,
+    GoogleDriveConnector,
 )
 from app.domain.ingestion.exceptions import DriveAuthError
 
@@ -27,9 +27,7 @@ def _empty_settings(**overrides: str) -> MagicMock:
 
 def _mock_drive_service() -> MagicMock:
     svc = MagicMock()
-    svc.files.return_value.list.return_value.execute.return_value = {
-        "files": [{"id": "123"}]
-    }
+    svc.files.return_value.list.return_value.execute.return_value = {"files": [{"id": "123"}]}
     return svc
 
 
@@ -96,9 +94,7 @@ class TestAuthenticate:
                 return_value=mock_creds,
             ) as mock_from_info,
         ):
-            mock_settings.return_value = _empty_settings(
-                google_service_account_json=sa_json
-            )
+            mock_settings.return_value = _empty_settings(google_service_account_json=sa_json)
             result = await connector.authenticate()
             assert result is True
             assert connector._auth_method == "service_account_json"
@@ -271,7 +267,7 @@ class TestDownloadFile:
             mock_dl_instance.next_chunk.return_value = (None, True)
             mock_dl.return_value = mock_dl_instance
 
-            content, filename = await connector.download_file("file-1")
+            _content, filename = await connector.download_file("file-1")
             assert filename == "doc.pdf"
 
     @pytest.mark.asyncio
@@ -297,7 +293,7 @@ class TestDownloadFile:
             mock_dl_instance.next_chunk.return_value = (None, True)
             mock_dl.return_value = mock_dl_instance
 
-            content, filename = await connector.download_file("file-2")
+            _content, filename = await connector.download_file("file-2")
             assert filename == "My Document.docx"
 
     @pytest.mark.asyncio
@@ -323,7 +319,7 @@ class TestDownloadFile:
             mock_dl_instance.next_chunk.return_value = (None, True)
             mock_dl.return_value = mock_dl_instance
 
-            content, filename = await connector.download_file("file-3")
+            _content, filename = await connector.download_file("file-3")
             assert filename == "My Spreadsheet.pdf"
             mock_svc.files.return_value.export_media.assert_called_once_with(
                 fileId="file-3", mimeType="application/pdf"
@@ -352,7 +348,7 @@ class TestDownloadFile:
             mock_dl_instance.next_chunk.return_value = (None, True)
             mock_dl.return_value = mock_dl_instance
 
-            content, filename = await connector.download_file("file-4")
+            _content, filename = await connector.download_file("file-4")
             assert filename == "My Slides.pdf"
             mock_svc.files.return_value.export_media.assert_called_once_with(
                 fileId="file-4", mimeType="application/pdf"

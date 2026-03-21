@@ -12,10 +12,7 @@ class TestRunIngestionTask:
         from app.domain.ingestion.tasks import run_ingestion_task
 
         assert run_ingestion_task is not None
-        assert (
-            run_ingestion_task.name
-            == "app.domain.ingestion.tasks.run_ingestion_task"
-        )
+        assert run_ingestion_task.name == "app.domain.ingestion.tasks.run_ingestion_task"
 
     def test_task_queue_route(self) -> None:
         """Task name must match the ingestion queue route prefix."""

@@ -47,9 +47,7 @@ class HybridRetriever(IHybridRetriever):
     # Internal coroutines executed via asyncio.gather
     # ------------------------------------------------------------------
 
-    async def _run_vector_search(
-        self, request: HybridSearchRequest
-    ) -> list[Any]:
+    async def _run_vector_search(self, request: HybridSearchRequest) -> list[Any]:
         """Run vector similarity search and return raw results."""
         return await self._vector.search(
             VectorSearchRequest(
@@ -60,9 +58,7 @@ class HybridRetriever(IHybridRetriever):
             )
         )
 
-    async def _run_graph_search(
-        self, request: HybridSearchRequest
-    ) -> list[Any]:
+    async def _run_graph_search(self, request: HybridSearchRequest) -> list[Any]:
         """Run graph entity search and return raw results."""
         return await self._graph.search_entities(
             GraphSearchRequest(
@@ -75,9 +71,7 @@ class HybridRetriever(IHybridRetriever):
     # Public API
     # ------------------------------------------------------------------
 
-    async def search(
-        self, request: HybridSearchRequest
-    ) -> list[HybridSearchResult]:
+    async def search(self, request: HybridSearchRequest) -> list[HybridSearchResult]:
         """Execute hybrid search combining vector and graph results."""
         vector_weight = request.vector_weight
         graph_weight = 1.0 - vector_weight
@@ -97,11 +91,7 @@ class HybridRetriever(IHybridRetriever):
             tasks.append(self._run_graph_search(request))
 
         # Execute all searches concurrently.
-        raw_results = (
-            await asyncio.gather(*tasks, return_exceptions=True)
-            if tasks
-            else []
-        )
+        raw_results = await asyncio.gather(*tasks, return_exceptions=True) if tasks else []
 
         # Unpack results, treating exceptions as empty.
         vector_results: list[Any] = []
@@ -142,15 +132,11 @@ class HybridRetriever(IHybridRetriever):
             key = f"entity:{gr.entity.id}"
 
             # Build context from entity and relationships
-            context_parts = [
-                f"Entity: {gr.entity.name} ({gr.entity.entity_type})"
-            ]
+            context_parts = [f"Entity: {gr.entity.name} ({gr.entity.entity_type})"]
             if gr.entity.description:
                 context_parts.append(gr.entity.description)
             for rel in gr.relationships[:5]:
-                context_parts.append(
-                    f"  - {rel.relationship_type} -> {rel.target_entity_name}"
-                )
+                context_parts.append(f"  - {rel.relationship_type} -> {rel.target_entity_name}")
 
             content = "\n".join(context_parts)
 

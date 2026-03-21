@@ -9,7 +9,6 @@ import {
   Folder,
   FolderOpen,
   Loader2,
-  Save,
 } from "lucide-react";
 import { useDriveFolders, useDefaultFolder } from "@/hooks/use-ingestion";
 import type { DriveFolderEntry } from "@/types/ingestion";

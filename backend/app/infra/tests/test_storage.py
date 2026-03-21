@@ -1,11 +1,11 @@
 """Tests for Supabase Storage client wrapper."""
 
-from datetime import datetime, timezone
-from unittest.mock import patch, MagicMock
+from datetime import UTC, datetime
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.infra.storage import StorageClient, DOCUMENTS_BUCKET
+from app.infra.storage import DOCUMENTS_BUCKET, StorageClient
 
 
 class TestStorageClientInit:
@@ -180,14 +180,14 @@ class TestStorageClientTTL:
         expiry = StorageClient.calculate_expiry()
 
         assert isinstance(expiry, datetime)
-        assert expiry.tzinfo == timezone.utc
+        assert expiry.tzinfo == UTC
         # Should be approximately 7 days from now
-        delta = expiry - datetime.now(timezone.utc)
+        delta = expiry - datetime.now(UTC)
         assert 6.9 < delta.days + delta.seconds / 86400 < 7.1
 
     def test_calculate_expiry_with_custom_ttl(self) -> None:
         """calculate_expiry() should respect custom TTL."""
         expiry = StorageClient.calculate_expiry(ttl_days=30)
 
-        delta = expiry - datetime.now(timezone.utc)
+        delta = expiry - datetime.now(UTC)
         assert 29.9 < delta.days + delta.seconds / 86400 < 30.1

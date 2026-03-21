@@ -10,7 +10,6 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-
 # ---------------------------------------------------------------------------
 # Citation
 # ---------------------------------------------------------------------------
@@ -117,14 +116,15 @@ class ChatRequest(BaseModel):
         None, description="Existing conversation ID, or None to create new"
     )
     model: str | None = Field(
-        None, description="Model override for this request (e.g. 'anthropic/claude-sonnet-4-20250514')"
+        None,
+        description="Model override for this request (e.g. 'anthropic/claude-sonnet-4-20250514')",
     )
     enable_thinking: bool = Field(
-        False, description="Enable extended thinking (real API-level reasoning) for supported models"
+        False,
+        description="Enable extended thinking (real API-level reasoning) for supported models",
     )
     vector_weight: float = Field(
-        0.5, ge=0.0, le=1.0,
-        description="Weight for vector vs graph retrieval"
+        0.5, ge=0.0, le=1.0, description="Weight for vector vs graph retrieval"
     )
     attachment_ids: list[str] = Field(
         default_factory=list,
@@ -136,7 +136,8 @@ class ChatStreamEvent(BaseModel):
     """Server-sent event for streaming chat responses."""
 
     event: str = Field(
-        ..., description="Event type: token | thinking | tool_start | tool_result | citation | message_created | artifact_start | artifact_delta | artifact_end | done | error"
+        ...,
+        description="Event type: token | thinking | tool_start | tool_result | citation | message_created | artifact_start | artifact_delta | artifact_end | done | error",
     )
     data: str = Field("", description="Event payload")
 

@@ -30,21 +30,15 @@ class Conversation(Base):
 
     __tablename__ = "conversations"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid7)
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
-    title: Mapped[str] = mapped_column(
-        String(255), nullable=False, default="New conversation"
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    title: Mapped[str] = mapped_column(String(255), nullable=False, default="New conversation")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
@@ -68,31 +62,23 @@ class Message(Base):
 
     __tablename__ = "messages"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid7)
     conversation_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("conversations.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
-    role: Mapped[str] = mapped_column(
-        String(20), nullable=False
-    )
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     citations_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     tool_calls_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     thinking_blocks_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     steps_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     token_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    conversation: Mapped[Conversation] = relationship(
-        "Conversation", back_populates="messages"
-    )
+    conversation: Mapped[Conversation] = relationship("Conversation", back_populates="messages")
 
 
 class Artifact(Base):
@@ -100,9 +86,7 @@ class Artifact(Base):
 
     __tablename__ = "artifacts"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid7)
     conversation_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("conversations.id", ondelete="CASCADE"),
@@ -121,22 +105,16 @@ class Artifact(Base):
         nullable=False,
         index=True,
     )
-    type: Mapped[str] = mapped_column(
-        String(50), nullable=False, default="markdown"
-    )
+    type: Mapped[str] = mapped_column(String(50), nullable=False, default="markdown")
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False, default="")
     language: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
-    conversation: Mapped[Conversation] = relationship(
-        "Conversation", back_populates="artifacts"
-    )
+    conversation: Mapped[Conversation] = relationship("Conversation", back_populates="artifacts")
 
 
 class ChatAttachment(Base):
@@ -144,9 +122,7 @@ class ChatAttachment(Base):
 
     __tablename__ = "chat_attachments"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid7)
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
@@ -162,13 +138,7 @@ class ChatAttachment(Base):
     mime_type: Mapped[str] = mapped_column(String(100), nullable=False)
     size: Mapped[int] = mapped_column(Integer, nullable=False)
     storage_path: Mapped[str] = mapped_column(String(500), nullable=False)
-    expires_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    __table_args__ = (
-        Index("ix_chat_attachments_expires_at", "expires_at"),
-    )
+    __table_args__ = (Index("ix_chat_attachments_expires_at", "expires_at"),)

@@ -8,9 +8,15 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
-from sqlalchemy import select, func, update as sa_update
+if TYPE_CHECKING:
+    from app.domain.auth.models import OAuthAccount
+    from app.domain.ingestion.drive_connector import GoogleDriveConnector
+
+from sqlalchemy import func, select
+from sqlalchemy import update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -87,7 +93,7 @@ class IngestionService:
         #   - Worker crash / restart
         #   - Orchestrator exception where both the orchestrator's own
         #     except handler AND the task's fallback handler failed
-        stale_cutoff = datetime.now(timezone.utc) - _STALE_JOB_THRESHOLD
+        stale_cutoff = datetime.now(UTC) - _STALE_JOB_THRESHOLD
 
         stale_stmt = (
             sa_update(IngestionJob)
@@ -98,7 +104,7 @@ class IngestionService:
             .values(
                 status=IngestionStatus.FAILED,
                 error_message="Auto-failed: job exceeded maximum runtime and is presumed dead",
-                completed_at=datetime.now(timezone.utc),
+                completed_at=datetime.now(UTC),
             )
             .execution_options(synchronize_session=False)
         )
@@ -113,9 +119,7 @@ class IngestionService:
 
         # --- Check for genuinely running jobs --------------------------------
         running = await self._db.execute(
-            select(IngestionJob).where(
-                IngestionJob.status.in_(active_statuses)
-            )
+            select(IngestionJob).where(IngestionJob.status.in_(active_statuses))
         )
         if running.scalar_one_or_none() is not None:
             raise IngestionAlreadyRunningError()
@@ -125,7 +129,9 @@ class IngestionService:
         if request.source == "google_drive":
             saved_default = await self._get_config(_CFG_DRIVE_FOLDER_ID)
             settings = get_settings()
-            folder_id = request.folder_id or saved_default or settings.google_drive_folder_id or None
+            folder_id = (
+                request.folder_id or saved_default or settings.google_drive_folder_id or None
+            )
 
         # Create job
         job = IngestionJob(
@@ -142,6 +148,7 @@ class IngestionService:
 
         # Dispatch to Celery worker (non-blocking)
         from app.domain.ingestion.tasks import run_ingestion_task
+
         run_ingestion_task.delay(
             job_id=str(job.id),
             admin_user_id=str(admin_user_id),
@@ -169,11 +176,9 @@ class IngestionService:
             IngestionError: If job is not in a retryable state
         """
         from app.domain.ingestion.exceptions import IngestionError
-        from app.domain.ingestion.models import IndexedFile, IndexedFileStatus, IndexedFileStage
+        from app.domain.ingestion.models import IndexedFile, IndexedFileStage, IndexedFileStatus
 
-        result = await self._db.execute(
-            select(IngestionJob).where(IngestionJob.id == job_id)
-        )
+        result = await self._db.execute(select(IngestionJob).where(IngestionJob.id == job_id))
         original = result.scalar_one_or_none()
         if original is None:
             raise IngestionJobNotFoundError(str(job_id))
@@ -205,7 +210,9 @@ class IngestionService:
             IndexedFileStatus.PROCESSING.value,
         ]
         retryable_count_result = await self._db.execute(
-            select(func.count()).select_from(IndexedFile).where(
+            select(func.count())
+            .select_from(IndexedFile)
+            .where(
                 IndexedFile.job_id == job_id,
                 IndexedFile.status.in_(retryable_statuses),
             )
@@ -247,15 +254,14 @@ class IngestionService:
 
         # Refresh the job
         self._db.expire_all()
-        result = await self._db.execute(
-            select(IngestionJob).where(IngestionJob.id == job_id)
-        )
+        result = await self._db.execute(select(IngestionJob).where(IngestionJob.id == job_id))
         job = result.scalar_one()
 
         logger.info("Retrying ingestion job %s (%d files to reprocess)", job_id, retryable_count)
 
         # Dispatch to Celery worker (skip scanning, process only)
         from app.domain.ingestion.tasks import run_ingestion_task
+
         run_ingestion_task.delay(
             job_id=str(job_id),
             admin_user_id=str(admin_user_id),
@@ -271,9 +277,7 @@ class IngestionService:
         Raises:
             IngestionJobNotFoundError: If job not found
         """
-        result = await self._db.execute(
-            select(IngestionJob).where(IngestionJob.id == job_id)
-        )
+        result = await self._db.execute(select(IngestionJob).where(IngestionJob.id == job_id))
         job = result.scalar_one_or_none()
         if job is None:
             raise IngestionJobNotFoundError(str(job_id))
@@ -288,12 +292,9 @@ class IngestionService:
         """
         # Count by status
         status_counts_result = await self._db.execute(
-            select(IngestionJob.status, func.count().label("cnt"))
-            .group_by(IngestionJob.status)
+            select(IngestionJob.status, func.count().label("cnt")).group_by(IngestionJob.status)
         )
-        status_counts: dict[str, int] = {
-            row.status.value: row.cnt for row in status_counts_result
-        }
+        status_counts: dict[str, int] = {row.status.value: row.cnt for row in status_counts_result}
 
         # Total files across all completed jobs
         totals_result = await self._db.execute(
@@ -310,11 +311,13 @@ class IngestionService:
         active_result = await self._db.execute(
             select(IngestionJob)
             .where(
-                IngestionJob.status.in_([
-                    IngestionStatus.PENDING,
-                    IngestionStatus.SCANNING,
-                    IngestionStatus.PROCESSING,
-                ])
+                IngestionJob.status.in_(
+                    [
+                        IngestionStatus.PENDING,
+                        IngestionStatus.SCANNING,
+                        IngestionStatus.PROCESSING,
+                    ]
+                )
             )
             .order_by(IngestionJob.started_at.desc())
             .limit(1)
@@ -338,9 +341,7 @@ class IngestionService:
         """List ingestion jobs with pagination."""
         offset = (page - 1) * page_size
 
-        count_result = await self._db.execute(
-            select(func.count()).select_from(IngestionJob)
-        )
+        count_result = await self._db.execute(select(func.count()).select_from(IngestionJob))
         total = count_result.scalar() or 0
 
         result = await self._db.execute(
@@ -366,15 +367,17 @@ class IngestionService:
         Raises:
             IngestionJobNotFoundError: If job not found
         """
-        result = await self._db.execute(
-            select(IngestionJob).where(IngestionJob.id == job_id)
-        )
+        result = await self._db.execute(select(IngestionJob).where(IngestionJob.id == job_id))
         job = result.scalar_one_or_none()
         if job is None:
             raise IngestionJobNotFoundError(str(job_id))
 
-        if job.status in (IngestionStatus.PENDING, IngestionStatus.SCANNING, IngestionStatus.PROCESSING):
-            now = datetime.now(timezone.utc)
+        if job.status in (
+            IngestionStatus.PENDING,
+            IngestionStatus.SCANNING,
+            IngestionStatus.PROCESSING,
+        ):
+            now = datetime.now(UTC)
             stmt = (
                 sa_update(IngestionJob)
                 .where(IngestionJob.id == job_id)
@@ -410,7 +413,6 @@ class IngestionService:
         credentials (service account / env OAuth) when no per-user tokens
         are available.
         """
-        from app.domain.ingestion.drive_connector import GoogleDriveConnector
 
         connector = await self._get_drive_connector(user_id)
         entries = await connector.list_folder_children(parent_id)
@@ -419,7 +421,7 @@ class IngestionService:
     async def _get_drive_connector(
         self,
         user_id: uuid.UUID | None = None,
-    ) -> "GoogleDriveConnector":
+    ) -> GoogleDriveConnector:
         """Build an authenticated GoogleDriveConnector.
 
         Tries the logged-in user's stored OAuth tokens first, then falls
@@ -441,9 +443,7 @@ class IngestionService:
             if account and account.access_token_enc:
                 access_token = decrypt_value(account.access_token_enc)
                 refresh_token = (
-                    decrypt_value(account.refresh_token_enc)
-                    if account.refresh_token_enc
-                    else None
+                    decrypt_value(account.refresh_token_enc) if account.refresh_token_enc else None
                 )
                 connector = GoogleDriveConnector.from_user_tokens(
                     access_token=access_token,
@@ -460,8 +460,8 @@ class IngestionService:
 
     async def _maybe_persist_refreshed_token(
         self,
-        account: "OAuthAccount",
-        connector: "GoogleDriveConnector",
+        account: OAuthAccount,
+        connector: GoogleDriveConnector,
     ) -> None:
         """If the google-auth library refreshed the access token, persist it."""
         from app.infra.encryption import decrypt_value, encrypt_value
@@ -496,16 +496,12 @@ class IngestionService:
     # ------------------------------------------------------------------
 
     async def _get_config(self, key: str) -> str | None:
-        result = await self._db.execute(
-            select(AppConfig).where(AppConfig.key == key)
-        )
+        result = await self._db.execute(select(AppConfig).where(AppConfig.key == key))
         row = result.scalar_one_or_none()
         return row.value if row else None
 
     async def _set_config(self, key: str, value: str) -> None:
-        result = await self._db.execute(
-            select(AppConfig).where(AppConfig.key == key)
-        )
+        result = await self._db.execute(select(AppConfig).where(AppConfig.key == key))
         row = result.scalar_one_or_none()
         if row:
             row.value = value

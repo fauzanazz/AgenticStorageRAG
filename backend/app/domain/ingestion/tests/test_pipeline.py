@@ -3,7 +3,7 @@
 import asyncio
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -23,7 +23,6 @@ from app.domain.ingestion.pipeline import (
     StagePipeline,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -42,7 +41,7 @@ def _make_job(**kwargs) -> IngestionJob:
         "skipped_files": 0,
         "error_message": None,
         "metadata_": {},
-        "started_at": datetime.now(timezone.utc),
+        "started_at": datetime.now(UTC),
         "completed_at": None,
     }
     defaults.update(kwargs)
@@ -67,7 +66,7 @@ def _make_indexed_file(**kwargs) -> IndexedFile:
         "retry_count": 0,
         "document_id": None,
         "error_message": None,
-        "created_at": datetime.now(timezone.utc),
+        "created_at": datetime.now(UTC),
         "processed_at": None,
     }
     defaults.update(kwargs)
@@ -113,7 +112,6 @@ def _small_config() -> PipelineConfig:
 
 
 class TestPipelineStats:
-
     @pytest.mark.asyncio
     async def test_increment_and_to_dict(self) -> None:
         stats = PipelineStats()
@@ -139,7 +137,6 @@ class TestPipelineStats:
 
 
 class TestPipelineConfig:
-
     def test_from_settings(self) -> None:
         with patch("app.domain.ingestion.pipeline.PipelineConfig.from_settings") as mock:
             mock.return_value = _small_config()
@@ -153,11 +150,10 @@ class TestPipelineConfig:
 
 
 class TestDownloadStage:
-
     @pytest.mark.asyncio
     async def test_download_skips_oversized_files(self) -> None:
         """Files exceeding max size should be skipped without downloading."""
-        factory, mock_db = _make_session_factory()
+        factory, _mock_db = _make_session_factory()
         job = _make_job()
         connector = AsyncMock()
         llm = MagicMock()
@@ -223,7 +219,7 @@ class TestDownloadStage:
     @pytest.mark.asyncio
     async def test_download_returns_result(self) -> None:
         """Successful download should return a DownloadResult."""
-        factory, mock_db = _make_session_factory()
+        factory, _mock_db = _make_session_factory()
         job = _make_job()
         connector = AsyncMock()
         connector.download_file.return_value = (b"pdf-content", "test.pdf")
@@ -260,11 +256,10 @@ class TestDownloadStage:
 
 
 class TestPipelineIntegration:
-
     @pytest.mark.asyncio
     async def test_empty_pipeline_completes(self) -> None:
         """Pipeline with no files should complete without errors."""
-        factory, mock_db = _make_session_factory()
+        factory, _mock_db = _make_session_factory()
         job = _make_job()
         connector = AsyncMock()
         llm = MagicMock()
@@ -287,7 +282,7 @@ class TestPipelineIntegration:
     @pytest.mark.asyncio
     async def test_cancellation_stops_pipeline(self) -> None:
         """Pipeline should stop when cancellation is detected."""
-        factory, mock_db = _make_session_factory()
+        factory, _mock_db = _make_session_factory()
         job = _make_job()
         connector = AsyncMock()
         llm = MagicMock()
@@ -311,7 +306,7 @@ class TestPipelineIntegration:
             cancel_called = True
             return True
 
-        result = await pipeline.run(scanning_done, is_cancelled=is_cancelled)
+        await pipeline.run(scanning_done, is_cancelled=is_cancelled)
         assert cancel_called
 
 
@@ -321,11 +316,10 @@ class TestPipelineIntegration:
 
 
 class TestEmbedBatching:
-
     @pytest.mark.asyncio
     async def test_flush_embed_batch_calls_vector_service(self) -> None:
         """Flushing an embed batch should call VectorService.embed_chunks."""
-        factory, mock_db = _make_session_factory()
+        factory, _mock_db = _make_session_factory()
         job = _make_job()
         connector = AsyncMock()
         llm = MagicMock()
@@ -355,13 +349,11 @@ class TestEmbedBatching:
 
         mock_neo4j = AsyncMock()
 
-        with patch(
-            "app.domain.knowledge.vector_service.VectorService"
-        ) as MockVS, patch(
-            "app.domain.knowledge.graph_service.GraphService"
-        ), patch(
-            "app.domain.knowledge.kg_builder.KGBuilder"
-        ) as MockKG:
+        with (
+            patch("app.domain.knowledge.vector_service.VectorService") as MockVS,
+            patch("app.domain.knowledge.graph_service.GraphService"),
+            patch("app.domain.knowledge.kg_builder.KGBuilder") as MockKG,
+        ):
             mock_vs_instance = AsyncMock()
             mock_vs_instance.embed_chunks.return_value = 1
             MockVS.return_value = mock_vs_instance
@@ -387,11 +379,10 @@ class TestEmbedBatching:
 
 
 class TestRetryLogic:
-
     @pytest.mark.asyncio
     async def test_download_failure_queues_for_retry(self) -> None:
         """Download failures should be queued for retry, not immediately marked as permanently failed."""
-        factory, mock_db = _make_session_factory()
+        factory, _mock_db = _make_session_factory()
         job = _make_job()
         connector = AsyncMock()
         connector.download_file.side_effect = ConnectionError("connection reset")
@@ -421,7 +412,7 @@ class TestRetryLogic:
     @pytest.mark.asyncio
     async def test_extract_failure_queues_for_retry(self) -> None:
         """Extract failures should be queued for retry."""
-        factory, mock_db = _make_session_factory()
+        factory, _mock_db = _make_session_factory()
         job = _make_job()
         connector = AsyncMock()
         llm = MagicMock()

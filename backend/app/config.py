@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     )
 
     # --- Application ---
-    app_name: str = "OpenRAG"
+    app_name: str = "DriveRAG"
     app_version: str = "0.1.0"
     debug: bool = False
     environment: str = "development"  # development | staging | production
@@ -50,7 +50,9 @@ class Settings(BaseSettings):
     neo4j_uri: str = "bolt://localhost:17687"
     neo4j_user: str = "neo4j"
     neo4j_password: str = "password"
-    neo4j_database: str = "dingdongrag"  # Separate from other projects (no underscores in Neo4j DB names)
+    neo4j_database: str = (
+        "dingdongrag"  # Separate from other projects (no underscores in Neo4j DB names)
+    )
 
     # --- Redis ---
     redis_url: str = "redis://localhost:16379/0"
@@ -118,10 +120,7 @@ class Settings(BaseSettings):
                     f"{self.environment} environments"
                 )
             if not self.encryption_key:
-                raise ValueError(
-                    "ENCRYPTION_KEY is required in "
-                    f"{self.environment} environments"
-                )
+                raise ValueError(f"ENCRYPTION_KEY is required in {self.environment} environments")
         return self
 
 

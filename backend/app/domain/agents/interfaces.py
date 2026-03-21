@@ -7,13 +7,8 @@ from __future__ import annotations
 
 import uuid
 from abc import ABC, abstractmethod
-from collections.abc import AsyncGenerator
-from collections.abc import Callable
+from collections.abc import AsyncGenerator, Callable
 from typing import Any
-
-# Type alias for the SSE event emitter callback.
-# Signature: emit_event(event_type: str, data_json: str) -> None
-EventEmitter = Callable[[str, str], None] | None
 
 from app.domain.agents.schemas import (
     ChatRequest,
@@ -22,6 +17,10 @@ from app.domain.agents.schemas import (
     ConversationResponse,
     MessageResponse,
 )
+
+# Type alias for the SSE event emitter callback.
+# Signature: emit_event(event_type: str, data_json: str) -> None
+EventEmitter = Callable[[str, str], None] | None
 
 
 class IAgentTool(ABC):
@@ -115,16 +114,12 @@ class IChatService(ABC):
         ...
 
     @abstractmethod
-    async def delete_conversation(
-        self, conversation_id: uuid.UUID, user_id: uuid.UUID
-    ) -> None:
+    async def delete_conversation(self, conversation_id: uuid.UUID, user_id: uuid.UUID) -> None:
         """Delete a conversation and all its messages."""
         ...
 
     @abstractmethod
-    async def update_conversation_title(
-        self, conversation_id: uuid.UUID, title: str
-    ) -> None:
+    async def update_conversation_title(self, conversation_id: uuid.UUID, title: str) -> None:
         """Update a conversation's title."""
         ...
 

@@ -6,8 +6,8 @@ Use create_app() to get a fully configured application.
 
 import asyncio
 import logging
-from contextlib import asynccontextmanager
 from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, Request
@@ -15,22 +15,22 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import get_settings
-from app.infra.database import init_db, close_db
+from app.domain.agents.router import router as agents_router
+from app.domain.auth.models import OAuthAccount  # noqa: F401 — needed for Alembic
+from app.domain.auth.oauth.router import router as oauth_router
+from app.domain.auth.router import router as auth_router
+from app.domain.documents.router import router as documents_router
+from app.domain.ingestion.router import router as ingestion_router
+from app.domain.knowledge.router import router as knowledge_router
+from app.domain.settings.models import UserModelSettings  # noqa: F401 — needed for Alembic
+from app.domain.settings.router import router as settings_router
+from app.infra.database import close_db, init_db
+from app.infra.llm import llm_provider
+from app.infra.middleware import RequestLoggingMiddleware
 from app.infra.neo4j_client import neo4j_client
 from app.infra.redis_client import redis_client
 from app.infra.storage import storage_client
-from app.infra.llm import llm_provider
-from app.infra.middleware import RequestLoggingMiddleware
 from app.scripts.graph_schema import apply_schema
-from app.domain.auth.router import router as auth_router
-from app.domain.auth.oauth.router import router as oauth_router
-from app.domain.documents.router import router as documents_router
-from app.domain.knowledge.router import router as knowledge_router
-from app.domain.agents.router import router as agents_router
-from app.domain.ingestion.router import router as ingestion_router
-from app.domain.settings.router import router as settings_router
-from app.domain.auth.models import OAuthAccount  # noqa: F401 — needed for Alembic
-from app.domain.settings.models import UserModelSettings  # noqa: F401 — needed for Alembic
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +55,7 @@ async def _auto_seed_graph_if_empty() -> None:
         return
 
     # Check if graph is empty
-    settings = get_settings()
+    get_settings()
     records = await neo4j_client.execute_read("MATCH (n) RETURN count(n) AS cnt LIMIT 1")
     node_count = records[0]["cnt"] if records else 0
 
@@ -93,7 +93,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     uvicorn --reload never freezes waiting for a hung driver.
     """
     settings = get_settings()
-    logger.info("Starting %s v%s (%s)", settings.app_name, settings.app_version, settings.environment)
+    logger.info(
+        "Starting %s v%s (%s)", settings.app_name, settings.app_version, settings.environment
+    )
 
     # Initialize infrastructure (order matters for dependencies)
     init_db()
@@ -102,11 +104,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     neo4j_connected = False
     try:
         await asyncio.wait_for(
-            neo4j_client.connect(), timeout=_STARTUP_CONNECT_TIMEOUT,
+            neo4j_client.connect(),
+            timeout=_STARTUP_CONNECT_TIMEOUT,
         )
         neo4j_connected = True
-    except asyncio.TimeoutError:
-        logger.warning("Neo4j connection timed out after %.0fs (non-fatal)", _STARTUP_CONNECT_TIMEOUT)
+    except TimeoutError:
+        logger.warning(
+            "Neo4j connection timed out after %.0fs (non-fatal)", _STARTUP_CONNECT_TIMEOUT
+        )
     except Exception as e:
         logger.warning("Neo4j connection failed (non-fatal): %s", e)
 
@@ -114,10 +119,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if neo4j_connected:
         try:
             await asyncio.wait_for(
-                apply_schema(neo4j_client.driver), timeout=_STARTUP_CONNECT_TIMEOUT,
+                apply_schema(neo4j_client.driver),
+                timeout=_STARTUP_CONNECT_TIMEOUT,
             )
             logger.info("Neo4j schema applied")
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning("Neo4j schema init timed out (non-fatal)")
         except Exception as e:
             logger.warning("Neo4j schema init failed (non-fatal): %s", e)
@@ -129,10 +135,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     try:
         await asyncio.wait_for(
-            redis_client.connect(), timeout=_STARTUP_CONNECT_TIMEOUT,
+            redis_client.connect(),
+            timeout=_STARTUP_CONNECT_TIMEOUT,
         )
-    except asyncio.TimeoutError:
-        logger.warning("Redis connection timed out after %.0fs (non-fatal)", _STARTUP_CONNECT_TIMEOUT)
+    except TimeoutError:
+        logger.warning(
+            "Redis connection timed out after %.0fs (non-fatal)", _STARTUP_CONNECT_TIMEOUT
+        )
     except Exception as e:
         logger.warning("Redis connection failed (non-fatal): %s", e)
 
@@ -149,11 +158,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Shutdown infrastructure — run all teardowns concurrently with a hard
     # timeout so that a single hung driver cannot freeze the entire process
     # (critical for uvicorn --reload).
-    async def _safe_close(name: str, coro) -> None:  # noqa: ANN001
+    async def _safe_close(name: str, coro) -> None:
         try:
             await asyncio.wait_for(coro, timeout=_SHUTDOWN_TIMEOUT)
-        except asyncio.TimeoutError:
-            logger.warning("Shutdown: %s close timed out after %.0fs — skipping", name, _SHUTDOWN_TIMEOUT)
+        except TimeoutError:
+            logger.warning(
+                "Shutdown: %s close timed out after %.0fs — skipping", name, _SHUTDOWN_TIMEOUT
+            )
         except Exception as e:
             logger.warning("Shutdown: %s close failed: %s", name, e)
 
@@ -218,8 +229,7 @@ def create_app() -> FastAPI:
         llm_status = llm_provider.health_check()
 
         all_healthy = (
-            neo4j_status.get("status") == "healthy"
-            and redis_status.get("status") == "healthy"
+            neo4j_status.get("status") == "healthy" and redis_status.get("status") == "healthy"
         )
 
         return {

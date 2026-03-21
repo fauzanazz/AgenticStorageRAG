@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- react-force-graph-2d lacks TS types */
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -7,7 +8,6 @@ import { buildClusterTree, buildTierView } from "./cluster-utils";
 import type { FGNode } from "./cluster-utils";
 
 // Dynamic import — force-graph uses canvas APIs unavailable during SSR
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const ForceGraph2D = dynamic(() => import("react-force-graph-2d"), {
   ssr: false,
 }) as any;
@@ -46,7 +46,6 @@ interface GraphCanvasProps {
 }
 
 export function GraphCanvas({ data, className, onExpandNode }: GraphCanvasProps) {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fgRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });

@@ -123,7 +123,9 @@ class FileMetadataClassification(BaseModel):
     )
     major: str | None = Field(default=None, description="Academic major or department")
     course_code: str | None = Field(default=None, description="Course code, e.g. IF2120")
-    course_name: str | None = Field(default=None, description="Course name, e.g. Probabilitas dan Statistika")
+    course_name: str | None = Field(
+        default=None, description="Course name, e.g. Probabilitas dan Statistika"
+    )
     year: str | None = Field(default=None, description="Academic year or curriculum year")
     category: str | None = Field(
         default=None,

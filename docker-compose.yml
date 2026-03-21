@@ -1,4 +1,4 @@
-# OpenRAG - Local Development
+# DriveRAG - Local Development
 #
 # Two modes:
 #   make dev          → Full local stack (Postgres + Neo4j + Redis + backend + worker + frontend)

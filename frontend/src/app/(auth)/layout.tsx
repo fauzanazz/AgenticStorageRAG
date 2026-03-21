@@ -31,7 +31,7 @@ export default function AuthLayout({
               D
             </div>
             <span className="text-xl font-semibold tracking-tight" style={{ color: "var(--foreground)" }}>
-              OpenRAG
+              DriveRAG
             </span>
           </div>
         </div>

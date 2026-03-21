@@ -1,4 +1,4 @@
-# OpenRAG
+# DriveRAG
 
 An agentic Knowledge Graph RAG application that ingests documents into a hybrid retrieval system (Neo4j graph + pgvector), with an autonomous AI agent that reasons over the knowledge to answer queries through a mobile-first web interface.
 
@@ -82,7 +82,7 @@ cd frontend && pnpm dev
 ## Project Structure
 
 ```
-openrag/
+driverag/
 ├── backend/
 │   ├── app/
 │   │   ├── main.py              # FastAPI app + lifespan
@@ -177,7 +177,7 @@ See [`.env.example`](.env.example) for the full list. Key variables:
 
 ## Self-Hosting Guide
 
-Complete guide to deploy OpenRAG on your own infrastructure.
+Complete guide to deploy DriveRAG on your own infrastructure.
 
 ### 1. Prerequisites
 
@@ -296,7 +296,7 @@ The `/health/detailed` endpoint reports the status of all infrastructure connect
 
 ## Self-Seeding Guide
 
-OpenRAG has a two-tier knowledge architecture. This section covers how to populate both tiers.
+DriveRAG has a two-tier knowledge architecture. This section covers how to populate both tiers.
 
 ### Tier 1: Base Knowledge Graph (from Google Drive)
 

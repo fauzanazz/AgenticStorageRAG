@@ -1,12 +1,12 @@
 """Tests for auth router (API endpoints)."""
 
 import uuid
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock
 
 import pytest
-from httpx import AsyncClient, ASGITransport
 from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
 
 from app.dependencies import get_db
 from app.domain.auth.exceptions import (
@@ -15,7 +15,7 @@ from app.domain.auth.exceptions import (
     InvalidCredentialsError,
     InvalidTokenError,
 )
-from app.domain.auth.router import router, _get_auth_service
+from app.domain.auth.router import _get_auth_service, router
 from app.domain.auth.schemas import AuthResponse, TokenResponse, UserResponse
 
 
@@ -49,7 +49,7 @@ def _make_auth_response(
             full_name=full_name,
             is_active=True,
             is_admin=False,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         ),
         tokens=TokenResponse(
             access_token="mock_access",

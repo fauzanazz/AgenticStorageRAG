@@ -14,8 +14,7 @@ import asyncio
 import hashlib
 import json
 import logging
-import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -251,7 +250,7 @@ async def export_graph(shard_size_mb: int = DEFAULT_SHARD_SIZE_MB) -> dict[str, 
 
         manifest = {
             "version": _bump_version(),
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(UTC).isoformat(),
             "updated_by": "graph_export",
             "description": f"Exported {total_entities} entities, {total_relationships} relationships",
             "source": "neo4j_export",

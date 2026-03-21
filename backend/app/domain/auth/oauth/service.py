@@ -53,9 +53,7 @@ class OAuthService:
         )
         return self._provider.get_authorization_url(state=state, redirect_uri=redirect_uri)
 
-    async def handle_callback(
-        self, code: str, state: str, redirect_uri: str
-    ) -> AuthResponse:
+    async def handle_callback(self, code: str, state: str, redirect_uri: str) -> AuthResponse:
         """Handle OAuth callback: verify state, exchange code, find-or-create user."""
         # 1. Verify state
         redis_key = f"{_STATE_PREFIX}{state}"
@@ -131,7 +129,9 @@ class OAuthService:
 
         # Encrypt tokens
         access_enc = encrypt_value(oauth_tokens.access_token) if oauth_tokens.access_token else None
-        refresh_enc = encrypt_value(oauth_tokens.refresh_token) if oauth_tokens.refresh_token else None
+        refresh_enc = (
+            encrypt_value(oauth_tokens.refresh_token) if oauth_tokens.refresh_token else None
+        )
         scopes_str = " ".join(oauth_tokens.scopes) if oauth_tokens.scopes else None
 
         if account is not None:

@@ -88,9 +88,7 @@ class FetchDocumentTool(IAgentTool):
             "required": ["document_id"],
         }
 
-    async def execute(
-        self, emit_event: EventEmitter = None, **kwargs: Any
-    ) -> dict[str, Any]:
+    async def execute(self, emit_event: EventEmitter = None, **kwargs: Any) -> dict[str, Any]:
         document_id_str: str = kwargs.get("document_id", "")
         chunk_offset: int = kwargs.get("chunk_offset", 0)
 
@@ -101,9 +99,7 @@ class FetchDocumentTool(IAgentTool):
             return {"result": [], "error": "Invalid document_id", "count": 0}
 
         # -- Look up the document ----------------------------------------
-        result = await self._db.execute(
-            select(Document).where(Document.id == doc_id)
-        )
+        result = await self._db.execute(select(Document).where(Document.id == doc_id))
         document: Document | None = result.scalar_one_or_none()
 
         if document is None:
@@ -195,9 +191,7 @@ class FetchDocumentTool(IAgentTool):
         storage = StorageClient()
         return await storage.download_file(document.storage_path)
 
-    async def _extract_text(
-        self, document: Document, file_bytes: bytes
-    ) -> str:
+    async def _extract_text(self, document: Document, file_bytes: bytes) -> str:
         """Extract raw text from file bytes using the processor registry."""
         file_ext = Path(document.filename).suffix.lower().lstrip(".")
         processor = get_processor(document.file_type) or get_processor(file_ext)

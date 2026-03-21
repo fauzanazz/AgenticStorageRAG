@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.domain.auth.models import User
 from app.domain.auth.password import PasswordHasher
-from app.infra.database import init_db, close_db
+from app.infra.database import close_db, init_db
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -41,9 +41,7 @@ async def seed_users(session: AsyncSession) -> None:
 
     for account in SEED_ACCOUNTS:
         # Check if already exists
-        result = await session.execute(
-            select(User).where(User.email == account["email"])
-        )
+        result = await session.execute(select(User).where(User.email == account["email"]))
         existing = result.scalar_one_or_none()
 
         if existing:
@@ -70,7 +68,7 @@ async def main() -> None:
     logger.info("Seeding database: %s", settings.environment)
     logger.info("")
 
-    engine, session_factory = init_db()
+    _engine, session_factory = init_db()
 
     async with session_factory() as session:
         logger.info("--- Users ---")

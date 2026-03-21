@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import litellm
-from litellm import acompletion, ModelResponse
+from litellm import ModelResponse, acompletion
 from litellm import completion_cost as litellm_completion_cost
 
 from app.config import get_settings
@@ -234,10 +234,10 @@ class LLMProvider:
                     )
                     self._record_usage(self.fallback_model, response)
                 return response
-            except asyncio.TimeoutError:
-                raise asyncio.TimeoutError(
+            except TimeoutError as exc:
+                raise TimeoutError(
                     f"LLM call to fallback model {self.fallback_model} timed out after {_LLM_TIMEOUT}s"
-                )
+                ) from exc
 
     def _record_usage(self, model: str, response: ModelResponse) -> None:
         """Extract token usage and cost from a LiteLLM response and accumulate.
@@ -268,7 +268,9 @@ class LLMProvider:
             # Async Redis push — fire and forget via the event loop
             try:
                 loop = asyncio.get_running_loop()
-                loop.create_task(self._push_usage_to_redis(model, input_tokens, output_tokens, cost))
+                loop.create_task(
+                    self._push_usage_to_redis(model, input_tokens, output_tokens, cost)
+                )
             except RuntimeError:
                 # No running event loop (e.g., during sync tests)
                 pass
@@ -435,11 +437,10 @@ class LLMProvider:
             logger.warning("Redis cost read failed, falling back to in-memory: %s", e)
             return self.get_cost_summary()
 
-
     def with_user_settings(
         self,
         user_settings: Any,  # UserModelSettings — using Any to avoid circular import
-    ) -> "ScopedLLMProvider":
+    ) -> ScopedLLMProvider:
         """Return a ScopedLLMProvider using the user's models and decrypted API keys."""
         from app.infra.encryption import decrypt_value
 

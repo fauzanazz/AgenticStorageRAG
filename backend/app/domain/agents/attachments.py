@@ -11,7 +11,7 @@ import base64
 import logging
 import os
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -68,16 +68,12 @@ class AttachmentError(Exception):
 
 class AttachmentTooLargeError(AttachmentError):
     def __init__(self, filename: str, size: int, max_size: int) -> None:
-        super().__init__(
-            f"File '{filename}' is {size} bytes, max allowed is {max_size}"
-        )
+        super().__init__(f"File '{filename}' is {size} bytes, max allowed is {max_size}")
 
 
 class UnsupportedAttachmentTypeError(AttachmentError):
     def __init__(self, filename: str, mime_type: str) -> None:
-        super().__init__(
-            f"File type '{mime_type}' is not supported for '{filename}'"
-        )
+        super().__init__(f"File type '{mime_type}' is not supported for '{filename}'")
 
 
 class AttachmentNotFoundError(AttachmentError):
@@ -131,7 +127,7 @@ class AttachmentService:
         await storage_client.upload_file(storage_path, file_bytes, mime_type)
 
         # Save metadata to DB
-        expires_at = datetime.now(timezone.utc) + timedelta(days=ATTACHMENT_TTL_DAYS)
+        expires_at = datetime.now(UTC) + timedelta(days=ATTACHMENT_TTL_DAYS)
         attachment = ChatAttachment(
             id=attachment_id,
             user_id=user_id,
@@ -147,9 +143,7 @@ class AttachmentService:
 
     # -- Fetch --------------------------------------------------------------
 
-    async def get(
-        self, attachment_id: uuid.UUID, user_id: uuid.UUID
-    ) -> ChatAttachment:
+    async def get(self, attachment_id: uuid.UUID, user_id: uuid.UUID) -> ChatAttachment:
         """Fetch an attachment with ownership check."""
         result = await self._db.execute(
             select(ChatAttachment).where(
@@ -162,9 +156,7 @@ class AttachmentService:
             raise AttachmentNotFoundError(str(attachment_id))
         return attachment
 
-    async def get_many(
-        self, attachment_ids: list[str], user_id: uuid.UUID
-    ) -> list[ChatAttachment]:
+    async def get_many(self, attachment_ids: list[str], user_id: uuid.UUID) -> list[ChatAttachment]:
         """Batch fetch attachments with ownership check."""
         if not attachment_ids:
             return []
@@ -184,9 +176,7 @@ class AttachmentService:
 
     # -- LLM processing -----------------------------------------------------
 
-    async def process_for_llm(
-        self, attachments: list[ChatAttachment]
-    ) -> tuple[str, list[dict]]:
+    async def process_for_llm(self, attachments: list[ChatAttachment]) -> tuple[str, list[dict]]:
         """Process attachments into LLM-ready content.
 
         Returns:
@@ -207,9 +197,7 @@ class AttachmentService:
                 image_blocks.append(
                     {
                         "type": "image_url",
-                        "image_url": {
-                            "url": f"data:{attachment.mime_type};base64,{b64}"
-                        },
+                        "image_url": {"url": f"data:{attachment.mime_type};base64,{b64}"},
                     }
                 )
             elif attachment.mime_type == "application/pdf":
@@ -218,8 +206,7 @@ class AttachmentService:
                 processor = PdfProcessor()
                 text = await processor.extract_text(file_bytes)
                 text_parts.append(
-                    f"[Attached: {attachment.filename}]\n"
-                    f"<file_content>\n{text}\n</file_content>"
+                    f"[Attached: {attachment.filename}]\n<file_content>\n{text}\n</file_content>"
                 )
             elif (
                 attachment.mime_type
@@ -230,14 +217,12 @@ class AttachmentService:
                 processor = DocxProcessor()
                 text = await processor.extract_text(file_bytes)
                 text_parts.append(
-                    f"[Attached: {attachment.filename}]\n"
-                    f"<file_content>\n{text}\n</file_content>"
+                    f"[Attached: {attachment.filename}]\n<file_content>\n{text}\n</file_content>"
                 )
             elif attachment.mime_type == "text/plain":
                 text = file_bytes.decode("utf-8", errors="replace")
                 text_parts.append(
-                    f"[Attached: {attachment.filename}]\n"
-                    f"<file_content>\n{text}\n</file_content>"
+                    f"[Attached: {attachment.filename}]\n<file_content>\n{text}\n</file_content>"
                 )
 
         text_context = "\n\n".join(text_parts) if text_parts else ""

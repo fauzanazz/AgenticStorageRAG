@@ -1,1 +1,1 @@
-"""OpenRAG - Agentic Knowledge Graph RAG System."""
+"""DriveRAG - Agentic Knowledge Graph RAG System."""

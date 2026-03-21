@@ -4,8 +4,8 @@ import uuid
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies import get_current_user_id, get_db
 from app.config import get_settings
+from app.dependencies import get_current_user_id, get_db
 from app.domain.settings.schemas import (
     CHAT_MODELS,
     EMBEDDING_MODELS,
@@ -62,10 +62,18 @@ async def get_available_models(
         "anthropic": bool(
             getattr(user_settings, "anthropic_api_key_enc", None)
             or getattr(user_settings, "use_claude_code", False)
-        ) if user_settings else False,
-        "openai": bool(getattr(user_settings, "openai_api_key_enc", None)) if user_settings else False,
-        "dashscope": bool(getattr(user_settings, "dashscope_api_key_enc", None)) if user_settings else False,
-        "openrouter": bool(getattr(user_settings, "openrouter_api_key_enc", None)) if user_settings else False,
+        )
+        if user_settings
+        else False,
+        "openai": bool(getattr(user_settings, "openai_api_key_enc", None))
+        if user_settings
+        else False,
+        "dashscope": bool(getattr(user_settings, "dashscope_api_key_enc", None))
+        if user_settings
+        else False,
+        "openrouter": bool(getattr(user_settings, "openrouter_api_key_enc", None))
+        if user_settings
+        else False,
     }
 
     # A provider is available if either source has a key
@@ -99,7 +107,7 @@ async def test_claude_code(
         return {"ok": False, "error": "claude CLI binary not found in PATH"}
 
     try:
-        from claude_agent_sdk import ClaudeAgentOptions, AssistantMessage, TextBlock, query
+        from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, TextBlock, query
 
         response_text = ""
         options = ClaudeAgentOptions(max_turns=1)

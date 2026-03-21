@@ -8,9 +8,13 @@ from __future__ import annotations
 
 import logging
 import uuid
+from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
+
+if TYPE_CHECKING:
+    from app.domain.auth.models import User
 
 from app.dependencies import get_current_user, get_db, get_storage
 from app.domain.ingestion.exceptions import (
@@ -38,7 +42,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin/ingestion", tags=["admin-ingestion"])
 
 
-async def _require_admin(user: "User" = Depends(get_current_user)) -> "User":
+async def _require_admin(user: User = Depends(get_current_user)) -> User:
     """Dependency that ensures the current user is an admin.
 
     Raises:
@@ -67,7 +71,7 @@ def _get_service(
     description="Returns all registered source connectors with their configuration status.",
 )
 async def list_providers(
-    _user: "User" = Depends(_require_admin),
+    _user: User = Depends(_require_admin),
 ) -> list[ProviderInfo]:
     """List all registered ingestion source providers."""
     from app.domain.ingestion.registry import get_all_connectors
@@ -87,7 +91,7 @@ async def list_providers(
 )
 async def trigger_ingestion(
     request: TriggerIngestionRequest = TriggerIngestionRequest(),
-    user: "User" = Depends(_require_admin),
+    user: User = Depends(_require_admin),
     service: IngestionService = Depends(_get_service),
 ) -> IngestionJobResponse:
     """Trigger a new ingestion job from Google Drive."""
@@ -114,7 +118,7 @@ async def trigger_ingestion(
     summary="Get aggregate ingestion statistics",
 )
 async def get_ingestion_stats(
-    _user: "User" = Depends(_require_admin),
+    _user: User = Depends(_require_admin),
     service: IngestionService = Depends(_get_service),
 ) -> IngestionStatsResponse:
     """Get aggregate statistics for all ingestion jobs."""
@@ -127,7 +131,7 @@ async def get_ingestion_stats(
     description="Returns accumulated LLM token usage and estimated cost since last server restart. Admin only.",
 )
 async def get_cost_summary(
-    _user: "User" = Depends(_require_admin),
+    _user: User = Depends(_require_admin),
 ) -> dict:
     """Get accumulated LLM cost and token usage (aggregated across all workers via Redis)."""
     return await llm_provider.get_cost_summary_from_redis()
@@ -141,7 +145,7 @@ async def get_cost_summary(
 async def list_jobs(
     page: int = Query(1, ge=1, description="Page number (1-based)"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page (max 100)"),
-    _user: "User" = Depends(_require_admin),
+    _user: User = Depends(_require_admin),
     service: IngestionService = Depends(_get_service),
 ) -> IngestionJobListResponse:
     """List all ingestion jobs (newest first)."""
@@ -155,7 +159,7 @@ async def list_jobs(
 )
 async def get_job(
     job_id: uuid.UUID,
-    _user: "User" = Depends(_require_admin),
+    _user: User = Depends(_require_admin),
     service: IngestionService = Depends(_get_service),
 ) -> IngestionJobResponse:
     """Get details for a specific ingestion job."""
@@ -175,7 +179,7 @@ async def get_job(
 )
 async def cancel_job(
     job_id: uuid.UUID,
-    _user: "User" = Depends(_require_admin),
+    _user: User = Depends(_require_admin),
     service: IngestionService = Depends(_get_service),
 ) -> IngestionJobResponse:
     """Cancel a running ingestion job."""
@@ -197,7 +201,7 @@ async def cancel_job(
 )
 async def retry_job(
     job_id: uuid.UUID,
-    user: "User" = Depends(_require_admin),
+    user: User = Depends(_require_admin),
     service: IngestionService = Depends(_get_service),
 ) -> IngestionJobResponse:
     """Retry a failed or cancelled ingestion job."""
@@ -231,7 +235,7 @@ async def retry_job(
 )
 async def browse_drive_folders(
     parent_id: str = Query("root", description="Parent folder ID ('root' for top-level)"),
-    user: "User" = Depends(_require_admin),
+    user: User = Depends(_require_admin),
     service: IngestionService = Depends(_get_service),
 ) -> list[DriveFolderEntry]:
     """List subfolders of a Google Drive folder.
@@ -255,7 +259,7 @@ async def browse_drive_folders(
     summary="Get default Drive folder",
 )
 async def get_default_folder(
-    _user: "User" = Depends(_require_admin),
+    _user: User = Depends(_require_admin),
     service: IngestionService = Depends(_get_service),
 ) -> DefaultFolderResponse:
     """Get the saved default Drive folder for ingestion."""
@@ -269,7 +273,7 @@ async def get_default_folder(
 )
 async def save_default_folder(
     request: SaveDefaultFolderRequest,
-    _user: "User" = Depends(_require_admin),
+    _user: User = Depends(_require_admin),
     service: IngestionService = Depends(_get_service),
 ) -> DefaultFolderResponse:
     """Save/update the default Drive folder for ingestion."""
@@ -290,7 +294,7 @@ async def save_default_folder(
 )
 async def browse_drive_for_attachments(
     folder_id: str | None = Query(None, description="Drive folder ID. None = root."),
-    user: "User" = Depends(get_current_user),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[DriveBrowseEntry]:
     """Browse files and folders in the user's connected Google Drive.
@@ -298,8 +302,9 @@ async def browse_drive_for_attachments(
     Returns files filtered to supported attachment types plus all folders
     for navigation. Available to any authenticated user (not admin-only).
     """
-    from app.domain.auth.models import OAuthAccount
     from sqlalchemy import select as sa_select
+
+    from app.domain.auth.models import OAuthAccount
 
     result = await db.execute(
         sa_select(OAuthAccount).where(
@@ -322,8 +327,12 @@ async def browse_drive_for_attachments(
     )
 
     ATTACHMENT_MIME_TYPES = {
-        "image/png", "image/jpeg", "image/gif", "image/webp",
-        "text/plain", "application/pdf",
+        "image/png",
+        "image/jpeg",
+        "image/gif",
+        "image/webp",
+        "text/plain",
+        "application/pdf",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "application/vnd.google-apps.document",  # Google Docs (exportable)
     }
@@ -335,14 +344,16 @@ async def browse_drive_for_attachments(
         browse_entries = []
         for entry in entries:
             if entry.is_folder or entry.mime_type in ATTACHMENT_MIME_TYPES:
-                browse_entries.append(DriveBrowseEntry(
-                    id=entry.file_id,
-                    name=entry.name,
-                    mime_type=entry.mime_type,
-                    size=entry.size,
-                    is_folder=entry.is_folder,
-                    modified_time=entry.modified_time,
-                ))
+                browse_entries.append(
+                    DriveBrowseEntry(
+                        id=entry.file_id,
+                        name=entry.name,
+                        mime_type=entry.mime_type,
+                        size=entry.size,
+                        is_folder=entry.is_folder,
+                        modified_time=entry.modified_time,
+                    )
+                )
 
         return browse_entries
     except Exception as e:

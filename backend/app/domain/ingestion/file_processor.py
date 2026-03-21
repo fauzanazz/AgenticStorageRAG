@@ -11,10 +11,11 @@ import asyncio
 import gc
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select, update as sa_update
+from sqlalchemy import select
+from sqlalchemy import update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.ingestion.interfaces import SourceConnector
@@ -70,10 +71,12 @@ class FileProcessor:
             select(IndexedFile)
             .where(
                 IndexedFile.job_id == self._job.id,
-                IndexedFile.status.in_([
-                    IndexedFileStatus.PENDING.value,
-                    IndexedFileStatus.PROCESSING.value,
-                ]),
+                IndexedFile.status.in_(
+                    [
+                        IndexedFileStatus.PENDING.value,
+                        IndexedFileStatus.PROCESSING.value,
+                    ]
+                ),
             )
             .order_by(IndexedFile.created_at)
         )
@@ -82,7 +85,8 @@ class FileProcessor:
 
         logger.info(
             "FileProcessor: %d files to process for job %s",
-            len(files), self._job.id,
+            len(files),
+            self._job.id,
         )
 
         for indexed_file in files:
@@ -93,7 +97,8 @@ class FileProcessor:
 
             # Mark as processing
             await self._update_file_status(
-                indexed_file, IndexedFileStatus.PROCESSING.value,
+                indexed_file,
+                IndexedFileStatus.PROCESSING.value,
             )
 
             try:
@@ -139,7 +144,8 @@ class FileProcessor:
             except Exception as e:
                 logger.exception(
                     "Failed to process indexed file %s: %s",
-                    indexed_file.file_name, e,
+                    indexed_file.file_name,
+                    e,
                 )
                 await self._update_file_status(
                     indexed_file,
@@ -186,10 +192,12 @@ class FileProcessor:
                 select(IndexedFile)
                 .where(
                     IndexedFile.job_id == self._job.id,
-                    IndexedFile.status.in_([
-                        IndexedFileStatus.PENDING.value,
-                        IndexedFileStatus.PROCESSING.value,
-                    ]),
+                    IndexedFile.status.in_(
+                        [
+                            IndexedFileStatus.PENDING.value,
+                            IndexedFileStatus.PROCESSING.value,
+                        ]
+                    ),
                 )
                 .order_by(IndexedFile.created_at)
                 .limit(10)
@@ -203,10 +211,12 @@ class FileProcessor:
                         select(IndexedFile)
                         .where(
                             IndexedFile.job_id == self._job.id,
-                            IndexedFile.status.in_([
-                                IndexedFileStatus.PENDING.value,
-                                IndexedFileStatus.PROCESSING.value,
-                            ]),
+                            IndexedFile.status.in_(
+                                [
+                                    IndexedFileStatus.PENDING.value,
+                                    IndexedFileStatus.PROCESSING.value,
+                                ]
+                            ),
                         )
                         .order_by(IndexedFile.created_at)
                         .limit(10)
@@ -224,7 +234,8 @@ class FileProcessor:
                     return {"processed": processed, "failed": failed, "skipped": skipped}
 
                 await self._update_file_status(
-                    indexed_file, IndexedFileStatus.PROCESSING.value,
+                    indexed_file,
+                    IndexedFileStatus.PROCESSING.value,
                 )
 
                 try:
@@ -273,7 +284,8 @@ class FileProcessor:
                 except Exception as e:
                     logger.exception(
                         "Failed to process indexed file %s: %s",
-                        indexed_file.file_name, e,
+                        indexed_file.file_name,
+                        e,
                     )
                     await self._update_file_status(
                         indexed_file,
@@ -300,8 +312,12 @@ class FileProcessor:
             values["document_id"] = document_id
         if error_message is not None:
             values["error_message"] = error_message
-        if status in (IndexedFileStatus.COMPLETED.value, IndexedFileStatus.FAILED.value, IndexedFileStatus.SKIPPED.value):
-            values["processed_at"] = datetime.now(timezone.utc)
+        if status in (
+            IndexedFileStatus.COMPLETED.value,
+            IndexedFileStatus.FAILED.value,
+            IndexedFileStatus.SKIPPED.value,
+        ):
+            values["processed_at"] = datetime.now(UTC)
 
         stmt = (
             sa_update(IndexedFile)

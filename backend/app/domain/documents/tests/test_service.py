@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import io
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -16,7 +16,7 @@ from app.domain.documents.exceptions import (
     FileTooLargeError,
     UnsupportedFileTypeError,
 )
-from app.domain.documents.models import Document, DocumentChunk, DocumentSource, DocumentStatus
+from app.domain.documents.models import Document, DocumentSource, DocumentStatus
 from app.domain.documents.schemas import ChunkData, ProcessingResult
 from app.domain.documents.service import DocumentService
 
@@ -51,9 +51,9 @@ def _make_mock_document(
     mock.error_message = None
     mock.is_base_knowledge = False
     mock.metadata_ = {}
-    mock.uploaded_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    mock.processed_at = datetime(2026, 1, 1, 0, 5, tzinfo=timezone.utc)
-    mock.expires_at = datetime(2026, 1, 8, tzinfo=timezone.utc)
+    mock.uploaded_at = datetime(2026, 1, 1, tzinfo=UTC)
+    mock.processed_at = datetime(2026, 1, 1, 0, 5, tzinfo=UTC)
+    mock.expires_at = datetime(2026, 1, 8, tzinfo=UTC)
     return mock
 
 
@@ -67,10 +67,12 @@ class TestDocumentServiceUpload:
         mock_storage.upload_file = AsyncMock(return_value={"path": "test"})
 
         # Make db.add a regular Mock that sets ORM defaults on the Document
-        from datetime import datetime, timezone
+        from datetime import datetime
+
         def _fake_add(obj: object) -> None:
             if hasattr(obj, "uploaded_at") and obj.uploaded_at is None:
-                obj.uploaded_at = datetime.now(timezone.utc)
+                obj.uploaded_at = datetime.now(UTC)
+
         mock_db.add = MagicMock(side_effect=_fake_add)
 
         service = DocumentService(db=mock_db, storage=mock_storage)

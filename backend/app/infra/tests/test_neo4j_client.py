@@ -1,6 +1,6 @@
 """Tests for Neo4j client wrapper."""
 
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 

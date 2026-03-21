@@ -105,7 +105,11 @@ class GenerateDocumentTool(IAgentTool):
         fmt = kwargs.get("format", "markdown")
 
         if not instructions:
-            return {"result": {"error": "No instructions provided"}, "count": 0, "source": "generate_document"}
+            return {
+                "result": {"error": "No instructions provided"},
+                "count": 0,
+                "source": "generate_document",
+            }
 
         is_html = fmt == "html"
         artifact_type = "text/html" if is_html else "markdown"
@@ -158,13 +162,15 @@ class GenerateDocumentTool(IAgentTool):
             if emit_event:
                 emit_event(
                     "artifact_end",
-                    json.dumps({
-                        "artifact_id": artifact_id,
-                        "title": title,
-                        "type": artifact_type,
-                        "content_length": len(full_content),
-                        "error": str(e),
-                    }),
+                    json.dumps(
+                        {
+                            "artifact_id": artifact_id,
+                            "title": title,
+                            "type": artifact_type,
+                            "content_length": len(full_content),
+                            "error": str(e),
+                        }
+                    ),
                 )
             return {"result": {"error": str(e)}, "count": 0, "source": "generate_document"}
 
@@ -172,12 +178,14 @@ class GenerateDocumentTool(IAgentTool):
         if emit_event:
             emit_event(
                 "artifact_end",
-                json.dumps({
-                    "artifact_id": artifact_id,
-                    "title": title,
-                    "type": artifact_type,
-                    "content_length": len(full_content),
-                }),
+                json.dumps(
+                    {
+                        "artifact_id": artifact_id,
+                        "title": title,
+                        "type": artifact_type,
+                        "content_length": len(full_content),
+                    }
+                ),
             )
 
         return {

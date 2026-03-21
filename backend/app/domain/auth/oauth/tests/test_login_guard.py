@@ -1,8 +1,8 @@
 """Tests for OAuth login guard (Google-only users blocked from password login)."""
 
 import uuid
-from unittest.mock import AsyncMock, MagicMock, patch
-from datetime import datetime, UTC
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 

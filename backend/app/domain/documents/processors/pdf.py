@@ -18,8 +18,9 @@ import sys
 import tempfile
 from pathlib import Path
 
-from .base import BaseProcessor
 from app.domain.documents.schemas import ProcessingResult
+
+from .base import BaseProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +76,7 @@ class PdfProcessor(BaseProcessor):
                 stderr = proc.stderr.decode(errors="replace")[:2000]
                 raise RuntimeError(f"PDF extraction failed (rc={proc.returncode}): {stderr[:500]}")
 
-            with open(result_file, "r") as f:
+            with open(result_file) as f:
                 data = json.load(f)
 
             # Truncate text immediately to prevent OOM in the parent process.
@@ -85,7 +86,9 @@ class PdfProcessor(BaseProcessor):
             if len(text) > _MAX_TEXT_CHARS:
                 logger.warning(
                     "PDF text truncated from %d to %d chars (%d pages)",
-                    len(text), _MAX_TEXT_CHARS, data.get("page_count", 0),
+                    len(text),
+                    _MAX_TEXT_CHARS,
+                    data.get("page_count", 0),
                 )
                 data["text"] = text[:_MAX_TEXT_CHARS]
                 del text  # free the original large string
@@ -152,9 +155,7 @@ class PdfProcessor(BaseProcessor):
             )
 
         except subprocess.TimeoutExpired:
-            logger.error(
-                "PDF child process timed out after %ds", _CHILD_TIMEOUT
-            )
+            logger.error("PDF child process timed out after %ds", _CHILD_TIMEOUT)
             return ProcessingResult(
                 chunks=[],
                 metadata={"error": f"PDF extraction timed out after {_CHILD_TIMEOUT}s"},

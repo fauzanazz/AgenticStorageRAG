@@ -15,7 +15,6 @@ from app.dependencies import get_current_user, get_db
 from app.domain.auth.models import User
 from app.domain.knowledge.exceptions import (
     EntityNotFoundError,
-    GraphQueryError,
     KnowledgeBaseError,
 )
 from app.domain.knowledge.graph_service import GraphService
@@ -146,7 +145,9 @@ async def get_graph(
     document_id: uuid.UUID | None = Query(None),
     entity_types: str | None = Query(None, description="Comma-separated entity types"),
     limit: int = Query(500, ge=1, le=5000),
-    source: str | None = Query(None, description="Filter by document source: 'upload' or 'google_drive'"),
+    source: str | None = Query(
+        None, description="Filter by document source: 'upload' or 'google_drive'"
+    ),
     user: User = Depends(get_current_user),
     graph: GraphService = Depends(_get_graph_service),
 ) -> GraphVisualization:

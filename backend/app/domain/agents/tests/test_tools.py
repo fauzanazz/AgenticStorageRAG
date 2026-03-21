@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
 import pytest
 
 from app.domain.agents.tools.graph_search import GraphSearchTool
-from app.domain.agents.tools.vector_search import VectorSearchTool
 from app.domain.agents.tools.hybrid_search import HybridSearchTool
+from app.domain.agents.tools.vector_search import VectorSearchTool
 from app.domain.knowledge.schemas import (
     EntityResponse,
     GraphSearchResult,
@@ -21,7 +21,7 @@ from app.domain.knowledge.schemas import (
 
 @pytest.fixture
 def now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class TestGraphSearchTool:

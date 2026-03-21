@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -15,7 +15,6 @@ from app.domain.agents.schemas import (
     ConversationResponse,
     MessageResponse,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -92,7 +91,7 @@ async def _async_iter(items):
 
 @pytest.fixture
 def now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 @pytest.fixture
@@ -143,19 +142,21 @@ def mock_tool() -> MagicMock:
         },
         "required": ["query"],
     }
-    tool.execute = AsyncMock(return_value={
-        "result": [
-            {
-                "content": "AI is artificial intelligence",
-                "source": "vector",
-                "score": 0.9,
-                "document_id": str(uuid.uuid4()),
-                "chunk_id": str(uuid.uuid4()),
-            }
-        ],
-        "count": 1,
-        "source": "hybrid",
-    })
+    tool.execute = AsyncMock(
+        return_value={
+            "result": [
+                {
+                    "content": "AI is artificial intelligence",
+                    "source": "vector",
+                    "score": 0.9,
+                    "document_id": str(uuid.uuid4()),
+                    "chunk_id": str(uuid.uuid4()),
+                }
+            ],
+            "count": 1,
+            "source": "hybrid",
+        }
+    )
     return tool
 
 
@@ -202,6 +203,7 @@ class TestRAGAgentReActLoop:
         ]
 
         call_count = 0
+
         async def _complete_side(**kwargs):
             nonlocal call_count
             call_count += 1
@@ -244,13 +246,18 @@ class TestRAGAgentReActLoop:
 
         agent = RAGAgent(llm=mock_llm, chat_service=mock_chat_service, tools=[tool_a, tool_b])
 
-        tc_a_delta = _make_tool_call_delta(index=0, call_id="call_a", name="graph_search", arguments='{"query": "test"}')
-        tc_b_delta = _make_tool_call_delta(index=1, call_id="call_b", name="vector_search", arguments='{"query": "test"}')
+        tc_a_delta = _make_tool_call_delta(
+            index=0, call_id="call_a", name="graph_search", arguments='{"query": "test"}'
+        )
+        tc_b_delta = _make_tool_call_delta(
+            index=1, call_id="call_b", name="vector_search", arguments='{"query": "test"}'
+        )
 
         iter1_chunks = [_make_stream_chunk(content=None, tool_calls=[tc_a_delta, tc_b_delta])]
         iter2_chunks = [_make_stream_chunk(content="Answer.")]
 
         call_count = 0
+
         async def _complete_side(**kwargs):
             nonlocal call_count
             call_count += 1

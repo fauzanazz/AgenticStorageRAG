@@ -1,11 +1,11 @@
 """Tests for Google OAuth provider."""
 
-import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
-from datetime import datetime, UTC
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.domain.auth.oauth.google import GoogleOAuthProvider
+import pytest
+
 from app.domain.auth.exceptions import OAuthError
+from app.domain.auth.oauth.google import GoogleOAuthProvider
 
 
 class TestGoogleOAuthProvider:
@@ -37,9 +37,7 @@ class TestGoogleOAuthProvider:
     def test_get_authorization_url_missing_client_id(self, mock_settings):
         mock_settings.return_value = MagicMock(google_client_id="")
         with pytest.raises(OAuthError, match="GOOGLE_CLIENT_ID"):
-            self.provider.get_authorization_url(
-                state="test", redirect_uri="http://localhost/cb"
-            )
+            self.provider.get_authorization_url(state="test", redirect_uri="http://localhost/cb")
 
     @pytest.mark.asyncio
     @patch("app.domain.auth.oauth.google.get_settings")

@@ -10,7 +10,6 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-
 # ---------------------------------------------------------------------------
 # Entity schemas
 # ---------------------------------------------------------------------------
@@ -19,7 +18,9 @@ from pydantic import BaseModel, Field
 class EntityBase(BaseModel):
     """Shared entity fields."""
 
-    entity_type: str = Field(..., description="Type/label of the entity (e.g., Person, Concept, Organization)")
+    entity_type: str = Field(
+        ..., description="Type/label of the entity (e.g., Person, Concept, Organization)"
+    )
     name: str = Field(..., max_length=500, description="Entity name")
     description: str | None = Field(None, description="Entity description")
     properties: dict | None = Field(None, description="Additional entity properties")
@@ -58,7 +59,9 @@ class EntityWithRelationships(EntityResponse):
 class RelationshipBase(BaseModel):
     """Shared relationship fields."""
 
-    relationship_type: str = Field(..., description="Type of relationship (e.g., WORKS_AT, RELATED_TO)")
+    relationship_type: str = Field(
+        ..., description="Type of relationship (e.g., WORKS_AT, RELATED_TO)"
+    )
     properties: dict | None = Field(None, description="Additional relationship properties")
     weight: float = Field(1.0, ge=0.0, le=1.0, description="Relationship strength/confidence")
 
@@ -133,7 +136,9 @@ class HybridSearchRequest(BaseModel):
 
     query: str = Field(..., min_length=1, max_length=2000)
     top_k: int = Field(10, ge=1, le=100)
-    vector_weight: float = Field(0.5, ge=0.0, le=1.0, description="Weight for vector results (1 - this = graph weight)")
+    vector_weight: float = Field(
+        0.5, ge=0.0, le=1.0, description="Weight for vector results (1 - this = graph weight)"
+    )
     document_id: uuid.UUID | None = None
 
 

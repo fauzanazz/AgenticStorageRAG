@@ -1,4 +1,4 @@
-# OpenRAG - Makefile
+# DriveRAG - Makefile
 # Run `make help` to see all available commands.
 
 .PHONY: help dev dev-supabase dev-backend dev-worker dev-frontend test test-backend test-frontend lint lint-backend lint-frontend typecheck typecheck-frontend build migrate migrate-local migration seed graph-schema graph-seed graph-seed-clean graph-export clean down logs ps

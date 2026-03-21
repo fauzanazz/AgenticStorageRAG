@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from app.domain.knowledge.exceptions import (
     DuplicateEntityError,
     EmbeddingError,

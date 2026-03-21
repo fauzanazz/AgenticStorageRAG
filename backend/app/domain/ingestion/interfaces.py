@@ -9,7 +9,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any
 
-from app.domain.ingestion.schemas import DriveFolderEntry, DriveFileInfo
+from app.domain.ingestion.schemas import DriveFileInfo, DriveFolderEntry
 
 
 class SourceConnector(ABC):

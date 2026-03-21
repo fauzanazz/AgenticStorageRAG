@@ -7,9 +7,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.domain.knowledge.vector_service import VectorService, _estimate_tokens
 from app.domain.knowledge.exceptions import EmbeddingError
 from app.domain.knowledge.schemas import VectorSearchRequest
+from app.domain.knowledge.vector_service import VectorService, _estimate_tokens
 
 
 @pytest.fixture
@@ -47,9 +47,7 @@ class TestEmbedChunks:
         assert result == 0
 
     @pytest.mark.asyncio
-    async def test_embed_chunks_success(
-        self, service: VectorService, mock_db: AsyncMock
-    ) -> None:
+    async def test_embed_chunks_success(self, service: VectorService, mock_db: AsyncMock) -> None:
         doc_id = uuid.uuid4()
         chunks = [
             {"id": uuid.uuid4(), "content": "Test chunk 1", "metadata": {"page": 1}},
@@ -63,7 +61,9 @@ class TestEmbedChunks:
             {"embedding": [0.2] * 1536},
         ]
 
-        with patch("app.domain.knowledge.vector_service.litellm.aembedding", return_value=mock_response):
+        with patch(
+            "app.domain.knowledge.vector_service.litellm.aembedding", return_value=mock_response
+        ):
             result = await service.embed_chunks(chunks, doc_id)
 
         assert result == 2
@@ -71,28 +71,26 @@ class TestEmbedChunks:
         mock_db.flush.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_embed_chunks_api_failure(
-        self, service: VectorService
-    ) -> None:
+    async def test_embed_chunks_api_failure(self, service: VectorService) -> None:
         chunks = [
             {"id": uuid.uuid4(), "content": "Test chunk", "metadata": None},
         ]
 
-        with patch(
-            "app.domain.knowledge.vector_service.litellm.aembedding",
-            side_effect=Exception("API rate limit"),
+        with (
+            patch(
+                "app.domain.knowledge.vector_service.litellm.aembedding",
+                side_effect=Exception("API rate limit"),
+            ),
+            pytest.raises(EmbeddingError, match="Failed to embed chunks"),
         ):
-            with pytest.raises(EmbeddingError, match="Failed to embed chunks"):
-                await service.embed_chunks(chunks, uuid.uuid4())
+            await service.embed_chunks(chunks, uuid.uuid4())
 
 
 class TestVectorSearch:
     """Tests for vector similarity search."""
 
     @pytest.mark.asyncio
-    async def test_search_success(
-        self, service: VectorService, mock_db: AsyncMock
-    ) -> None:
+    async def test_search_success(self, service: VectorService, mock_db: AsyncMock) -> None:
         chunk_id = uuid.uuid4()
         doc_id = uuid.uuid4()
 
@@ -114,9 +112,7 @@ class TestVectorSearch:
             "app.domain.knowledge.vector_service.litellm.aembedding",
             return_value=mock_response,
         ):
-            results = await service.search(
-                VectorSearchRequest(query="test query", top_k=5)
-            )
+            results = await service.search(VectorSearchRequest(query="test query", top_k=5))
 
         assert len(results) == 1
         assert results[0].content == "Test content"
@@ -139,9 +135,7 @@ class TestVectorSearch:
             "app.domain.knowledge.vector_service.litellm.aembedding",
             return_value=mock_response,
         ):
-            results = await service.search(
-                VectorSearchRequest(query="test", document_id=doc_id)
-            )
+            results = await service.search(VectorSearchRequest(query="test", document_id=doc_id))
 
         assert results == []
 
@@ -150,9 +144,7 @@ class TestDeleteDocumentEmbeddings:
     """Tests for deleting document embeddings."""
 
     @pytest.mark.asyncio
-    async def test_delete_embeddings(
-        self, service: VectorService, mock_db: AsyncMock
-    ) -> None:
+    async def test_delete_embeddings(self, service: VectorService, mock_db: AsyncMock) -> None:
         mock_result = MagicMock()
         mock_result.rowcount = 5
         mock_db.execute.return_value = mock_result

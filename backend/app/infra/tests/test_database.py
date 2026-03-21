@@ -1,17 +1,17 @@
 """Tests for database infrastructure."""
 
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.infra.database import (
     Base,
+    close_db,
     create_engine,
     create_session_factory,
-    init_db,
-    close_db,
     get_db_session,
+    init_db,
 )
 
 

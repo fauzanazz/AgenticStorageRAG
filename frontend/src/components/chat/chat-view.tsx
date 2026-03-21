@@ -133,7 +133,7 @@ export function ChatView({ conversationId }: ChatViewProps) {
   const handleNewChat = () => {
     resetChat();
     lastNavigatedIdRef.current = undefined;
-    window.history.pushState(null, "", "/chat");
+    router.push("/chat");
     setShowSidebar(false);
   };
 
@@ -218,7 +218,7 @@ export function ChatView({ conversationId }: ChatViewProps) {
                   D
                 </div>
                 <div className="text-center">
-                  <h3 className="text-lg font-semibold">OpenRAG</h3>
+                  <h3 className="text-lg font-semibold">DriveRAG</h3>
                   <p className="mt-1 text-sm" style={{ color: "var(--muted-foreground)" }}>
                     Ask questions about your knowledge base.
                     <br />

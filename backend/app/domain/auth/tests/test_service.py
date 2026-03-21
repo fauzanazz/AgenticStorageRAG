@@ -1,9 +1,9 @@
 """Tests for auth service."""
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -34,8 +34,8 @@ def _make_mock_user(
     user.is_active = is_active
     user.is_admin = is_admin
     user.org_id = None
-    user.created_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    user.updated_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    user.created_at = datetime(2026, 1, 1, tzinfo=UTC)
+    user.updated_at = datetime(2026, 1, 1, tzinfo=UTC)
     return user
 
 
@@ -56,8 +56,8 @@ class TestAuthServiceRegister:
             user.id = uuid.uuid4()
             user.is_active = True
             user.is_admin = False
-            user.created_at = datetime.now(timezone.utc)
-            user.updated_at = datetime.now(timezone.utc)
+            user.created_at = datetime.now(UTC)
+            user.updated_at = datetime.now(UTC)
 
         mock_db.add = MagicMock(side_effect=_set_defaults)
 
@@ -298,7 +298,6 @@ class TestAuthServiceRefresh:
 
         with pytest.raises(UserNotFoundError):
             await service.refresh_tokens("valid_refresh_token")
-
 
     @pytest.mark.asyncio
     async def test_refresh_inactive_user_raises(self) -> None:

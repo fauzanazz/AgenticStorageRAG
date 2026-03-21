@@ -1,5 +1,5 @@
 /**
- * Typed API client for the OpenRAG backend.
+ * Typed API client for the DriveRAG backend.
  *
  * All API calls go through this client. Never use fetch() directly
  * in components or hooks -- always use this client.

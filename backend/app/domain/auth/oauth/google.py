@@ -82,9 +82,7 @@ class GoogleOAuthProvider(AbstractOAuthProvider):
 
         expires_in = data.get("expires_in")
         token_expiry = (
-            datetime.now(UTC) + timedelta(seconds=int(expires_in))
-            if expires_in
-            else None
+            datetime.now(UTC) + timedelta(seconds=int(expires_in)) if expires_in else None
         )
 
         scope_str = data.get("scope", "")

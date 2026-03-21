@@ -7,8 +7,8 @@ To add a new format, import the processor and add to PROCESSOR_REGISTRY.
 from __future__ import annotations
 
 from app.domain.documents.interfaces import AbstractDocumentProcessor
-from app.domain.documents.processors.pdf import PdfProcessor
 from app.domain.documents.processors.docx import DocxProcessor
+from app.domain.documents.processors.pdf import PdfProcessor
 
 # Registry of all available processors
 _PROCESSORS: list[AbstractDocumentProcessor] = [

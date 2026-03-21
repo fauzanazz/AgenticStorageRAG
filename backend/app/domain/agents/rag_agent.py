@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 # Maximum ReAct iterations before forcing a final answer.
 MAX_REACT_ITERATIONS = 5
 
-SYSTEM_PROMPT = """You are OpenRAG, an intelligent knowledge assistant. You have access to a knowledge graph and document embeddings to answer questions accurately.
+SYSTEM_PROMPT = """You are DriveRAG, an intelligent knowledge assistant. You have access to a knowledge graph and document embeddings to answer questions accurately.
 
 ## Your Capabilities
 You have access to the following retrieval tools:
@@ -135,9 +135,7 @@ class RAGAgent(IRAGAgent):
                 )
 
             # Get conversation history FIRST (before adding the new message)
-            history = await self._chat.get_messages(
-                conversation_id, user_id, limit=20
-            )
+            history = await self._chat.get_messages(conversation_id, user_id, limit=20)
 
             # Save user message
             user_msg = await self._chat.add_message(
@@ -147,16 +145,17 @@ class RAGAgent(IRAGAgent):
             )
             yield ChatStreamEvent(
                 event="message_created",
-                data=json.dumps({
-                    "message_id": str(user_msg.id),
-                    "role": "user",
-                }),
+                data=json.dumps(
+                    {
+                        "message_id": str(user_msg.id),
+                        "role": "user",
+                    }
+                ),
             )
 
             # Build tool descriptions for system prompt
             tool_desc = "\n".join(
-                f"- **{name}**: {tool.description}"
-                for name, tool in self._tools.items()
+                f"- **{name}**: {tool.description}" for name, tool in self._tools.items()
             )
             system_prompt = SYSTEM_PROMPT.format(tool_descriptions=tool_desc)
 
@@ -169,17 +168,13 @@ class RAGAgent(IRAGAgent):
                 from app.domain.agents.attachments import AttachmentService
 
                 attachment_svc = AttachmentService(self._db)
-                attachments = await attachment_svc.get_many(
-                    request.attachment_ids, user_id
-                )
-                attachment_text, attachment_image_blocks = (
-                    await attachment_svc.process_for_llm(attachments)
+                attachments = await attachment_svc.get_many(request.attachment_ids, user_id)
+                attachment_text, attachment_image_blocks = await attachment_svc.process_for_llm(
+                    attachments
                 )
 
             # Build initial message list
-            messages: list[dict[str, Any]] = [
-                {"role": "system", "content": system_prompt}
-            ]
+            messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
             for msg in history:
                 messages.append({"role": msg.role, "content": msg.content})
 
@@ -226,13 +221,15 @@ class RAGAgent(IRAGAgent):
                     narrative_steps.append({"type": "narration", "content": event.data})
                 elif event.event == "tool_start":
                     parsed = json.loads(event.data)
-                    narrative_steps.append({
-                        "type": "tool_call",
-                        "tool_name": parsed["tool_name"],
-                        "tool_label": parsed["tool_label"],
-                        "tool_args": parsed.get("arguments"),
-                        "tool_status": "running",
-                    })
+                    narrative_steps.append(
+                        {
+                            "type": "tool_call",
+                            "tool_name": parsed["tool_name"],
+                            "tool_label": parsed["tool_label"],
+                            "tool_args": parsed.get("arguments"),
+                            "tool_status": "running",
+                        }
+                    )
                 elif event.event == "tool_result":
                     parsed = json.loads(event.data)
                     for step in reversed(narrative_steps):
@@ -250,7 +247,9 @@ class RAGAgent(IRAGAgent):
 
             logger.debug(
                 "react loop done: answer_len=%d, tool_results=%d, thinking=%d",
-                len(accumulated_answer), len(all_tool_results), len(thinking_blocks),
+                len(accumulated_answer),
+                len(all_tool_results),
+                len(thinking_blocks),
             )
 
             # Extract and emit citations from tool results
@@ -269,16 +268,20 @@ class RAGAgent(IRAGAgent):
                 role="assistant",
                 content=accumulated_answer,
                 citations=citations if citations else None,
-                tool_calls=[tc.model_dump() for tc in tool_call_records] if tool_call_records else None,
+                tool_calls=[tc.model_dump() for tc in tool_call_records]
+                if tool_call_records
+                else None,
                 thinking_blocks=thinking_blocks if thinking_blocks else None,
                 steps=narrative_steps if narrative_steps else None,
             )
             yield ChatStreamEvent(
                 event="message_created",
-                data=json.dumps({
-                    "message_id": str(assistant_msg.id),
-                    "role": "assistant",
-                }),
+                data=json.dumps(
+                    {
+                        "message_id": str(assistant_msg.id),
+                        "role": "assistant",
+                    }
+                ),
             )
 
             # Persist any generated artifacts
@@ -309,11 +312,13 @@ class RAGAgent(IRAGAgent):
 
             yield ChatStreamEvent(
                 event="done",
-                data=json.dumps({
-                    "conversation_id": str(conversation_id),
-                    "citations_count": len(citations),
-                    "tools_used": [tc.tool_name for tc in tool_call_records],
-                }),
+                data=json.dumps(
+                    {
+                        "conversation_id": str(conversation_id),
+                        "citations_count": len(citations),
+                        "tools_used": [tc.tool_name for tc in tool_call_records],
+                    }
+                ),
             )
 
         except Exception as e:
@@ -365,7 +370,12 @@ class RAGAgent(IRAGAgent):
 
             iter_max_tokens = 32000 if can_think else 8192
 
-            logger.debug("=== ReAct iteration %d (thinking=%s, max_tokens=%d) ===", iteration, can_think, iter_max_tokens)
+            logger.debug(
+                "=== ReAct iteration %d (thinking=%s, max_tokens=%d) ===",
+                iteration,
+                can_think,
+                iter_max_tokens,
+            )
             try:
                 stream = await self._llm.complete(
                     messages=messages,
@@ -485,7 +495,11 @@ class RAGAgent(IRAGAgent):
             for tc in raw_tool_calls:
                 tool_name = tc["function"]["name"]
                 try:
-                    args = json.loads(tc["function"]["arguments"]) if tc["function"]["arguments"] else {}
+                    args = (
+                        json.loads(tc["function"]["arguments"])
+                        if tc["function"]["arguments"]
+                        else {}
+                    )
                 except json.JSONDecodeError:
                     args = {}
                 label = friendly_tool_name(tool_name)
@@ -495,11 +509,13 @@ class RAGAgent(IRAGAgent):
             for _, tool_name, args, label in parsed_calls:
                 yield ChatStreamEvent(
                     event="tool_start",
-                    data=json.dumps({
-                        "tool_name": tool_name,
-                        "tool_label": label,
-                        "arguments": args,
-                    }),
+                    data=json.dumps(
+                        {
+                            "tool_name": tool_name,
+                            "tool_label": label,
+                            "arguments": args,
+                        }
+                    ),
                 )
 
             # Execute all tool calls in parallel.
@@ -507,20 +523,22 @@ class RAGAgent(IRAGAgent):
             # into a shared queue via the emit_event callback.
             tool_event_queue: asyncio.Queue[ChatStreamEvent] = asyncio.Queue()
 
-            def _emit_tool_event(event_type: str, data_json: str) -> None:
-                tool_event_queue.put_nowait(
-                    ChatStreamEvent(event=event_type, data=data_json)
-                )
+            def _emit_tool_event(
+                event_type: str,
+                data_json: str,
+                _q: asyncio.Queue[ChatStreamEvent] = tool_event_queue,
+            ) -> None:
+                _q.put_nowait(ChatStreamEvent(event=event_type, data=data_json))
 
-            async def _exec(call_id: str, name: str, args: dict, label: str) -> tuple[str, str, dict, str, dict[str, Any] | None, str | None, int]:
+            async def _exec(
+                call_id: str, name: str, args: dict, label: str
+            ) -> tuple[str, str, dict, str, dict[str, Any] | None, str | None, int]:
                 start = time.time()
                 if name not in self._tools:
                     logger.warning("Unknown tool requested: %s", name)
                     return call_id, name, args, label, None, f"unknown tool: {name}", 0
                 try:
-                    result = await self._tools[name].execute(
-                        emit_event=_emit_tool_event, **args
-                    )
+                    result = await self._tools[name].execute(emit_event=_emit_tool_event, **args)
                     elapsed = int((time.time() - start) * 1000)
                     return call_id, name, args, label, result, None, elapsed
                 except Exception as e:
@@ -529,9 +547,11 @@ class RAGAgent(IRAGAgent):
                     return call_id, name, args, label, None, str(e), elapsed
 
             # Run tools and drain queued events concurrently
-            async def _run_tools():
+            async def _run_tools(
+                _calls: list[tuple[str, str, dict[str, Any], str]] = parsed_calls,
+            ) -> list[tuple[str, str, dict, str, dict[str, Any] | None, str | None, int]]:
                 return await asyncio.gather(
-                    *[_exec(cid, n, a, l) for cid, n, a, l in parsed_calls],
+                    *[_exec(cid, n, a, lbl) for cid, n, a, lbl in _calls],
                 )
 
             tool_task = asyncio.create_task(_run_tools())
@@ -578,34 +598,40 @@ class RAGAgent(IRAGAgent):
 
                 yield ChatStreamEvent(
                     event="tool_result",
-                    data=json.dumps({
-                        "tool_name": tool_name,
-                        "tool_label": label,
-                        "summary": summary,
-                        "count": count,
-                        "duration_ms": elapsed_ms,
-                        "error": error,
-                        "results": truncated_items,
-                    }),
+                    data=json.dumps(
+                        {
+                            "tool_name": tool_name,
+                            "tool_label": label,
+                            "summary": summary,
+                            "count": count,
+                            "duration_ms": elapsed_ms,
+                            "error": error,
+                            "results": truncated_items,
+                        }
+                    ),
                 )
 
                 # Side-channel: populate caller's lists directly
                 if result is not None:
                     tool_results_out.append(result)
-                tool_records_out.append(AgentToolCall(
-                    tool_name=tool_name,
-                    arguments=args,
-                    result_summary=summary,
-                    duration_ms=elapsed_ms,
-                    results=truncated_items,
-                ))
+                tool_records_out.append(
+                    AgentToolCall(
+                        tool_name=tool_name,
+                        arguments=args,
+                        result_summary=summary,
+                        duration_ms=elapsed_ms,
+                        results=truncated_items,
+                    )
+                )
 
                 # Append tool result to messages so LLM sees the observation
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": call_id,
-                    "content": json.dumps(result) if result is not None else f"Error: {error}",
-                })
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": call_id,
+                        "content": json.dumps(result) if result is not None else f"Error: {error}",
+                    }
+                )
 
     # ------------------------------------------------------------------
     # Title generation
@@ -645,7 +671,7 @@ class RAGAgent(IRAGAgent):
                 temperature=0.0,
                 stream=False,
             )
-            generated = response.choices[0].message.content.strip().strip('"\'')[:80]
+            generated = response.choices[0].message.content.strip().strip("\"'")[:80]
             if generated:
                 title = generated
         except Exception as e:
@@ -737,9 +763,7 @@ class RAGAgent(IRAGAgent):
         if not doc_ids:
             return
 
-        result = await self._db.execute(
-            select(Document).where(Document.id.in_(doc_ids))
-        )
+        result = await self._db.execute(select(Document).where(Document.id.in_(doc_ids)))
         docs_by_id = {doc.id: doc for doc in result.scalars().all()}
 
         storage = StorageClient()
@@ -754,18 +778,14 @@ class RAGAgent(IRAGAgent):
             if doc.source == DocumentSource.GOOGLE_DRIVE:
                 drive_file_id = (doc.metadata_ or {}).get("drive_file_id")
                 if drive_file_id:
-                    citation.source_url = (
-                        f"https://drive.google.com/file/d/{drive_file_id}/view"
-                    )
+                    citation.source_url = f"https://drive.google.com/file/d/{drive_file_id}/view"
             elif doc.storage_path:
                 try:
                     citation.source_url = await storage.get_signed_url(
                         doc.storage_path, expires_in=3600
                     )
                 except Exception:
-                    logger.warning(
-                        "Failed to generate signed URL for %s", doc.storage_path
-                    )
+                    logger.warning("Failed to generate signed URL for %s", doc.storage_path)
 
     # ------------------------------------------------------------------
     # Helpers

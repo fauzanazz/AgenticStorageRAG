@@ -7,7 +7,7 @@ Implements AbstractTokenService interface.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from jose import JWTError, jwt
@@ -41,7 +41,7 @@ class TokenService(AbstractTokenService):
         Returns:
             Encoded JWT string.
         """
-        expire = datetime.now(timezone.utc) + timedelta(minutes=self._access_expire_minutes)
+        expire = datetime.now(UTC) + timedelta(minutes=self._access_expire_minutes)
         payload: dict[str, Any] = {
             "sub": str(user_id),
             "exp": expire,
@@ -58,7 +58,7 @@ class TokenService(AbstractTokenService):
         Returns:
             Encoded JWT string.
         """
-        expire = datetime.now(timezone.utc) + timedelta(days=self._refresh_expire_days)
+        expire = datetime.now(UTC) + timedelta(days=self._refresh_expire_days)
         payload: dict[str, Any] = {
             "sub": str(user_id),
             "exp": expire,

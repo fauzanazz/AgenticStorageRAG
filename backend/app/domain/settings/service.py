@@ -14,7 +14,6 @@ from app.infra.encryption import encrypt_value
 
 
 class SettingsService(AbstractSettingsService):
-
     def __init__(self, db: AsyncSession) -> None:
         self._db = db
 
@@ -43,9 +42,7 @@ class SettingsService(AbstractSettingsService):
         row.anthropic_api_key_enc = self._apply_key(
             request.anthropic_api_key, row.anthropic_api_key_enc
         )
-        row.openai_api_key_enc = self._apply_key(
-            request.openai_api_key, row.openai_api_key_enc
-        )
+        row.openai_api_key_enc = self._apply_key(request.openai_api_key, row.openai_api_key_enc)
         row.dashscope_api_key_enc = self._apply_key(
             request.dashscope_api_key, row.dashscope_api_key_enc
         )

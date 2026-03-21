@@ -7,9 +7,9 @@ the FastAPI TestClient with mocked database.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -47,9 +47,7 @@ class TestAuthIntegration:
     @pytest.mark.asyncio
     async def test_register_endpoint_validates_email(self, app) -> None:
         """Registration should reject invalid email format."""
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 "/api/v1/auth/register",
                 json={
@@ -63,9 +61,7 @@ class TestAuthIntegration:
     @pytest.mark.asyncio
     async def test_register_endpoint_validates_password_length(self, app) -> None:
         """Registration should reject short passwords."""
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 "/api/v1/auth/register",
                 json={
@@ -79,36 +75,28 @@ class TestAuthIntegration:
     @pytest.mark.asyncio
     async def test_login_requires_body(self, app) -> None:
         """Login should return 422 with no body."""
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post("/api/v1/auth/login")
             assert response.status_code == 422
 
     @pytest.mark.asyncio
     async def test_me_requires_auth(self, app) -> None:
         """The /me endpoint should return 401 without a token."""
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/api/v1/auth/me")
             assert response.status_code == 401
 
     @pytest.mark.asyncio
     async def test_refresh_requires_body(self, app) -> None:
         """Refresh should return 422 with no body."""
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post("/api/v1/auth/refresh")
             assert response.status_code == 422
 
     @pytest.mark.asyncio
     async def test_protected_endpoints_reject_invalid_token(self, app) -> None:
         """Protected endpoints should reject invalid JWT tokens."""
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             headers = {"Authorization": "Bearer invalid-token"}
 
             # Documents
@@ -145,14 +133,12 @@ class TestAuthFullFlow:
             user.id = uuid.uuid4()
             user.is_active = True
             user.is_admin = False
-            user.created_at = datetime.now(timezone.utc)
-            user.updated_at = datetime.now(timezone.utc)
+            user.created_at = datetime.now(UTC)
+            user.updated_at = datetime.now(UTC)
 
         mock_db.add.side_effect = set_user_defaults
 
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 "/api/v1/auth/register",
                 json={
@@ -197,16 +183,14 @@ class TestAuthFullFlow:
         user.hashed_password = hashed
         user.is_active = True
         user.is_admin = False
-        user.created_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
-        user.updated_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        user.created_at = datetime(2026, 1, 1, tzinfo=UTC)
+        user.updated_at = datetime(2026, 1, 1, tzinfo=UTC)
 
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = user
         mock_db.execute.return_value = mock_result
 
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 "/api/v1/auth/login",
                 json={
@@ -239,14 +223,12 @@ class TestAuthFullFlow:
             user.id = user_id
             user.is_active = True
             user.is_admin = False
-            user.created_at = datetime.now(timezone.utc)
-            user.updated_at = datetime.now(timezone.utc)
+            user.created_at = datetime.now(UTC)
+            user.updated_at = datetime.now(UTC)
 
         mock_db.add.side_effect = set_user_defaults
 
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             # Step 1: Register
             reg_response = await client.post(
                 "/api/v1/auth/register",
@@ -268,8 +250,8 @@ class TestAuthFullFlow:
             user_mock.full_name = "Flow User"
             user_mock.is_active = True
             user_mock.is_admin = False
-            user_mock.created_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
-            user_mock.updated_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+            user_mock.created_at = datetime(2026, 1, 1, tzinfo=UTC)
+            user_mock.updated_at = datetime(2026, 1, 1, tzinfo=UTC)
 
             me_result = MagicMock()
             me_result.scalar_one_or_none.return_value = user_mock

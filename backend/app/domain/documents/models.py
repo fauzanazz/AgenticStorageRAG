@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import enum
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import (
     Boolean,
@@ -38,7 +38,7 @@ class DocumentStatus(str, enum.Enum):
 class DocumentSource(str, enum.Enum):
     """Where the document originated from."""
 
-    UPLOAD = "upload"          # User uploaded via web UI
+    UPLOAD = "upload"  # User uploaded via web UI
     GOOGLE_DRIVE = "google_drive"  # Base KG from Google Drive
 
 
@@ -53,7 +53,7 @@ class Document(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
-        default=uuid.uuid4,
+        default=uuid.uuid7,
     )
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -116,7 +116,7 @@ class Document(Base):
     )
     uploaded_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
         nullable=False,
     )
     processed_at: Mapped[datetime | None] = mapped_column(
@@ -154,7 +154,7 @@ class DocumentChunk(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
-        default=uuid.uuid4,
+        default=uuid.uuid7,
     )
     document_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -192,7 +192,7 @@ class DocumentChunk(Base):
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
         nullable=False,
     )
 

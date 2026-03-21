@@ -2,12 +2,12 @@
 
 import React, { useState } from "react";
 import { redirect } from "next/navigation";
-import { RefreshCw, ChevronDown, ChevronUp, ChevronRight, DollarSign, FileText, CheckCircle2, Clock, XCircle, SkipForward, Save, Loader2 } from "lucide-react";
+import { RefreshCw, ChevronDown, ChevronUp, DollarSign, FileText, CheckCircle2, Clock, XCircle, SkipForward, Save, Loader2 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useIngestion, useProviders } from "@/hooks/use-ingestion";
-import { getProvider, getAllProviders } from "@/lib/ingestion-providers";
-import type { IngestionProvider, ProviderState } from "@/lib/ingestion-providers";
-import type { DriveFolderEntry, FileEvent, FileEvents, IngestionJob, IngestionStatus, LLMCostSummary, ProviderInfo } from "@/types/ingestion";
+import { getProvider } from "@/lib/ingestion-providers";
+import type { IngestionProvider } from "@/lib/ingestion-providers";
+import type { FileEvent, FileEvents, IngestionJob, IngestionStatus, LLMCostSummary, ProviderInfo } from "@/types/ingestion";
 import { Skeleton } from "@/components/ui/skeleton";
 
 // ── Status config ────────────────────────────────────────────────────────────
@@ -582,7 +582,7 @@ export default function IngestionPage() {
   }
 
   return (
-    <div className="flex-1 p-6 lg:p-8 space-y-6 max-w-4xl">
+    <div className="flex-1 p-6 lg:p-8 space-y-6 max-w-4xl mx-auto">
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>

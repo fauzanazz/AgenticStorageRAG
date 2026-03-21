@@ -197,9 +197,7 @@ def _extract_split_then_text(
                             preexec_fn=_limit_memory,
                         )
                         if result.returncode == 0 and result.stdout:
-                            text_parts.append(
-                                result.stdout.decode("utf-8", errors="replace")
-                            )
+                            text_parts.append(result.stdout.decode("utf-8", errors="replace"))
                     except Exception:
                         pass
 
@@ -243,7 +241,8 @@ def main() -> None:
         result = {"text": "", "page_count": 0, "title": None, "author": None}
     else:
         text, page_count, title, author = _extract_split_then_text(
-            pdf_path, max_pages=_MAX_PAGES,
+            pdf_path,
+            max_pages=_MAX_PAGES,
         )
         if len(text) > _MAX_TEXT_CHARS:
             text = text[:_MAX_TEXT_CHARS]

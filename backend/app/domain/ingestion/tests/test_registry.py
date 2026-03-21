@@ -2,12 +2,11 @@
 
 import pytest
 
+from app.domain.ingestion.drive_connector import GoogleDriveConnector
 from app.domain.ingestion.registry import (
     get_all_connectors,
     get_connector_class,
-    register_connector,
 )
-from app.domain.ingestion.drive_connector import GoogleDriveConnector
 
 
 class TestRegistry:

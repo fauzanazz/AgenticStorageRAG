@@ -1,9 +1,9 @@
 """Tests for middleware."""
 
 import pytest
-from httpx import AsyncClient, ASGITransport
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
+from httpx import ASGITransport, AsyncClient
 
 from app.infra.middleware import RequestLoggingMiddleware
 

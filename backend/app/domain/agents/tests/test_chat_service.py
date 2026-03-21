@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -31,7 +31,7 @@ def service(mock_db: AsyncMock) -> ChatService:
 
 @pytest.fixture
 def now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class TestCreateConversation:
@@ -91,9 +91,7 @@ class TestGetConversation:
             await service.get_conversation(uuid.uuid4(), uuid.uuid4())
 
     @pytest.mark.asyncio
-    async def test_success(
-        self, service: ChatService, mock_db: AsyncMock, now: datetime
-    ) -> None:
+    async def test_success(self, service: ChatService, mock_db: AsyncMock, now: datetime) -> None:
         user_id = uuid.uuid4()
         conv_id = uuid.uuid4()
 
@@ -119,9 +117,7 @@ class TestListConversations:
     """Tests for listing conversations."""
 
     @pytest.mark.asyncio
-    async def test_empty_list(
-        self, service: ChatService, mock_db: AsyncMock
-    ) -> None:
+    async def test_empty_list(self, service: ChatService, mock_db: AsyncMock) -> None:
         scalars_mock = MagicMock()
         scalars_mock.all.return_value = []
         result_mock = MagicMock()
@@ -178,9 +174,7 @@ class TestDeleteConversation:
             await service.delete_conversation(uuid.uuid4(), uuid.uuid4())
 
     @pytest.mark.asyncio
-    async def test_access_denied(
-        self, service: ChatService, mock_db: AsyncMock
-    ) -> None:
+    async def test_access_denied(self, service: ChatService, mock_db: AsyncMock) -> None:
         conv = MagicMock(spec=Conversation)
         conv.user_id = uuid.uuid4()
         mock_db.get.return_value = conv
@@ -189,9 +183,7 @@ class TestDeleteConversation:
             await service.delete_conversation(uuid.uuid4(), uuid.uuid4())
 
     @pytest.mark.asyncio
-    async def test_success(
-        self, service: ChatService, mock_db: AsyncMock
-    ) -> None:
+    async def test_success(self, service: ChatService, mock_db: AsyncMock) -> None:
         user_id = uuid.uuid4()
         conv = MagicMock(spec=Conversation)
         conv.user_id = user_id
@@ -268,9 +260,7 @@ class TestGetMessages:
             await service.get_messages(uuid.uuid4(), uuid.uuid4())
 
     @pytest.mark.asyncio
-    async def test_access_denied(
-        self, service: ChatService, mock_db: AsyncMock
-    ) -> None:
+    async def test_access_denied(self, service: ChatService, mock_db: AsyncMock) -> None:
         conv = MagicMock(spec=Conversation)
         conv.user_id = uuid.uuid4()
         mock_db.get.return_value = conv
@@ -279,9 +269,7 @@ class TestGetMessages:
             await service.get_messages(uuid.uuid4(), uuid.uuid4())
 
     @pytest.mark.asyncio
-    async def test_success(
-        self, service: ChatService, mock_db: AsyncMock, now: datetime
-    ) -> None:
+    async def test_success(self, service: ChatService, mock_db: AsyncMock, now: datetime) -> None:
         """get_messages() should return deserialized messages with citations."""
         user_id = uuid.uuid4()
         conv_id = uuid.uuid4()
@@ -295,7 +283,9 @@ class TestGetMessages:
         msg.conversation_id = conv_id
         msg.role = "assistant"
         msg.content = "Answer with citation"
-        msg.citations_json = '[{"content_snippet":"test","source_type":"vector","relevance_score":0.9}]'
+        msg.citations_json = (
+            '[{"content_snippet":"test","source_type":"vector","relevance_score":0.9}]'
+        )
         msg.tool_calls_json = None
         msg.thinking_blocks_json = None
         msg.steps_json = None

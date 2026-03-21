@@ -15,7 +15,6 @@ import hashlib
 import json
 import logging
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -60,9 +59,7 @@ def _verify_checksum(manifest: dict[str, Any]) -> bool:
 
     hasher = hashlib.sha256()
     files = manifest.get("files", {})
-    all_data_files = sorted(
-        files.get("entities", []) + files.get("relationships", [])
-    )
+    all_data_files = sorted(files.get("entities", []) + files.get("relationships", []))
 
     for rel_path in all_data_files:
         full_path = SEED_DIR / rel_path
@@ -89,7 +86,7 @@ def _read_jsonl_files(file_paths: list[str]) -> list[dict[str, Any]]:
             logger.warning("Skipping missing file: %s", rel_path)
             continue
 
-        with open(full_path, "r", encoding="utf-8") as f:
+        with open(full_path, encoding="utf-8") as f:
             for line_num, line in enumerate(f, 1):
                 line = line.strip()
                 if not line:
@@ -133,19 +130,15 @@ async def _clean_graph(driver: Any, database: str) -> None:
 
 async def _clean_pg_shadow() -> None:
     """Truncate PostgreSQL shadow tables for knowledge entities and relationships."""
-    from app.infra.database import init_db, close_db
+    from app.infra.database import close_db, init_db
 
     logger.info("Cleaning PostgreSQL shadow tables...")
-    engine, session_factory = init_db()
+    _engine, session_factory = init_db()
 
     async with session_factory() as session:
         # Delete relationships first (FK dependency), then entities
-        await session.execute(
-            __import__("sqlalchemy").text("DELETE FROM knowledge_relationships")
-        )
-        await session.execute(
-            __import__("sqlalchemy").text("DELETE FROM knowledge_entities")
-        )
+        await session.execute(__import__("sqlalchemy").text("DELETE FROM knowledge_relationships"))
+        await session.execute(__import__("sqlalchemy").text("DELETE FROM knowledge_entities"))
         await session.commit()
 
     await close_db()
@@ -279,18 +272,16 @@ async def _import_pg_shadow(
     from sqlalchemy import select
 
     from app.domain.knowledge.models import KnowledgeEntity, KnowledgeRelationship
-    from app.infra.database import init_db, close_db
+    from app.infra.database import close_db, init_db
 
-    engine, session_factory = init_db()
+    _engine, session_factory = init_db()
     entity_count = 0
     rel_count = 0
 
     async with session_factory() as session:
         # --- Import entities ---
         # Build set of existing neo4j_ids for skip logic
-        existing_result = await session.execute(
-            select(KnowledgeEntity.neo4j_id)
-        )
+        existing_result = await session.execute(select(KnowledgeEntity.neo4j_id))
         existing_ids = {row[0] for row in existing_result.all()}
 
         neo4j_id_to_pg_id: dict[str, uuid.UUID] = {}
@@ -325,9 +316,7 @@ async def _import_pg_shadow(
         await session.flush()
 
         # --- Import relationships ---
-        existing_rel_result = await session.execute(
-            select(KnowledgeRelationship.neo4j_id)
-        )
+        existing_rel_result = await session.execute(select(KnowledgeRelationship.neo4j_id))
         existing_rel_ids = {row[0] for row in existing_rel_result.all()}
 
         for rel in relationships:
@@ -396,7 +385,9 @@ async def import_graph(clean: bool = False) -> dict[str, Any]:
     entities = _read_jsonl_files(entity_files)
     relationships = _read_jsonl_files(rel_files)
 
-    logger.info("Read %d entities, %d relationships from seed files", len(entities), len(relationships))
+    logger.info(
+        "Read %d entities, %d relationships from seed files", len(entities), len(relationships)
+    )
 
     # Connect to Neo4j
     driver = AsyncGraphDatabase.driver(
@@ -416,9 +407,7 @@ async def import_graph(clean: bool = False) -> dict[str, Any]:
         schema_result = await apply_schema(driver, settings.neo4j_database)
 
         # Import into Neo4j
-        neo4j_entities = await _import_entities_neo4j(
-            driver, settings.neo4j_database, entities
-        )
+        neo4j_entities = await _import_entities_neo4j(driver, settings.neo4j_database, entities)
         neo4j_rels = await _import_relationships_neo4j(
             driver, settings.neo4j_database, relationships
         )
@@ -443,9 +432,7 @@ async def import_graph(clean: bool = False) -> dict[str, Any]:
 
 async def main() -> None:
     """CLI entry point."""
-    parser = argparse.ArgumentParser(
-        description="Import graph seed files into Neo4j + PostgreSQL"
-    )
+    parser = argparse.ArgumentParser(description="Import graph seed files into Neo4j + PostgreSQL")
     parser.add_argument(
         "--clean",
         action="store_true",

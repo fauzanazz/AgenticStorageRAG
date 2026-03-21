@@ -5,6 +5,7 @@ Uses Fernet (AES-128-CBC + HMAC-SHA256) keyed from the app's JWT_SECRET_KEY.
 The secret key is hashed with SHA-256 and base64url-encoded to produce a
 valid 32-byte Fernet key.
 """
+
 import base64
 import hashlib
 

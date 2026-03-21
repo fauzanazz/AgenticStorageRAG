@@ -16,7 +16,7 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "OpenRAG",
+  title: "DriveRAG",
   description: "Agentic Knowledge Graph RAG with hybrid retrieval",
 };
 
@@ -32,8 +32,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning className={`${plusJakarta.variable} ${jetbrainsMono.variable}`}>
-      <body className="font-sans antialiased">
+    <html lang="en" suppressHydrationWarning className={`${plusJakarta.variable} ${jetbrainsMono.variable} h-full overflow-hidden`}>
+      <body className="font-sans antialiased h-full overflow-hidden">
         <Providers>{children}</Providers>
       </body>
     </html>

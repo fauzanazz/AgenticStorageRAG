@@ -9,19 +9,22 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import AsyncGenerator
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
+
+if TYPE_CHECKING:
+    from app.domain.auth.models import User
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
+from app.domain.settings.models import UserModelSettings
 from app.infra.database import get_db_session
+from app.infra.llm import LLMProvider, llm_provider
 from app.infra.neo4j_client import Neo4jClient, neo4j_client
 from app.infra.redis_client import RedisClient, redis_client
 from app.infra.storage import StorageClient, storage_client
-from app.infra.llm import LLMProvider, llm_provider
-from app.domain.settings.models import UserModelSettings
 
 # OAuth2 scheme for token extraction from Authorization header
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
@@ -74,8 +77,8 @@ async def get_current_user_id(
         async def protected(user_id: uuid.UUID = Depends(get_current_user_id)):
             ...
     """
-    from app.domain.auth.token import TokenService
     from app.domain.auth.exceptions import InvalidTokenError
+    from app.domain.auth.token import TokenService
 
     token_service = TokenService()
     try:
@@ -100,7 +103,7 @@ async def get_current_user_id(
 async def get_current_user(
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     db: AsyncSession = Depends(get_db),
-) -> "User":
+) -> User:
     """Get the full current user object from the database.
 
     Usage:

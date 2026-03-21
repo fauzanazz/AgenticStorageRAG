@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
     max_retries=3,
     default_retry_delay=2,
     autoretry_for=(Exception,),
-    retry_backoff=True,      # 2s, 4s, 8s
+    retry_backoff=True,  # 2s, 4s, 8s
     retry_backoff_max=60,
     acks_late=True,
 )

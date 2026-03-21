@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import create_app
 from app.dependencies import get_current_user, get_db, get_storage
+from app.main import create_app
 
 
 @pytest.fixture

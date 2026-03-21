@@ -6,7 +6,6 @@ from app.domain.settings.schemas import ModelSettingsResponse, UpdateModelSettin
 
 
 class AbstractSettingsService(ABC):
-
     @abstractmethod
     async def get_model_settings(self, user_id: uuid.UUID) -> ModelSettingsResponse:
         """Return the user's current model settings (API keys as has_key bools)."""

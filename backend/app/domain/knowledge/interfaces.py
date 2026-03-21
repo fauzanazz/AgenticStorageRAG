@@ -31,30 +31,22 @@ class IGraphService(ABC):
     """Interface for knowledge graph operations (Neo4j)."""
 
     @abstractmethod
-    async def create_entity(
-        self, entity: EntityCreate
-    ) -> EntityResponse:
+    async def create_entity(self, entity: EntityCreate) -> EntityResponse:
         """Create an entity node in the graph."""
         ...
 
     @abstractmethod
-    async def get_entity(
-        self, entity_id: uuid.UUID
-    ) -> EntityWithRelationships:
+    async def get_entity(self, entity_id: uuid.UUID) -> EntityWithRelationships:
         """Get entity with its relationships."""
         ...
 
     @abstractmethod
-    async def search_entities(
-        self, request: GraphSearchRequest
-    ) -> list[GraphSearchResult]:
+    async def search_entities(self, request: GraphSearchRequest) -> list[GraphSearchResult]:
         """Search entities by query, traversing the graph."""
         ...
 
     @abstractmethod
-    async def create_relationship(
-        self, relationship: RelationshipCreate
-    ) -> RelationshipResponse:
+    async def create_relationship(self, relationship: RelationshipCreate) -> RelationshipResponse:
         """Create a relationship between two entities."""
         ...
 
@@ -74,9 +66,7 @@ class IGraphService(ABC):
         ...
 
     @abstractmethod
-    async def delete_document_entities(
-        self, document_id: uuid.UUID
-    ) -> int:
+    async def delete_document_entities(self, document_id: uuid.UUID) -> int:
         """Delete all entities and relationships for a document."""
         ...
 
@@ -108,13 +98,17 @@ class IGraphService(ABC):
             target_id = entity_map.get(rel.get("target", "").lower())
             if source_id and target_id and source_id != target_id:
                 try:
-                    await self.create_relationship(RelationshipCreate(
-                        source_entity_id=source_id,
-                        target_entity_id=target_id,
-                        relationship_type=rel.get("type", "RELATED_TO"),
-                        properties={"description": rel["description"]} if rel.get("description") else None,
-                        source_document_id=document_id,
-                    ))
+                    await self.create_relationship(
+                        RelationshipCreate(
+                            source_entity_id=source_id,
+                            target_entity_id=target_id,
+                            relationship_type=rel.get("type", "RELATED_TO"),
+                            properties={"description": rel["description"]}
+                            if rel.get("description")
+                            else None,
+                            source_document_id=document_id,
+                        )
+                    )
                     count += 1
                 except Exception:
                     pass
@@ -142,16 +136,12 @@ class IVectorService(ABC):
         ...
 
     @abstractmethod
-    async def search(
-        self, request: VectorSearchRequest
-    ) -> list[VectorSearchResult]:
+    async def search(self, request: VectorSearchRequest) -> list[VectorSearchResult]:
         """Search by vector similarity."""
         ...
 
     @abstractmethod
-    async def delete_document_embeddings(
-        self, document_id: uuid.UUID
-    ) -> int:
+    async def delete_document_embeddings(self, document_id: uuid.UUID) -> int:
         """Delete all embeddings for a document."""
         ...
 
@@ -160,9 +150,7 @@ class IHybridRetriever(ABC):
     """Interface for hybrid retrieval (vector + graph)."""
 
     @abstractmethod
-    async def search(
-        self, request: HybridSearchRequest
-    ) -> list[HybridSearchResult]:
+    async def search(self, request: HybridSearchRequest) -> list[HybridSearchResult]:
         """Execute a hybrid search combining vector and graph results."""
         ...
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { FileText, Image, X, Loader2 } from "lucide-react";
+import { FileText, Image as ImageIcon, X, Loader2 } from "lucide-react";
 import type { ChatAttachment } from "@/types/chat";
 
 interface AttachmentChipProps {
@@ -37,7 +37,7 @@ export function AttachmentChip({ attachment, onRemove }: AttachmentChipProps) {
       {uploading ? (
         <Loader2 className="size-3 animate-spin shrink-0" />
       ) : isImage(attachment.mime_type) ? (
-        <Image className="size-3 shrink-0" />
+        <ImageIcon className="size-3 shrink-0" />
       ) : (
         <FileText className="size-3 shrink-0" />
       )}

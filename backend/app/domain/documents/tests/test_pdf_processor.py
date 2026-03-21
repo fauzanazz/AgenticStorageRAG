@@ -10,9 +10,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.domain.documents.processors.pdf import PdfProcessor, _WORKER_SCRIPT
+from app.domain.documents.processors.pdf import _WORKER_SCRIPT, PdfProcessor
 from app.domain.documents.schemas import ProcessingResult
-
 
 FAKE_PDF = b"%PDF-1.4 fake content"
 FAKE_TEXT = "Hello world. " * 200  # enough for at least one chunk

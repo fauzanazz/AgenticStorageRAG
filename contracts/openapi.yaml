@@ -1,6 +1,6 @@
 openapi: "3.1.0"
 info:
-  title: OpenRAG API
+  title: DriveRAG API
   version: "0.2.0"
   description: |
     Agentic Knowledge Graph RAG system API.

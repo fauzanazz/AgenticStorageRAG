@@ -84,7 +84,7 @@ class BaseProcessor(AbstractDocumentProcessor):
 
                 chunks.append(
                     ChunkData(
-                        content=current_chunk[:split_point + 1].strip(),
+                        content=current_chunk[: split_point + 1].strip(),
                         page_number=page_number,
                         chunk_index=chunk_index,
                     )

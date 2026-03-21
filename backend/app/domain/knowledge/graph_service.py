@@ -11,14 +11,14 @@ import logging
 import uuid
 from typing import Any
 
-from sqlalchemy import select, func as sa_func
+from sqlalchemy import func as sa_func
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.knowledge.exceptions import (
     EntityNotFoundError,
     GraphBuildError,
     GraphQueryError,
-    RelationshipNotFoundError,
 )
 from app.domain.knowledge.interfaces import IGraphService
 from app.domain.knowledge.models import KnowledgeEntity, KnowledgeRelationship
@@ -129,9 +129,7 @@ class GraphService(IGraphService):
             relationships=relationships,
         )
 
-    async def search_entities(
-        self, request: GraphSearchRequest
-    ) -> list[GraphSearchResult]:
+    async def search_entities(self, request: GraphSearchRequest) -> list[GraphSearchResult]:
         """Search entities using Neo4j full-text index."""
         try:
             # Build a Lucene query from the user's search terms.
@@ -142,9 +140,7 @@ class GraphService(IGraphService):
             # Use the fulltext index for natural-language search
             type_filter = ""
             if request.entity_types:
-                labels = " OR ".join(
-                    f"n:{_sanitize_label(t)}" for t in request.entity_types
-                )
+                labels = " OR ".join(f"n:{_sanitize_label(t)}" for t in request.entity_types)
                 type_filter = f"WHERE ({labels})"
 
             cypher = f"""
@@ -169,17 +165,13 @@ class GraphService(IGraphService):
                 neo4j_id = node.get("neo4j_id", "")
 
                 # Look up PostgreSQL entity
-                stmt = select(KnowledgeEntity).where(
-                    KnowledgeEntity.neo4j_id == neo4j_id
-                )
+                stmt = select(KnowledgeEntity).where(KnowledgeEntity.neo4j_id == neo4j_id)
                 db_result = await self._db.execute(stmt)
                 db_entity = db_result.scalar_one_or_none()
 
                 if db_entity:
                     properties = (
-                        json.loads(db_entity.properties_json)
-                        if db_entity.properties_json
-                        else None
+                        json.loads(db_entity.properties_json) if db_entity.properties_json else None
                     )
                     entity_resp = EntityResponse(
                         id=db_entity.id,
@@ -228,9 +220,7 @@ class GraphService(IGraphService):
             logger.error("Graph search failed: %s", e)
             raise GraphQueryError(f"Graph search failed: {e}") from e
 
-    async def create_relationship(
-        self, relationship: RelationshipCreate
-    ) -> RelationshipResponse:
+    async def create_relationship(self, relationship: RelationshipCreate) -> RelationshipResponse:
         """Create a relationship in both Neo4j and PostgreSQL."""
         try:
             # Get source and target entities
@@ -273,9 +263,7 @@ class GraphService(IGraphService):
                 source_entity_id=relationship.source_entity_id,
                 target_entity_id=relationship.target_entity_id,
                 properties_json=(
-                    json.dumps(relationship.properties)
-                    if relationship.properties
-                    else None
+                    json.dumps(relationship.properties) if relationship.properties else None
                 ),
                 weight=relationship.weight,
                 source_document_id=relationship.source_document_id,
@@ -332,10 +320,12 @@ class GraphService(IGraphService):
                 properties["properties_json"] = json.dumps(entity.properties)
 
             label = _sanitize_label(entity.entity_type)
-            neo4j_queries.append((
-                f"CREATE (n:Entity:{label} $props) RETURN n",
-                {"props": properties},
-            ))
+            neo4j_queries.append(
+                (
+                    f"CREATE (n:Entity:{label} $props) RETURN n",
+                    {"props": properties},
+                )
+            )
 
             db_entity = KnowledgeEntity(
                 neo4j_id=neo4j_id,
@@ -387,9 +377,11 @@ class GraphService(IGraphService):
 
         # Fetch neo4j_ids for all entities in one query
         from sqlalchemy import select as sa_select
+
         result = await self._db.execute(
-            sa_select(KnowledgeEntity.id, KnowledgeEntity.neo4j_id, KnowledgeEntity.name)
-            .where(KnowledgeEntity.id.in_(entity_ids))
+            sa_select(KnowledgeEntity.id, KnowledgeEntity.neo4j_id, KnowledgeEntity.name).where(
+                KnowledgeEntity.id.in_(entity_ids)
+            )
         )
         rows = result.all()
         id_to_neo4j: dict[uuid.UUID, str] = {r[0]: r[1] for r in rows}
@@ -418,18 +410,20 @@ class GraphService(IGraphService):
             if rel.get("description"):
                 props["properties_json"] = json.dumps({"description": rel["description"]})
 
-            neo4j_queries.append((
-                f"""
+            neo4j_queries.append(
+                (
+                    f"""
                 MATCH (a {{neo4j_id: $source_id}}), (b {{neo4j_id: $target_id}})
                 CREATE (a)-[r:{rel_type} $props]->(b)
                 RETURN r
                 """,
-                {
-                    "source_id": source_neo4j,
-                    "target_id": target_neo4j,
-                    "props": props,
-                },
-            ))
+                    {
+                        "source_id": source_neo4j,
+                        "target_id": target_neo4j,
+                        "props": props,
+                    },
+                )
+            )
 
             rel_properties = {"description": rel["description"]} if rel.get("description") else None
             db_rel = KnowledgeRelationship(
@@ -481,6 +475,7 @@ class GraphService(IGraphService):
                 stmt = stmt.where(KnowledgeEntity.source_document_id == document_id)
             if source:
                 from app.domain.documents.models import Document
+
                 stmt = stmt.join(
                     Document,
                     KnowledgeEntity.source_document_id == Document.id,
@@ -555,7 +550,9 @@ class GraphService(IGraphService):
             # Find neighbors via Neo4j traversal
             records = await self._neo4j.execute_read(
                 """
-                MATCH path = (start {neo4j_id: $neo4j_id})-[*1..""" + str(depth) + """]->(neighbor)
+                MATCH path = (start {neo4j_id: $neo4j_id})-[*1.."""
+                + str(depth)
+                + """]->(neighbor)
                 WITH DISTINCT neighbor
                 LIMIT $limit
                 RETURN collect(neighbor.neo4j_id) AS neighbor_ids
@@ -571,7 +568,9 @@ class GraphService(IGraphService):
             # Also get undirected neighbors
             records2 = await self._neo4j.execute_read(
                 """
-                MATCH (start {neo4j_id: $neo4j_id})<-[*1..""" + str(depth) + """]-(neighbor)
+                MATCH (start {neo4j_id: $neo4j_id})<-[*1.."""
+                + str(depth)
+                + """]-(neighbor)
                 WITH DISTINCT neighbor
                 LIMIT $limit
                 RETURN collect(neighbor.neo4j_id) AS neighbor_ids
@@ -586,25 +585,25 @@ class GraphService(IGraphService):
 
             if not neighbor_neo4j_ids:
                 return GraphVisualization(
-                    nodes=[GraphNode(
-                        id=str(entity.id),
-                        label=entity.name,
-                        type=entity.entity_type,
-                        description=entity.description,
-                    )],
+                    nodes=[
+                        GraphNode(
+                            id=str(entity.id),
+                            label=entity.name,
+                            type=entity.entity_type,
+                            description=entity.description,
+                        )
+                    ],
                     edges=[],
                     total_nodes=1,
                     total_edges=0,
                 )
 
             # Resolve neighbors from PostgreSQL
-            stmt = select(KnowledgeEntity).where(
-                KnowledgeEntity.neo4j_id.in_(neighbor_neo4j_ids)
-            )
+            stmt = select(KnowledgeEntity).where(KnowledgeEntity.neo4j_id.in_(neighbor_neo4j_ids))
             result = await self._db.execute(stmt)
             neighbors = result.scalars().all()
 
-            all_entities = [entity] + list(neighbors)
+            all_entities = [entity, *list(neighbors)]
             all_entity_ids = [e.id for e in all_entities]
 
             # Get relationships between all these entities
@@ -671,6 +670,7 @@ class GraphService(IGraphService):
 
         # Count embeddings from the document_embeddings table
         from app.domain.knowledge.models import DocumentEmbedding
+
         embedding_count_stmt = select(sa_func.count(DocumentEmbedding.id))
         total_embeddings = (await self._db.execute(embedding_count_stmt)).scalar() or 0
 
@@ -686,9 +686,7 @@ class GraphService(IGraphService):
         """Delete all entities and relationships for a document."""
         try:
             # Get entities for this document
-            stmt = select(KnowledgeEntity).where(
-                KnowledgeEntity.source_document_id == document_id
-            )
+            stmt = select(KnowledgeEntity).where(KnowledgeEntity.source_document_id == document_id)
             result = await self._db.execute(stmt)
             entities = result.scalars().all()
 
@@ -719,9 +717,7 @@ class GraphService(IGraphService):
             logger.error("Failed to delete document entities: %s", e)
             raise GraphBuildError(f"Failed to delete entities: {e}") from e
 
-    async def _get_entity_relationships(
-        self, neo4j_id: str
-    ) -> list[RelationshipResponse]:
+    async def _get_entity_relationships(self, neo4j_id: str) -> list[RelationshipResponse]:
         """Get all relationships for an entity from Neo4j.
 
         Resolves real PostgreSQL entity/relationship IDs by looking up
@@ -782,16 +778,19 @@ class GraphService(IGraphService):
             rel_neo = record.get("rel_id", "")
 
             # Determine source/target based on relationship direction
-            source_info = entity_map.get(source_neo)
-            target_neo = other_neo if source_neo == neo4j_id else neo4j_id
-            target_info = entity_map.get(other_neo)
+            entity_map.get(source_neo)
+            entity_map.get(other_neo)
 
             # If this entity is the source
             if source_neo == neo4j_id:
                 src_id, src_name = entity_map.get(neo4j_id, (uuid.UUID(int=0), ""))
-                tgt_id, tgt_name = entity_map.get(other_neo, (uuid.UUID(int=0), record.get("other_name", "")))
+                tgt_id, tgt_name = entity_map.get(
+                    other_neo, (uuid.UUID(int=0), record.get("other_name", ""))
+                )
             else:
-                src_id, src_name = entity_map.get(other_neo, (uuid.UUID(int=0), record.get("other_name", "")))
+                src_id, src_name = entity_map.get(
+                    other_neo, (uuid.UUID(int=0), record.get("other_name", ""))
+                )
                 tgt_id, tgt_name = entity_map.get(neo4j_id, (uuid.UUID(int=0), ""))
 
             relationships.append(

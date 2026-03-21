@@ -23,7 +23,7 @@ import json
 import logging
 import uuid
 from abc import ABC, abstractmethod
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,8 +36,8 @@ from app.domain.documents.models import (
 )
 from app.domain.documents.processors import get_processor
 from app.domain.ingestion.drive_connector import (
-    SUPPORTED_MIME_TYPES,
     _GOOGLE_WORKSPACE_EXPORT_MAP,
+    SUPPORTED_MIME_TYPES,
 )
 from app.domain.ingestion.interfaces import SourceConnector
 from app.domain.ingestion.models import IngestionJob, IngestionStatus
@@ -140,9 +140,7 @@ class ScanFolderTool(OrchestratorTool):
     async def execute(self, **kwargs: Any) -> dict[str, Any]:
         folder_id: str = kwargs["folder_id"]
 
-        entries: list[DriveFolderEntry] = (
-            await self._connector.list_folder_children(folder_id)
-        )
+        entries: list[DriveFolderEntry] = await self._connector.list_folder_children(folder_id)
 
         children = []
         for e in entries:
@@ -334,7 +332,10 @@ async def ingest_single_file(
     if size_bytes is not None and size_bytes > _max_bytes:
         logger.warning(
             "File %s (%s) is %s bytes — exceeds max_ingest_file_size_mb=%d MB, skipping",
-            file_name, file_id, size_bytes, _get_settings().max_ingest_file_size_mb,
+            file_name,
+            file_id,
+            size_bytes,
+            _get_settings().max_ingest_file_size_mb,
         )
         return {
             "status": "skipped",
@@ -343,8 +344,8 @@ async def ingest_single_file(
         }
 
     # --- Deduplication guard ---
-    from sqlalchemy import select as sa_select
     from sqlalchemy import or_ as sa_or
+    from sqlalchemy import select as sa_select
 
     existing_result = await db.execute(
         sa_select(Document.id, Document.status)
@@ -363,7 +364,10 @@ async def ingest_single_file(
     if existing_row is not None:
         logger.info(
             "File %s (%s) already exists as document %s (status=%s) — skipping",
-            file_name, file_id, existing_row[0], existing_row[1],
+            file_name,
+            file_id,
+            existing_row[0],
+            existing_row[1],
         )
         return {
             "status": "skipped",
@@ -394,6 +398,7 @@ async def ingest_single_file(
         file_content, filename = await connector.download_file(file_id)
 
         import resource
+
         def _rss_mb() -> int:
             try:
                 with open("/proc/self/status") as f:
@@ -406,7 +411,9 @@ async def ingest_single_file(
 
         logger.info(
             "Downloaded %s (%d bytes) — RSS: %d MB",
-            filename, len(file_content), _rss_mb(),
+            filename,
+            len(file_content),
+            _rss_mb(),
         )
 
         doc_id = uuid.uuid4()
@@ -462,7 +469,7 @@ async def ingest_single_file(
         document.status = DocumentStatus.READY
         document.chunk_count = len(processing_result.chunks)
         document.metadata_.update(processing_result.metadata)
-        document.processed_at = datetime.now(timezone.utc)
+        document.processed_at = datetime.now(UTC)
         await db.commit()
 
         logger.info("Ingested %s: %d chunks", filename, len(processing_result.chunks))
@@ -476,8 +483,8 @@ async def ingest_single_file(
         chunk_count = len(chunks_created)
 
         # Release heavy objects
-        file_content = None  # noqa: F841
-        processing_result = None  # noqa: F841
+        file_content = None
+        processing_result = None
         chunks_created = []
         gc.collect()
 
@@ -514,12 +521,9 @@ async def _embed_chunks(
 
         vector_service = VectorService(db=db)
         chunk_dicts = [
-            {"id": c.id, "content": c.content, "metadata": c.metadata_ or {}}
-            for c in chunks
+            {"id": c.id, "content": c.content, "metadata": c.metadata_ or {}} for c in chunks
         ]
-        count = await vector_service.embed_chunks(
-            chunks=chunk_dicts, document_id=document.id
-        )
+        count = await vector_service.embed_chunks(chunks=chunk_dicts, document_id=document.id)
         await db.commit()
         logger.info("Embedded %d chunks for %s", count, document.id)
         return count
@@ -538,20 +542,15 @@ async def _extract_knowledge_graph(
     if not chunks:
         return {"entities_created": 0, "relationships_created": 0}
     try:
-        from app.domain.knowledge.kg_builder import KGBuilder
         from app.domain.knowledge.graph_service import GraphService
+        from app.domain.knowledge.kg_builder import KGBuilder
         from app.infra.neo4j_client import neo4j_client
 
         graph_service = GraphService(db=db, neo4j=neo4j_client)
         kg_builder = KGBuilder(graph_service=graph_service, llm=llm)
 
-        chunk_dicts = [
-            {"content": c.content, "metadata": c.metadata_ or {}}
-            for c in chunks
-        ]
-        result = await kg_builder.build_from_chunks(
-            chunks=chunk_dicts, document_id=document.id
-        )
+        chunk_dicts = [{"content": c.content, "metadata": c.metadata_ or {}} for c in chunks]
+        result = await kg_builder.build_from_chunks(chunks=chunk_dicts, document_id=document.id)
         await db.commit()
         logger.info(
             "KG extraction for %s: %d entities, %d rels",
@@ -659,7 +658,6 @@ class IngestFileTool(OrchestratorTool):
         )
 
 
-
 # ---------------------------------------------------------------------------
 # 4. batch_ingest_files  (parallel fan-out of ingest_file)
 # ---------------------------------------------------------------------------
@@ -724,9 +722,18 @@ class BatchIngestFilesTool(OrchestratorTool):
                             "file_id": {"type": "string", "description": "Google Drive file ID."},
                             "file_name": {"type": "string", "description": "Original file name."},
                             "mime_type": {"type": "string", "description": "MIME type."},
-                            "folder_path": {"type": "string", "description": "Slash-separated folder breadcrumb."},
-                            "classification": {"type": "object", "description": "Metadata from classify_file."},
-                            "size_bytes": {"type": "integer", "description": "File size in bytes from scan results."},
+                            "folder_path": {
+                                "type": "string",
+                                "description": "Slash-separated folder breadcrumb.",
+                            },
+                            "classification": {
+                                "type": "object",
+                                "description": "Metadata from classify_file.",
+                            },
+                            "size_bytes": {
+                                "type": "integer",
+                                "description": "File size in bytes from scan results.",
+                            },
                         },
                         "required": ["file_id", "file_name", "mime_type"],
                     },
@@ -741,21 +748,20 @@ class BatchIngestFilesTool(OrchestratorTool):
 
     async def _ingest_one(self, file_info: dict[str, Any], admin_user_id: str) -> dict[str, Any]:
         """Ingest a single file with its own DB session, bounded by the semaphore."""
-        async with self._semaphore:
-            async with self._session_factory() as db:
-                return await ingest_single_file(
-                    db=db,
-                    connector=self._connector,
-                    llm=self._llm,
-                    job=self._job,
-                    file_id=file_info["file_id"],
-                    file_name=file_info["file_name"],
-                    mime_type=file_info["mime_type"],
-                    folder_path=file_info.get("folder_path", ""),
-                    classification=file_info.get("classification", {}),
-                    admin_user_id=uuid.UUID(admin_user_id),
-                    size_bytes=file_info.get("size_bytes"),
-                )
+        async with self._semaphore, self._session_factory() as db:
+            return await ingest_single_file(
+                db=db,
+                connector=self._connector,
+                llm=self._llm,
+                job=self._job,
+                file_id=file_info["file_id"],
+                file_name=file_info["file_name"],
+                mime_type=file_info["mime_type"],
+                folder_path=file_info.get("folder_path", ""),
+                classification=file_info.get("classification", {}),
+                admin_user_id=uuid.UUID(admin_user_id),
+                size_bytes=file_info.get("size_bytes"),
+            )
 
     async def execute(self, **kwargs: Any) -> dict[str, Any]:
         files: list[dict[str, Any]] = kwargs.get("files", [])
@@ -788,7 +794,9 @@ class BatchIngestFilesTool(OrchestratorTool):
 
         logger.info(
             "BatchIngestFiles complete: %d processed, %d failed, %d skipped",
-            processed, failed, skipped,
+            processed,
+            failed,
+            skipped,
         )
 
         return {
@@ -871,7 +879,8 @@ class UpdateProgressTool(OrchestratorTool):
         }
 
     async def execute(self, **kwargs: Any) -> dict[str, Any]:
-        from datetime import datetime, timezone
+        from datetime import datetime
+
         from sqlalchemy.orm.attributes import flag_modified
 
         total_discovered: int = kwargs["total_discovered"]
@@ -887,7 +896,7 @@ class UpdateProgressTool(OrchestratorTool):
             new_status = IngestionStatus.PROCESSING
 
         # Build updated metadata
-        now_iso = datetime.now(timezone.utc).isoformat()
+        now_iso = datetime.now(UTC).isoformat()
         new_metadata = dict(self._job.metadata_)
         if message:
             new_metadata["current_action"] = message

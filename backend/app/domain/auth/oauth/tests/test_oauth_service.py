@@ -1,7 +1,7 @@
 """Tests for OAuth service (find-or-create, token storage)."""
 
 import uuid
-from datetime import datetime, UTC, timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -77,7 +77,9 @@ class TestOAuthServiceAuthorize:
         self, mock_db, mock_redis, mock_provider, mock_token_service
     ):
         service = OAuthService(
-            db=mock_db, redis=mock_redis, provider=mock_provider,
+            db=mock_db,
+            redis=mock_redis,
+            provider=mock_provider,
             token_service=mock_token_service,
         )
         url = await service.get_authorization_url("http://localhost/cb")
@@ -104,7 +106,9 @@ class TestOAuthServiceCallback:
         new_user.created_at = datetime.now(UTC)
 
         service = OAuthService(
-            db=mock_db, redis=mock_redis, provider=mock_provider,
+            db=mock_db,
+            redis=mock_redis,
+            provider=mock_provider,
             token_service=mock_token_service,
         )
         # Patch internal methods to avoid SQLAlchemy column expressions
@@ -132,7 +136,9 @@ class TestOAuthServiceCallback:
         mock_redis.client.get = AsyncMock(return_value=None)
 
         service = OAuthService(
-            db=mock_db, redis=mock_redis, provider=mock_provider,
+            db=mock_db,
+            redis=mock_redis,
+            provider=mock_provider,
             token_service=mock_token_service,
         )
         with pytest.raises(OAuthError, match="Invalid or expired"):
@@ -162,10 +168,12 @@ class TestOAuthServiceCallback:
         mock_db.execute = AsyncMock(side_effect=[mock_result_user, mock_result_oauth])
 
         service = OAuthService(
-            db=mock_db, redis=mock_redis, provider=mock_provider,
+            db=mock_db,
+            redis=mock_redis,
+            provider=mock_provider,
             token_service=mock_token_service,
         )
-        response = await service.handle_callback(
+        await service.handle_callback(
             code="auth-code", state="valid-state", redirect_uri="http://localhost/cb"
         )
 
@@ -197,7 +205,9 @@ class TestOAuthServiceCallback:
         mock_db.execute = AsyncMock(side_effect=[mock_result_user, mock_result_oauth])
 
         service = OAuthService(
-            db=mock_db, redis=mock_redis, provider=mock_provider,
+            db=mock_db,
+            redis=mock_redis,
+            provider=mock_provider,
             token_service=mock_token_service,
         )
         await service.handle_callback(

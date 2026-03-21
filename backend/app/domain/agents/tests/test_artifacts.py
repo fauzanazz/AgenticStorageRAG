@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import uuid
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -61,6 +60,7 @@ class TestGenerateDocumentTool:
 
         # Track emitted events
         emitted_events: list[tuple[str, str]] = []
+
         def emit_event(event_type: str, data_json: str) -> None:
             emitted_events.append((event_type, data_json))
 
@@ -154,6 +154,7 @@ class TestGenerateDocumentTool:
         mock_llm.complete.return_value = mock_stream()
 
         emitted: list[tuple[str, str]] = []
+
         def emit(t: str, d: str) -> None:
             emitted.append((t, d))
 

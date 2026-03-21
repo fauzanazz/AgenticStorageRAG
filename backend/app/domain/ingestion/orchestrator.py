@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -30,9 +30,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domain.ingestion.drive_connector import SUPPORTED_MIME_TYPES
 from app.domain.ingestion.exceptions import IngestionError
 from app.domain.ingestion.interfaces import SourceConnector
-from app.domain.ingestion.pipeline import PipelineConfig, StagePipeline
 from app.domain.ingestion.models import IngestionJob, IngestionStatus
-from app.domain.ingestion.scanner import DriveScanner, _SKIP_MIME
+from app.domain.ingestion.pipeline import PipelineConfig, StagePipeline
+from app.domain.ingestion.scanner import _SKIP_MIME, DriveScanner
 from app.domain.ingestion.schemas import DriveFolderEntry
 from app.infra.llm import LLMProvider
 from app.infra.storage import StorageClient
@@ -76,7 +76,10 @@ async def _db_retry(
                     pass
             logger.warning(
                 "DB connection error (attempt %d/%d), retrying in %.1fs: %s",
-                attempt, retries, delay, exc,
+                attempt,
+                retries,
+                delay,
+                exc,
             )
             await asyncio.sleep(delay)
             delay *= 2  # exponential backoff
@@ -88,11 +91,10 @@ async def _check_cancelled(session_factory: Any, job_id: uuid.UUID) -> bool:
     Uses a fresh session from the factory each time so a dead pooled
     connection never crashes the caller.
     """
+
     async def _query() -> bool:
         async with session_factory() as db:
-            result = await db.execute(
-                select(IngestionJob.status).where(IngestionJob.id == job_id)
-            )
+            result = await db.execute(select(IngestionJob.status).where(IngestionJob.id == job_id))
             return result.scalar_one_or_none() == IngestionStatus.CANCELLED
 
     try:
@@ -114,7 +116,7 @@ class IngestionOrchestrator:
         storage: StorageClient,
         connector: SourceConnector,
         llm: LLMProvider,
-        user_settings: "Any | None" = None,
+        user_settings: Any | None = None,
         session_factory: Any = None,
     ) -> None:
         self._db = db
@@ -125,10 +127,12 @@ class IngestionOrchestrator:
             self._session_factory = session_factory
         else:
             import app.infra.database as _db_module
+
             self._session_factory = _db_module._session_factory
 
     async def _is_cancelled(self, job: IngestionJob) -> bool:
         """Check the database to see if the job has been cancelled externally."""
+
         async def _query() -> bool:
             async with self._session_factory() as db:
                 result = await db.execute(
@@ -166,7 +170,7 @@ class IngestionOrchestrator:
             values["error_message"] = error_message
 
         if completed:
-            values["completed_at"] = datetime.now(timezone.utc)
+            values["completed_at"] = datetime.now(UTC)
 
         async def _do_update() -> int:
             async with self._session_factory() as db:
@@ -197,7 +201,7 @@ class IngestionOrchestrator:
         if error_message is not None:
             job.error_message = error_message
         if completed:
-            job.completed_at = datetime.now(timezone.utc)
+            job.completed_at = datetime.now(UTC)
 
     async def _index_root_files(
         self,
@@ -220,12 +224,13 @@ class IngestionOrchestrator:
 
         skip_file_ids: set[str] = set()
         if not force:
-            skip_file_ids = await scanner._find_already_ingested(
-                [f.file_id for f in files]
-            )
+            skip_file_ids = await scanner._find_already_ingested([f.file_id for f in files])
 
         count = await scanner._insert_indexed_files(
-            files, "", classifications, skip_file_ids,
+            files,
+            "",
+            classifications,
+            skip_file_ids,
         )
 
         if count:
@@ -236,7 +241,8 @@ class IngestionOrchestrator:
 
         logger.info(
             "Root files indexed: %d inserted, %d skipped",
-            count, skipped_count,
+            count,
+            skipped_count,
         )
         return count
 
@@ -300,7 +306,10 @@ class IngestionOrchestrator:
                 for entry in entries:
                     if entry.is_folder:
                         subfolders.append((entry.file_id, entry.name))
-                    elif entry.mime_type not in _SKIP_MIME and entry.mime_type in SUPPORTED_MIME_TYPES:
+                    elif (
+                        entry.mime_type not in _SKIP_MIME
+                        and entry.mime_type in SUPPORTED_MIME_TYPES
+                    ):
                         root_files.append(entry)
 
                 # 3. Index root-level files directly (typically few)
@@ -324,15 +333,14 @@ class IngestionOrchestrator:
                 )
                 await pipeline.run(
                     scanning_done,
-                    is_cancelled=lambda: _check_cancelled(
-                        self._session_factory, job.id
-                    ),
+                    is_cancelled=lambda: _check_cancelled(self._session_factory, job.id),
                 )
 
             # Run scanning + processing
             if retry:
                 await processor_worker()
             else:
+
                 async def scanner_worker(seeds: list[tuple[str, str]], worker_id: int) -> None:
                     if not seeds:
                         return

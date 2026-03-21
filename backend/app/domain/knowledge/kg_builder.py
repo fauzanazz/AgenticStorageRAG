@@ -13,9 +13,8 @@ import logging
 import uuid
 from typing import Any
 
-from app.domain.knowledge.exceptions import GraphBuildError
 from app.domain.knowledge.interfaces import IGraphService, IKGBuilder
-from app.domain.knowledge.schemas import EntityCreate, RelationshipCreate
+from app.domain.knowledge.schemas import EntityCreate
 from app.infra.llm import LLMProvider
 
 logger = logging.getLogger(__name__)
@@ -107,10 +106,7 @@ class KGBuilder(IKGBuilder):
             batch = chunks[batch_start:batch_end]
 
             extractions = await asyncio.gather(
-                *[
-                    _extract_one(batch_start + j, chunk)
-                    for j, chunk in enumerate(batch)
-                ],
+                *[_extract_one(batch_start + j, chunk) for j, chunk in enumerate(batch)],
                 return_exceptions=False,
             )
 
@@ -151,7 +147,9 @@ class KGBuilder(IKGBuilder):
 
             logger.debug(
                 "KG extraction batch %d-%d/%d complete",
-                batch_start + 1, batch_end, total,
+                batch_start + 1,
+                batch_end,
+                total,
             )
 
         # Batch-create entities and relationships
@@ -160,7 +158,9 @@ class KGBuilder(IKGBuilder):
         )
 
         relationships_created = await self._graph.batch_create_relationships(
-            all_relationships, entity_map, document_id,
+            all_relationships,
+            entity_map,
+            document_id,
         )
 
         logger.info(
@@ -175,9 +175,7 @@ class KGBuilder(IKGBuilder):
             "relationships_created": relationships_created,
         }
 
-    async def _extract_from_chunk(
-        self, content: str
-    ) -> dict[str, Any] | None:
+    async def _extract_from_chunk(self, content: str) -> dict[str, Any] | None:
         """Use LLM to extract entities and relationships from a text chunk."""
         try:
             response = await self._llm.complete(

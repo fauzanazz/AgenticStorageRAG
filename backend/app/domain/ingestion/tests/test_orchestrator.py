@@ -1,10 +1,9 @@
 """Tests for the ingestion orchestrator, scanner, file processor, and tools."""
 
-import asyncio
 import json
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -13,13 +12,11 @@ from app.domain.ingestion.models import IngestionJob, IngestionStatus
 from app.domain.ingestion.orchestrator import IngestionOrchestrator
 from app.domain.ingestion.orchestrator_tools import (
     ClassifyFileTool,
-    IngestFileTool,
     ScanFolderTool,
     UpdateProgressTool,
     ingest_single_file,
 )
 from app.domain.ingestion.schemas import DriveFolderEntry
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -40,7 +37,7 @@ def _make_job(**kwargs) -> IngestionJob:
         "skipped_files": 0,
         "error_message": None,
         "metadata_": {},
-        "started_at": datetime.now(timezone.utc),
+        "started_at": datetime.now(UTC),
         "completed_at": None,
     }
     defaults.update(kwargs)
@@ -127,14 +124,16 @@ class TestClassifyFileTool:
         mock_llm = AsyncMock()
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = json.dumps({
-            "major": "Informatika",
-            "course_code": "IF2120",
-            "course_name": "Probabilitas dan Statistika",
-            "year": "2019",
-            "category": "Referensi",
-            "additional_context": {},
-        })
+        mock_response.choices[0].message.content = json.dumps(
+            {
+                "major": "Informatika",
+                "course_code": "IF2120",
+                "course_name": "Probabilitas dan Statistika",
+                "year": "2019",
+                "category": "Referensi",
+                "additional_context": {},
+            }
+        )
         mock_llm.complete_for_ingestion.return_value = mock_response
 
         tool = ClassifyFileTool(llm=mock_llm)
@@ -195,7 +194,10 @@ class TestIngestSingleFile:
         with (
             patch("app.domain.ingestion.orchestrator_tools.get_processor") as mock_get_proc,
             patch("app.domain.ingestion.orchestrator_tools._embed_chunks", return_value=1),
-            patch("app.domain.ingestion.orchestrator_tools._extract_knowledge_graph", return_value={"entities_created": 2, "relationships_created": 1}),
+            patch(
+                "app.domain.ingestion.orchestrator_tools._extract_knowledge_graph",
+                return_value={"entities_created": 2, "relationships_created": 1},
+            ),
         ):
             mock_processor = AsyncMock()
             mock_processor.process.return_value = mock_processing_result
@@ -383,7 +385,7 @@ class TestIngestionOrchestrator:
         # _refresh_counters now selects individual columns → one_or_none returns a tuple
         mock_result.scalar_one_or_none.side_effect = [
             IngestionStatus.PROCESSING,  # _is_cancelled check
-            None,                        # _update_job_status check
+            None,  # _update_job_status check
         ]
         mock_result.one_or_none.return_value = (5, 5, 0, 0)  # total, processed, failed, skipped
         worker_db.execute.return_value = mock_result
@@ -407,9 +409,14 @@ class TestIngestionOrchestrator:
 
             mock_pipeline = AsyncMock()
             mock_pipeline.run.return_value = {
-                "downloaded": 5, "extracted": 5, "embedded": 5,
-                "kg_done": 5, "failed": 0, "skipped": 0,
-                "retry_succeeded": 0, "retry_failed": 0,
+                "downloaded": 5,
+                "extracted": 5,
+                "embedded": 5,
+                "kg_done": 5,
+                "failed": 0,
+                "skipped": 0,
+                "retry_succeeded": 0,
+                "retry_failed": 0,
             }
             mock_processor_cls.return_value = mock_pipeline
 
@@ -435,7 +442,7 @@ class TestIngestionOrchestrator:
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.side_effect = [
             IngestionStatus.PROCESSING,  # _is_cancelled
-            None,                        # _update_job_status check
+            None,  # _update_job_status check
         ]
         mock_result.one_or_none.return_value = (0, 0, 0, 0)  # total, processed, failed, skipped
         mock_result.rowcount = 1
@@ -459,9 +466,14 @@ class TestIngestionOrchestrator:
 
             mock_pipeline = AsyncMock()
             mock_pipeline.run.return_value = {
-                "downloaded": 0, "extracted": 0, "embedded": 0,
-                "kg_done": 0, "failed": 0, "skipped": 0,
-                "retry_succeeded": 0, "retry_failed": 0,
+                "downloaded": 0,
+                "extracted": 0,
+                "embedded": 0,
+                "kg_done": 0,
+                "failed": 0,
+                "skipped": 0,
+                "retry_succeeded": 0,
+                "retry_failed": 0,
             }
             mock_processor_cls.return_value = mock_pipeline
 
@@ -533,14 +545,20 @@ class TestIngestionOrchestrator:
 
             mock_pipeline = AsyncMock()
             mock_pipeline.run.return_value = {
-                "downloaded": 0, "extracted": 0, "embedded": 0,
-                "kg_done": 0, "failed": 0, "skipped": 0,
-                "retry_succeeded": 0, "retry_failed": 0,
+                "downloaded": 0,
+                "extracted": 0,
+                "embedded": 0,
+                "kg_done": 0,
+                "failed": 0,
+                "skipped": 0,
+                "retry_succeeded": 0,
+                "retry_failed": 0,
             }
             mock_processor_cls.return_value = mock_pipeline
 
             # The gather will propagate the scanner error, caught by orchestrator's try/except
             from app.domain.ingestion.exceptions import IngestionError
+
             with pytest.raises(IngestionError):
                 await orchestrator.run(job, admin_user_id=uuid.uuid4())
 
@@ -591,6 +609,7 @@ class TestListFolderChildren:
     async def test_returns_files_and_folders(self) -> None:
         """Should return both files and folders from Drive API."""
         from unittest.mock import patch
+
         from app.domain.ingestion.drive_connector import GoogleDriveConnector
 
         connector = GoogleDriveConnector()
@@ -620,8 +639,8 @@ class TestListFolderChildren:
             entries = await connector.list_folder_children("root-folder-id")
 
         assert len(entries) == 2
-        folder = [e for e in entries if e.is_folder][0]
-        file = [e for e in entries if not e.is_folder][0]
+        folder = next(e for e in entries if e.is_folder)
+        file = next(e for e in entries if not e.is_folder)
 
         assert folder.name == "Semester 3"
         assert folder.is_folder is True

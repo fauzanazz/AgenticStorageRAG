@@ -13,7 +13,7 @@ import uuid
 from typing import Any
 
 import litellm
-from sqlalchemy import select, text
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -90,9 +90,7 @@ class VectorService(IVectorService):
                         embedding_model=self._embedding_model,
                         token_count=_estimate_tokens(chunk["content"]),
                         metadata_json=(
-                            json.dumps(chunk["metadata"])
-                            if chunk.get("metadata")
-                            else None
+                            json.dumps(chunk["metadata"]) if chunk.get("metadata") else None
                         ),
                     )
                     self._db.add(embedding_record)
@@ -114,9 +112,7 @@ class VectorService(IVectorService):
 
         return total_created
 
-    async def search(
-        self, request: VectorSearchRequest
-    ) -> list[VectorSearchResult]:
+    async def search(self, request: VectorSearchRequest) -> list[VectorSearchResult]:
         """Search by vector similarity using pgvector.
 
         Uses cosine distance for similarity ranking.
@@ -154,7 +150,9 @@ class VectorService(IVectorService):
                 query_parts.append("AND document_id = :doc_id")
                 params["doc_id"] = str(request.document_id)
 
-            query_parts.append(r"AND 1 - (embedding\:\:vector <=> :query_vec\:\:vector) >= :threshold")
+            query_parts.append(
+                r"AND 1 - (embedding\:\:vector <=> :query_vec\:\:vector) >= :threshold"
+            )
             query_parts.append(r"ORDER BY embedding\:\:vector <=> :query_vec\:\:vector")
             query_parts.append("LIMIT :top_k")
 
@@ -168,11 +166,7 @@ class VectorService(IVectorService):
                     document_id=row.document_id,
                     content=row.content,
                     similarity=float(row.similarity),
-                    metadata=(
-                        json.loads(row.metadata_json)
-                        if row.metadata_json
-                        else None
-                    ),
+                    metadata=(json.loads(row.metadata_json) if row.metadata_json else None),
                 )
                 for row in rows
             ]
@@ -182,26 +176,18 @@ class VectorService(IVectorService):
             await self._db.rollback()
             raise EmbeddingError(f"Vector search failed: {e}") from e
 
-    async def delete_document_embeddings(
-        self, document_id: uuid.UUID
-    ) -> int:
+    async def delete_document_embeddings(self, document_id: uuid.UUID) -> int:
         """Delete all embeddings for a document."""
         result = await self._db.execute(
-            text(
-                "DELETE FROM document_embeddings WHERE document_id = :doc_id"
-            ),
+            text("DELETE FROM document_embeddings WHERE document_id = :doc_id"),
             {"doc_id": str(document_id)},
         )
         await self._db.flush()
         count = result.rowcount or 0
-        logger.info(
-            "Deleted %d embeddings for document %s", count, document_id
-        )
+        logger.info("Deleted %d embeddings for document %s", count, document_id)
         return count
 
-    async def _generate_embeddings(
-        self, texts: list[str]
-    ) -> list[list[float]]:
+    async def _generate_embeddings(self, texts: list[str]) -> list[list[float]]:
         """Generate embeddings using LiteLLM.
 
         Uses the model configured by the EMBEDDING_MODEL setting.
@@ -226,8 +212,7 @@ class VectorService(IVectorService):
                 if attempt < max_attempts:
                     wait = 2 ** (attempt - 1)  # 1s, 2s
                     logger.warning(
-                        "Embedding generation attempt %d/%d failed: %s. "
-                        "Retrying in %ds...",
+                        "Embedding generation attempt %d/%d failed: %s. Retrying in %ds...",
                         attempt,
                         max_attempts,
                         e,

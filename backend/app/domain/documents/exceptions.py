@@ -29,9 +29,7 @@ class FileTooLargeError(DocumentError):
     def __init__(self, file_size: int, max_size: int) -> None:
         self.file_size = file_size
         self.max_size = max_size
-        super().__init__(
-            f"File too large: {file_size} bytes (max: {max_size} bytes)"
-        )
+        super().__init__(f"File too large: {file_size} bytes (max: {max_size} bytes)")
 
 
 class DocumentProcessingError(DocumentError):

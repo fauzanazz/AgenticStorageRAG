@@ -1,4 +1,5 @@
 import pytest
+
 from app.infra.encryption import decrypt_value, encrypt_value
 
 

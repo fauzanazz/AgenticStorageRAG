@@ -3,15 +3,13 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app
 from app.dependencies import get_current_user_id, get_db, get_redis, get_storage
-from app.domain.documents.schemas import DocumentListResponse, DocumentResponse, DocumentUploadResponse
+from app.main import app
 
 
 @pytest.fixture
@@ -39,7 +37,9 @@ def mock_storage() -> AsyncMock:
 
 
 @pytest.fixture
-def client(mock_user_id: uuid.UUID, mock_db: AsyncMock, mock_redis: AsyncMock, mock_storage: AsyncMock) -> TestClient:
+def client(
+    mock_user_id: uuid.UUID, mock_db: AsyncMock, mock_redis: AsyncMock, mock_storage: AsyncMock
+) -> TestClient:
     app.dependency_overrides[get_current_user_id] = lambda: mock_user_id
     app.dependency_overrides[get_db] = lambda: mock_db
     app.dependency_overrides[get_redis] = lambda: mock_redis
@@ -59,6 +59,7 @@ class TestDocumentUploadEndpoint:
 
     def test_upload_unsupported_type(self, client: TestClient) -> None:
         import io
+
         response = client.post(
             "/api/v1/documents",
             files={"file": ("test.txt", io.BytesIO(b"hello"), "text/plain")},

@@ -7,10 +7,10 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import select, func, delete
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -23,7 +23,6 @@ from app.domain.documents.exceptions import (
 from app.domain.documents.models import Document, DocumentChunk, DocumentSource, DocumentStatus
 from app.domain.documents.processors import get_processor
 from app.domain.documents.schemas import (
-    ChunkData,
     DashboardStatsResponse,
     DocumentListResponse,
     DocumentResponse,
@@ -132,9 +131,7 @@ class DocumentService:
         Called by the background worker after upload.
         """
         # Fetch document
-        result = await self._db.execute(
-            select(Document).where(Document.id == document_id)
-        )
+        result = await self._db.execute(select(Document).where(Document.id == document_id))
         document = result.scalar_one_or_none()
         if document is None:
             raise DocumentNotFoundError(str(document_id))
@@ -188,7 +185,7 @@ class DocumentService:
             if processing_result.page_count is not None:
                 document.metadata_["page_count"] = processing_result.page_count
 
-            document.processed_at = datetime.now(timezone.utc)
+            document.processed_at = datetime.now(UTC)
             await self._db.commit()
 
             logger.info(
@@ -239,9 +236,7 @@ class DocumentService:
                 document_id=document.id,
             )
             await self._db.commit()
-            logger.info(
-                "Embedded %d chunks for document %s", count, document.id
-            )
+            logger.info("Embedded %d chunks for document %s", count, document.id)
         except Exception as e:
             logger.error(
                 "Embedding generation failed for document %s (non-fatal): %s",
@@ -341,9 +336,7 @@ class DocumentService:
             filters.append(Document.source == source)
 
         # Count total
-        count_result = await self._db.execute(
-            select(func.count()).where(*filters)
-        )
+        count_result = await self._db.execute(select(func.count()).where(*filters))
         total = count_result.scalar() or 0
 
         # Fetch page
@@ -402,7 +395,7 @@ class DocumentService:
         Returns:
             Number of documents cleaned up
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Find expired documents
         result = await self._db.execute(
@@ -419,7 +412,8 @@ class DocumentService:
 
         # Delete storage files in bulk (skip Drive-referenced docs)
         storage_paths = [
-            doc.storage_path for doc in expired_docs
+            doc.storage_path
+            for doc in expired_docs
             if doc.storage_path and not doc.storage_path.startswith("drive://")
         ]
         try:
@@ -448,9 +442,7 @@ class DocumentService:
         """
         # Document counts
         total_docs = (
-            await self._db.execute(
-                select(func.count()).where(Document.user_id == user_id)
-            )
+            await self._db.execute(select(func.count()).where(Document.user_id == user_id))
         ).scalar() or 0
 
         processing_docs = (
@@ -465,9 +457,9 @@ class DocumentService:
         # Chunk count
         total_chunks = (
             await self._db.execute(
-                select(func.count(DocumentChunk.id)).join(
-                    Document, DocumentChunk.document_id == Document.id
-                ).where(Document.user_id == user_id)
+                select(func.count(DocumentChunk.id))
+                .join(Document, DocumentChunk.document_id == Document.id)
+                .where(Document.user_id == user_id)
             )
         ).scalar() or 0
 
@@ -508,21 +500,16 @@ class DocumentService:
         from app.domain.ingestion.models import IndexedFile
 
         # Deduplicate: latest record per drive_file_id
-        subq = (
-            select(
-                IndexedFile,
-                func.row_number()
-                .over(
-                    partition_by=IndexedFile.drive_file_id,
-                    order_by=IndexedFile.created_at.desc(),
-                )
-                .label("rn"),
+        subq = select(
+            IndexedFile,
+            func.row_number()
+            .over(
+                partition_by=IndexedFile.drive_file_id,
+                order_by=IndexedFile.created_at.desc(),
             )
-            .subquery()
-        )
-        result = await self._db.execute(
-            select(subq).where(subq.c.rn == 1)
-        )
+            .label("rn"),
+        ).subquery()
+        result = await self._db.execute(select(subq).where(subq.c.rn == 1))
         rows = result.all()
 
         # Build lookup of folders

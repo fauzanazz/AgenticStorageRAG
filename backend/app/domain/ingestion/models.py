@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import enum
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import BigInteger, DateTime, Enum, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -35,8 +35,8 @@ class IngestionStatus(str, enum.Enum):
     """Ingestion job lifecycle states."""
 
     PENDING = "pending"
-    SCANNING = "scanning"        # Scanning Drive for files
-    PROCESSING = "processing"    # Processing files
+    SCANNING = "scanning"  # Scanning Drive for files
+    PROCESSING = "processing"  # Processing files
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
@@ -82,7 +82,7 @@ class IngestionJob(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
-        default=uuid.uuid4,
+        default=uuid.uuid7,
     )
     triggered_by: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -141,7 +141,7 @@ class IngestionJob(Base):
     )
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
         nullable=False,
     )
     completed_at: Mapped[datetime | None] = mapped_column(
@@ -170,7 +170,7 @@ class IndexedFile(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
-        default=uuid.uuid4,
+        default=uuid.uuid7,
     )
     job_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -229,7 +229,7 @@ class IndexedFile(Base):
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
         nullable=False,
     )
     processed_at: Mapped[datetime | None] = mapped_column(
@@ -238,7 +238,4 @@ class IndexedFile(Base):
     )
 
     def __repr__(self) -> str:
-        return (
-            f"<IndexedFile id={self.id} file={self.file_name} "
-            f"status={self.status}>"
-        )
+        return f"<IndexedFile id={self.id} file={self.file_name} status={self.status}>"

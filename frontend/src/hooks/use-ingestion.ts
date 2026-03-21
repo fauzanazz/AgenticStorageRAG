@@ -101,7 +101,7 @@ export function useIngestion(page = 1) {
     queryKey: queryKeys.ingestion.stats(),
     queryFn: fetchStats,
     // Also poll stats while jobs are active so the stats panel stays live.
-    refetchInterval: (query) => {
+    refetchInterval: () => {
       const jobs: IngestionJob[] = jobsQuery.data?.items ?? [];
       return hasActiveJobs(jobs) ? 4_000 : false;
     },
@@ -192,6 +192,7 @@ export function useIngestion(page = 1) {
     fetchCostSummary: () =>
       queryClient.invalidateQueries({ queryKey: queryKeys.ingestion.cost() }),
 
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     setError: (_: string | null) => {
       // Kept for backward-compat; errors are now managed by TanStack Query.
     },

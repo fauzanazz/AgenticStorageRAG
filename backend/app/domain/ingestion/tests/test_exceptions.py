@@ -1,7 +1,5 @@
 """Tests for ingestion domain exceptions."""
 
-import pytest
-
 from app.domain.ingestion.exceptions import (
     DriveAccessError,
     DriveAuthError,

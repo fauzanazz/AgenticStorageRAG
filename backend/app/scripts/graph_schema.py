@@ -94,7 +94,6 @@ async def apply_schema(driver: AsyncDriver, database: str | None = None) -> dict
 
 async def main() -> None:
     """Standalone entry point for schema initialization."""
-    import asyncio
 
     from neo4j import AsyncGraphDatabase
 

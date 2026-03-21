@@ -1,7 +1,7 @@
 """Tests for JWT token service."""
 
 import uuid
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -47,9 +47,7 @@ class TestTokenServiceCreate:
         assert len(token) > 0
 
     @patch("app.domain.auth.token.get_settings")
-    def test_access_and_refresh_tokens_are_different(
-        self, mock_get_settings: MagicMock
-    ) -> None:
+    def test_access_and_refresh_tokens_are_different(self, mock_get_settings: MagicMock) -> None:
         """Access and refresh tokens should have different content."""
         mock_settings = MagicMock()
         mock_settings.jwt_secret_key = "test-secret"

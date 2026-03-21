@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from app.domain.documents.processors import get_processor, get_supported_types
-from app.domain.documents.processors.pdf import PdfProcessor
 from app.domain.documents.processors.docx import DocxProcessor
+from app.domain.documents.processors.pdf import PdfProcessor
 
 
 class TestProcessorRegistry:

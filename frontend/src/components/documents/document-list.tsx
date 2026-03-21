@@ -53,6 +53,7 @@ export function DocumentList({
   documents,
   isLoading,
   onDelete,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   showSource = false,
 }: DocumentListProps) {
   if (isLoading) {

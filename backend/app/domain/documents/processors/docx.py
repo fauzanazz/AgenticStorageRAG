@@ -89,8 +89,7 @@ def _has_images(para: Paragraph) -> bool:
     """
     _VML_IMAGEDATA = "{urn:schemas-microsoft-com:vml}imagedata"
     return bool(
-        para._element.findall(".//" + qn("a:blip"))
-        or para._element.findall(".//" + _VML_IMAGEDATA)
+        para._element.findall(".//" + qn("a:blip")) or para._element.findall(".//" + _VML_IMAGEDATA)
     )
 
 

@@ -4,13 +4,11 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from app.domain.knowledge.kg_builder import KGBuilder, _parse_json_response
-from app.domain.knowledge.schemas import EntityResponse
 
 
 @pytest.fixture
@@ -36,7 +34,9 @@ class TestParseJsonResponse:
         assert result == {"entities": [], "relationships": []}
 
     def test_json_in_code_block(self) -> None:
-        text = '```json\n{"entities": [{"name": "Test", "type": "Person"}], "relationships": []}\n```'
+        text = (
+            '```json\n{"entities": [{"name": "Test", "type": "Person"}], "relationships": []}\n```'
+        )
         result = _parse_json_response(text)
         assert result is not None
         assert len(result["entities"]) == 1
@@ -78,20 +78,22 @@ class TestBuildFromChunks:
         ]
 
         # Mock LLM extraction response
-        extraction_json = json.dumps({
-            "entities": [
-                {"name": "John", "type": "Person", "description": "Employee"},
-                {"name": "Acme Corp", "type": "Organization", "description": "Company"},
-            ],
-            "relationships": [
-                {
-                    "source": "John",
-                    "target": "Acme Corp",
-                    "type": "WORKS_AT",
-                    "description": "Employment",
-                },
-            ],
-        })
+        extraction_json = json.dumps(
+            {
+                "entities": [
+                    {"name": "John", "type": "Person", "description": "Employee"},
+                    {"name": "Acme Corp", "type": "Organization", "description": "Company"},
+                ],
+                "relationships": [
+                    {
+                        "source": "John",
+                        "target": "Acme Corp",
+                        "type": "WORKS_AT",
+                        "description": "Employment",
+                    },
+                ],
+            }
+        )
 
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
@@ -126,12 +128,14 @@ class TestBuildFromChunks:
             {"id": uuid.uuid4(), "content": "John lives in NYC.", "metadata": {}},
         ]
 
-        extraction = json.dumps({
-            "entities": [
-                {"name": "John", "type": "Person"},
-            ],
-            "relationships": [],
-        })
+        extraction = json.dumps(
+            {
+                "entities": [
+                    {"name": "John", "type": "Person"},
+                ],
+                "relationships": [],
+            }
+        )
 
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]

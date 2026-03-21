@@ -1,7 +1,7 @@
 """Tests for ingestion service."""
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -12,7 +12,7 @@ from app.domain.ingestion.exceptions import (
 )
 from app.domain.ingestion.models import IngestionJob, IngestionStatus
 from app.domain.ingestion.schemas import TriggerIngestionRequest
-from app.domain.ingestion.service import IngestionService, _STALE_JOB_THRESHOLD
+from app.domain.ingestion.service import IngestionService
 
 
 def _make_job(**kwargs) -> MagicMock:
@@ -30,8 +30,8 @@ def _make_job(**kwargs) -> MagicMock:
         "error_message": None,
         "metadata_": {},
         "metadata": {},
-        "started_at": datetime.now(timezone.utc),
-        "completed_at": datetime.now(timezone.utc),
+        "started_at": datetime.now(UTC),
+        "completed_at": datetime.now(UTC),
     }
     defaults.update(kwargs)
     job = MagicMock(spec=IngestionJob)
@@ -172,7 +172,7 @@ class TestTriggerIngestion:
             obj.failed_files = 0
             obj.skipped_files = 0
             obj.metadata_ = {}
-            obj.started_at = datetime.now(timezone.utc)
+            obj.started_at = datetime.now(UTC)
             obj.completed_at = None
 
         mock_db.refresh = AsyncMock(side_effect=_fake_refresh)
@@ -182,7 +182,7 @@ class TestTriggerIngestion:
         with patch("app.domain.ingestion.service.get_settings") as mock_settings:
             mock_settings.return_value.google_drive_folder_id = "test-folder"
             with patch("app.domain.ingestion.tasks.run_ingestion_task") as mock_task:
-                result = await service.trigger_ingestion(
+                await service.trigger_ingestion(
                     TriggerIngestionRequest(),
                     admin_user_id=uuid.uuid4(),
                 )

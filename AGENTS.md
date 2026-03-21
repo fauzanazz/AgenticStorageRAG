@@ -1,4 +1,4 @@
-# AGENTS.md — OpenRAG
+# AGENTS.md — DriveRAG
 
 Orientation guide for AI agents working in this repository.
 Read this before touching any code.
@@ -18,7 +18,7 @@ An agentic Knowledge Graph RAG application. Documents are ingested into a **hybr
 ## Repository layout
 
 ```
-openrag/
+driverag/
 ├── backend/                   # FastAPI app (Python 3.12+, uv)
 │   ├── app/
 │   │   ├── main.py            # App factory + lifespan

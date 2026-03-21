@@ -24,8 +24,8 @@ from typing import Any
 from google.oauth2 import service_account
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseDownload
 from googleapiclient.errors import HttpError
+from googleapiclient.http import MediaIoBaseDownload
 
 from app.config import get_settings
 from app.domain.ingestion.exceptions import (
@@ -34,7 +34,7 @@ from app.domain.ingestion.exceptions import (
     DriveFileDownloadError,
 )
 from app.domain.ingestion.interfaces import SourceConnector
-from app.domain.ingestion.schemas import DriveFolderEntry, DriveFileInfo
+from app.domain.ingestion.schemas import DriveFileInfo, DriveFolderEntry
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +94,7 @@ class GoogleDriveConnector(SourceConnector):
         cls,
         access_token: str,
         refresh_token: str | None = None,
-    ) -> "GoogleDriveConnector":
+    ) -> GoogleDriveConnector:
         """Create a connector pre-authenticated with per-user OAuth tokens.
 
         Used for folder browsing on behalf of the logged-in user.
@@ -155,21 +155,17 @@ class GoogleDriveConnector(SourceConnector):
         try:
             # --- Option 1: Service Account (preferred) ---
             if settings.google_service_account_file:
-                self._credentials = (
-                    service_account.Credentials.from_service_account_file(
-                        settings.google_service_account_file,
-                        scopes=SCOPES,
-                    )
+                self._credentials = service_account.Credentials.from_service_account_file(
+                    settings.google_service_account_file,
+                    scopes=SCOPES,
                 )
                 self._auth_method = "service_account_file"
 
             elif settings.google_service_account_json:
                 info = json.loads(settings.google_service_account_json)
-                self._credentials = (
-                    service_account.Credentials.from_service_account_info(
-                        info,
-                        scopes=SCOPES,
-                    )
+                self._credentials = service_account.Credentials.from_service_account_info(
+                    info,
+                    scopes=SCOPES,
                 )
                 self._auth_method = "service_account_json"
 
@@ -199,17 +195,13 @@ class GoogleDriveConnector(SourceConnector):
                 return False
 
             # Build the Drive API service
-            self._service = build(
-                "drive", "v3", credentials=self._credentials
-            )
+            self._service = build("drive", "v3", credentials=self._credentials)
 
             # Test with a simple request
             test_request = self._service.files().list(pageSize=1, fields="files(id)")
             await asyncio.to_thread(test_request.execute)
 
-            logger.info(
-                "Google Drive authentication successful (%s)", self._auth_method
-            )
+            logger.info("Google Drive authentication successful (%s)", self._auth_method)
             return True
 
         except Exception as e:
@@ -239,9 +231,7 @@ class GoogleDriveConnector(SourceConnector):
         allowed_types = supported_types or list(SUPPORTED_MIME_TYPES.keys())
 
         # Build query
-        type_conditions = " or ".join(
-            f"mimeType='{mt}'" for mt in allowed_types
-        )
+        type_conditions = " or ".join(f"mimeType='{mt}'" for mt in allowed_types)
         query = f"({type_conditions}) and trashed=false"
         if folder_id:
             query = f"'{folder_id}' in parents and {query}"
@@ -266,9 +256,7 @@ class GoogleDriveConnector(SourceConnector):
                             mime_type=f["mimeType"],
                             size=int(f["size"]) if f.get("size") else None,
                             modified_time=f.get("modifiedTime"),
-                            parent_folder=(
-                                f["parents"][0] if f.get("parents") else None
-                            ),
+                            parent_folder=(f["parents"][0] if f.get("parents") else None),
                         )
                     )
                 page_token = result.get("nextPageToken")
@@ -446,8 +434,7 @@ class GoogleDriveConnector(SourceConnector):
                     if (
                         mime == "application/vnd.google-apps.shortcut"
                         and shortcut
-                        and shortcut.get("targetMimeType")
-                        == "application/vnd.google-apps.folder"
+                        and shortcut.get("targetMimeType") == "application/vnd.google-apps.folder"
                     ):
                         is_folder = True
                         target_id = shortcut["targetId"]

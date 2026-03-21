@@ -7,7 +7,9 @@ In production, connects to Supabase PostgreSQL.
 
 from collections.abc import AsyncGenerator
 
+from sqlalchemy.engine import URL
 from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
@@ -28,7 +30,7 @@ class Base(DeclarativeBase):
     pass
 
 
-def create_engine() -> "AsyncEngine":  # noqa: F821
+def create_engine() -> AsyncEngine:
     """Create the async SQLAlchemy engine from settings."""
     settings = get_settings()
     engine = create_async_engine(
@@ -45,7 +47,7 @@ def create_engine() -> "AsyncEngine":  # noqa: F821
     return engine
 
 
-def create_session_factory(engine: "AsyncEngine") -> async_sessionmaker[AsyncSession]:  # noqa: F821
+def create_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
     """Create a session factory bound to the given engine."""
     return async_sessionmaker(
         bind=engine,
@@ -57,11 +59,11 @@ def create_session_factory(engine: "AsyncEngine") -> async_sessionmaker[AsyncSes
 
 
 # Module-level defaults (initialized lazily via lifespan)
-_engine: "AsyncEngine | None" = None  # noqa: F821
+_engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
 
 
-def init_db() -> tuple["AsyncEngine", async_sessionmaker[AsyncSession]]:  # noqa: F821
+def init_db() -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
     """Initialize the database engine and session factory.
 
     Called during application startup (lifespan).
@@ -74,8 +76,8 @@ def init_db() -> tuple["AsyncEngine", async_sessionmaker[AsyncSession]]:  # noqa
 
 
 def build_session_factory(
-    url: "URL | str",  # noqa: F821
-) -> tuple["AsyncEngine", async_sessionmaker[AsyncSession]]:  # noqa: F821
+    url: URL | str,
+) -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
     """Create a fresh engine + session factory bound to the current event loop.
 
     Use this inside Celery tasks (asyncio.run) so the engine is bound to the
@@ -88,10 +90,9 @@ def build_session_factory(
     Returns:
         Tuple of (engine, session_factory) scoped to the current event loop.
     """
-    from sqlalchemy.engine import URL as SAUrl  # noqa: F811
 
     engine = create_async_engine(
-        url if isinstance(url, str) else url,
+        url,
         echo=False,
         pool_pre_ping=True,
         pool_size=10,

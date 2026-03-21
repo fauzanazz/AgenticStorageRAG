@@ -97,29 +97,33 @@ def _wrap_tools_as_mcp(
                 elapsed = int((time.time() - start) * 1000)
                 count = result.get("count", 0) if result else 0
                 results_sink.append(result)
-                records_sink.append(AgentToolCall(
-                    tool_name=__tool.name,
-                    arguments=args,
-                    result_summary=f"Found {count} results",
-                    duration_ms=elapsed,
-                    results=_truncate_items(result),
-                ))
-                return {
-                    "content": [{"type": "text", "text": json.dumps(result, default=str)}]
-                }
+                records_sink.append(
+                    AgentToolCall(
+                        tool_name=__tool.name,
+                        arguments=args,
+                        result_summary=f"Found {count} results",
+                        duration_ms=elapsed,
+                        results=_truncate_items(result),
+                    )
+                )
+                return {"content": [{"type": "text", "text": json.dumps(result, default=str)}]}
             except Exception as e:
                 elapsed = int((time.time() - start) * 1000)
                 logger.warning(
                     "MCP tool %s failed: %s\n%s",
-                    __tool.name, e, traceback.format_exc(),
+                    __tool.name,
+                    e,
+                    traceback.format_exc(),
                 )
-                records_sink.append(AgentToolCall(
-                    tool_name=__tool.name,
-                    arguments=args,
-                    result_summary=f"Error: {e}",
-                    duration_ms=elapsed,
-                    results=[],
-                ))
+                records_sink.append(
+                    AgentToolCall(
+                        tool_name=__tool.name,
+                        arguments=args,
+                        result_summary=f"Error: {e}",
+                        duration_ms=elapsed,
+                        results=[],
+                    )
+                )
                 # Return error as content — do NOT raise, or the SDK's
                 # TaskGroup will abort all sibling tool calls.
                 return {
@@ -156,7 +160,7 @@ _RAG_TOOL_NAMES = {"hybrid_search", "generate_document", "fetch_document"}
 # System prompt
 # ---------------------------------------------------------------------------
 
-SYSTEM_PROMPT = """You are OpenRAG, an intelligent knowledge assistant. You have access to a knowledge graph and document embeddings to answer questions accurately.
+SYSTEM_PROMPT = """You are DriveRAG, an intelligent knowledge assistant. You have access to a knowledge graph and document embeddings to answer questions accurately.
 
 ## Your Capabilities
 You have access to retrieval tools registered as MCP tools. Use them to search the knowledge base, fetch documents, and generate reports.
@@ -234,9 +238,7 @@ class ClaudeCodeAgent(IRAGAgent):
                 )
 
             # Get conversation history
-            history = await self._chat.get_messages(
-                conversation_id, user_id, limit=20
-            )
+            history = await self._chat.get_messages(conversation_id, user_id, limit=20)
 
             # Save user message
             user_msg = await self._chat.add_message(
@@ -246,10 +248,12 @@ class ClaudeCodeAgent(IRAGAgent):
             )
             yield ChatStreamEvent(
                 event="message_created",
-                data=json.dumps({
-                    "message_id": str(user_msg.id),
-                    "role": "user",
-                }),
+                data=json.dumps(
+                    {
+                        "message_id": str(user_msg.id),
+                        "role": "user",
+                    }
+                ),
             )
 
             # Build conversation context as a structured prompt
@@ -265,9 +269,7 @@ class ClaudeCodeAgent(IRAGAgent):
             tool_call_records: list[AgentToolCall] = []
 
             # Register RAG tools as MCP tools with side-channel capture
-            mcp_tools = _wrap_tools_as_mcp(
-                self._tools, all_tool_results, tool_call_records
-            )
+            mcp_tools = _wrap_tools_as_mcp(self._tools, all_tool_results, tool_call_records)
             rag_server = create_sdk_mcp_server(
                 name="rag",
                 version="1.0.0",
@@ -325,7 +327,9 @@ class ClaudeCodeAgent(IRAGAgent):
                         elif event_type == "content_block_stop":
                             if in_tool and current_tool_name:
                                 try:
-                                    tool_args = json.loads(tool_input_json) if tool_input_json else {}
+                                    tool_args = (
+                                        json.loads(tool_input_json) if tool_input_json else {}
+                                    )
                                 except json.JSONDecodeError:
                                     tool_args = {}
 
@@ -333,26 +337,30 @@ class ClaudeCodeAgent(IRAGAgent):
 
                                 yield ChatStreamEvent(
                                     event="tool_start",
-                                    data=json.dumps({
-                                        "tool_name": current_tool_name,
-                                        "tool_label": label,
-                                        "arguments": tool_args,
-                                    }),
+                                    data=json.dumps(
+                                        {
+                                            "tool_name": current_tool_name,
+                                            "tool_label": label,
+                                            "arguments": tool_args,
+                                        }
+                                    ),
                                 )
 
                                 while emitted_tool_idx < len(tool_call_records):
                                     rec = tool_call_records[emitted_tool_idx]
                                     yield ChatStreamEvent(
                                         event="tool_result",
-                                        data=json.dumps({
-                                            "tool_name": rec.tool_name,
-                                            "tool_label": friendly_tool_name(rec.tool_name),
-                                            "summary": rec.result_summary,
-                                            "count": len(rec.results),
-                                            "duration_ms": rec.duration_ms,
-                                            "error": None,
-                                            "results": rec.results,
-                                        }),
+                                        data=json.dumps(
+                                            {
+                                                "tool_name": rec.tool_name,
+                                                "tool_label": friendly_tool_name(rec.tool_name),
+                                                "summary": rec.result_summary,
+                                                "count": len(rec.results),
+                                                "duration_ms": rec.duration_ms,
+                                                "error": None,
+                                                "results": rec.results,
+                                            }
+                                        ),
                                     )
                                     emitted_tool_idx += 1
 
@@ -372,9 +380,11 @@ class ClaudeCodeAgent(IRAGAgent):
                 # are relayed.  This is a known SDK issue — the content and
                 # tool results have already been streamed successfully, so we
                 # log the error and continue with what we have.
-                is_transport_err = "CLIConnectionError" in str(type(sdk_err).__mro__) or \
-                    "ProcessTransport is not ready" in str(sdk_err) or \
-                    "TaskGroup" in str(sdk_err)
+                is_transport_err = (
+                    "CLIConnectionError" in str(type(sdk_err).__mro__)
+                    or "ProcessTransport is not ready" in str(sdk_err)
+                    or "TaskGroup" in str(sdk_err)
+                )
                 if is_transport_err:
                     logger.warning(
                         "SDK transport error (non-fatal, continuing with streamed content): %s",
@@ -388,15 +398,17 @@ class ClaudeCodeAgent(IRAGAgent):
                 rec = tool_call_records[emitted_tool_idx]
                 yield ChatStreamEvent(
                     event="tool_result",
-                    data=json.dumps({
-                        "tool_name": rec.tool_name,
-                        "tool_label": friendly_tool_name(rec.tool_name),
-                        "summary": rec.result_summary,
-                        "count": len(rec.results),
-                        "duration_ms": rec.duration_ms,
-                        "error": None,
-                        "results": rec.results,
-                    }),
+                    data=json.dumps(
+                        {
+                            "tool_name": rec.tool_name,
+                            "tool_label": friendly_tool_name(rec.tool_name),
+                            "summary": rec.result_summary,
+                            "count": len(rec.results),
+                            "duration_ms": rec.duration_ms,
+                            "error": None,
+                            "results": rec.results,
+                        }
+                    ),
                 )
                 emitted_tool_idx += 1
 
@@ -417,14 +429,18 @@ class ClaudeCodeAgent(IRAGAgent):
                 role="assistant",
                 content=accumulated_answer,
                 citations=citations if citations else None,
-                tool_calls=[tc.model_dump() for tc in tool_call_records] if tool_call_records else None,
+                tool_calls=[tc.model_dump() for tc in tool_call_records]
+                if tool_call_records
+                else None,
             )
             yield ChatStreamEvent(
                 event="message_created",
-                data=json.dumps({
-                    "message_id": str(assistant_msg.id),
-                    "role": "assistant",
-                }),
+                data=json.dumps(
+                    {
+                        "message_id": str(assistant_msg.id),
+                        "role": "assistant",
+                    }
+                ),
             )
 
             # Auto-generate title for first exchange
@@ -441,11 +457,13 @@ class ClaudeCodeAgent(IRAGAgent):
 
             yield ChatStreamEvent(
                 event="done",
-                data=json.dumps({
-                    "conversation_id": str(conversation_id),
-                    "citations_count": len(citations),
-                    "tools_used": [tc.tool_name for tc in tool_call_records],
-                }),
+                data=json.dumps(
+                    {
+                        "conversation_id": str(conversation_id),
+                        "citations_count": len(citations),
+                        "tools_used": [tc.tool_name for tc in tool_call_records],
+                    }
+                ),
             )
 
         except Exception as e:
@@ -531,9 +549,7 @@ class ClaudeCodeAgent(IRAGAgent):
         if not doc_ids:
             return
 
-        result = await self._db.execute(
-            select(Document).where(Document.id.in_(doc_ids))
-        )
+        result = await self._db.execute(select(Document).where(Document.id.in_(doc_ids)))
         docs_by_id = {doc.id: doc for doc in result.scalars().all()}
         storage = StorageClient()
 
@@ -545,18 +561,14 @@ class ClaudeCodeAgent(IRAGAgent):
             if doc.source == DocumentSource.GOOGLE_DRIVE:
                 drive_file_id = (doc.metadata_ or {}).get("drive_file_id")
                 if drive_file_id:
-                    citation.source_url = (
-                        f"https://drive.google.com/file/d/{drive_file_id}/view"
-                    )
+                    citation.source_url = f"https://drive.google.com/file/d/{drive_file_id}/view"
             elif doc.storage_path:
                 try:
                     citation.source_url = await storage.get_signed_url(
                         doc.storage_path, expires_in=3600
                     )
                 except Exception:
-                    logger.warning(
-                        "Failed to generate signed URL for %s", doc.storage_path
-                    )
+                    logger.warning("Failed to generate signed URL for %s", doc.storage_path)
 
     # ------------------------------------------------------------------
     # Title generation
@@ -593,7 +605,7 @@ class ClaudeCodeAgent(IRAGAgent):
                 temperature=0.0,
                 stream=False,
             )
-            generated = response.choices[0].message.content.strip().strip('"\'')[:80]
+            generated = response.choices[0].message.content.strip().strip("\"'")[:80]
             if generated:
                 title = generated
         except Exception as e:

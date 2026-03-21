@@ -8,10 +8,11 @@ or a Supabase-compatible API.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from supabase import create_client, Client as SupabaseClient
+from supabase import Client as SupabaseClient
+from supabase import create_client
 
 from app.config import get_settings
 
@@ -147,9 +148,7 @@ class StorageClient:
         Returns:
             Signed URL string
         """
-        response = self.client.storage.from_(bucket_name).create_signed_url(
-            file_path, expires_in
-        )
+        response = self.client.storage.from_(bucket_name).create_signed_url(file_path, expires_in)
         return response["signedURL"]
 
     @staticmethod
@@ -164,7 +163,7 @@ class StorageClient:
         """
         if ttl_days is None:
             ttl_days = get_settings().upload_ttl_days
-        return datetime.now(timezone.utc) + timedelta(days=ttl_days)
+        return datetime.now(UTC) + timedelta(days=ttl_days)
 
 
 # Module-level singleton (initialized via lifespan)

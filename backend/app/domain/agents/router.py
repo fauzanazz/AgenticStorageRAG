@@ -9,28 +9,27 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user, get_db, get_user_model_settings
+from app.domain.agents.attachments import (
+    EXTENSION_TO_MIME,
+    AttachmentService,
+    AttachmentTooLargeError,
+    UnsupportedAttachmentTypeError,
+)
 from app.domain.agents.chat_service import ChatService
 from app.domain.agents.exceptions import (
-    AgentBaseError,
     ArtifactNotFoundError,
     ConversationAccessDenied,
     ConversationNotFoundError,
 )
 from app.domain.agents.interfaces import IRAGAgent
 from app.domain.agents.rag_agent import RAGAgent
-from app.domain.agents.attachments import (
-    AttachmentService,
-    EXTENSION_TO_MIME,
-    AttachmentTooLargeError,
-    UnsupportedAttachmentTypeError,
-)
 from app.domain.agents.schemas import (
     AddMessageRequest,
     ArtifactResponse,
@@ -81,9 +80,7 @@ def _build_agent(
     )
 
     # Resolve the embedding model for VectorService
-    embedding_model = (
-        user_settings.embedding_model if user_settings is not None else None
-    )
+    embedding_model = user_settings.embedding_model if user_settings is not None else None
 
     graph_service = GraphService(db=db, neo4j=neo4j_client)
     vector_service = VectorService(db=db, embedding_model=embedding_model)
@@ -155,9 +152,7 @@ async def chat_stream(
                 logger.info("SSE client disconnected, stopping stream")
                 break
             # SSE spec: multi-line data needs each line prefixed with "data: "
-            data_lines = "\n".join(
-                f"data: {line}" for line in event.data.split("\n")
-            )
+            data_lines = "\n".join(f"data: {line}" for line in event.data.split("\n"))
             yield f"event: {event.event}\n{data_lines}\n\n"
 
     return StreamingResponse(
@@ -211,9 +206,11 @@ async def chat_message(
             elif event.event == "error":
                 try:
                     error_data = json.loads(event.data)
-                    raise HTTPException(status_code=500, detail=error_data.get("error", "Agent error"))
+                    raise HTTPException(
+                        status_code=500, detail=error_data.get("error", "Agent error")
+                    )
                 except json.JSONDecodeError:
-                    raise HTTPException(status_code=500, detail="Agent error")
+                    raise HTTPException(status_code=500, detail="Agent error") from None
     except HTTPException:
         raise
     except Exception as e:
@@ -225,9 +222,7 @@ async def chat_message(
 
     # Get the last assistant message from the conversation
     try:
-        stmt_messages = await chat_service.get_messages(
-            conversation_id, user.id, limit=100
-        )
+        stmt_messages = await chat_service.get_messages(conversation_id, user.id, limit=100)
         assistant_messages = [m for m in stmt_messages if m.role == "assistant"]
         if assistant_messages:
             return assistant_messages[-1]
@@ -242,7 +237,7 @@ async def chat_message(
         content=full_content or "I couldn't generate a response.",
         citations=[],
         token_count=len(full_content) // 4,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
 
 
@@ -289,8 +284,9 @@ async def attach_from_drive(
     db: AsyncSession = Depends(get_db),
 ) -> list[AttachmentResponse]:
     """Download files from Google Drive and attach them for chat."""
-    from app.domain.auth.models import OAuthAccount
     from sqlalchemy import select as sa_select
+
+    from app.domain.auth.models import OAuthAccount
 
     result = await db.execute(
         sa_select(OAuthAccount).where(
@@ -501,6 +497,7 @@ async def enrich_citations(
 ) -> dict:
     """Enrich citations with document names and source URLs."""
     from sqlalchemy import select as sa_select
+
     from app.domain.documents.models import Document, DocumentSource
     from app.infra.storage import StorageClient
 
@@ -514,9 +511,7 @@ async def enrich_citations(
 
     doc_ids = list({c.document_id for c in citations if c.document_id})
     if doc_ids:
-        result = await db.execute(
-            sa_select(Document).where(Document.id.in_(doc_ids))
-        )
+        result = await db.execute(sa_select(Document).where(Document.id.in_(doc_ids)))
         docs_by_id = {doc.id: doc for doc in result.scalars().all()}
         storage = StorageClient()
 
@@ -528,18 +523,14 @@ async def enrich_citations(
             if doc.source == DocumentSource.GOOGLE_DRIVE:
                 drive_file_id = (doc.metadata_ or {}).get("drive_file_id")
                 if drive_file_id:
-                    citation.source_url = (
-                        f"https://drive.google.com/file/d/{drive_file_id}/view"
-                    )
+                    citation.source_url = f"https://drive.google.com/file/d/{drive_file_id}/view"
             elif doc.storage_path:
                 try:
                     citation.source_url = await storage.get_signed_url(
                         doc.storage_path, expires_in=3600
                     )
                 except Exception:
-                    logger.warning(
-                        "Failed to generate signed URL for %s", doc.storage_path
-                    )
+                    logger.warning("Failed to generate signed URL for %s", doc.storage_path)
 
     return {"citations": [c.model_dump(mode="json") for c in citations]}
 

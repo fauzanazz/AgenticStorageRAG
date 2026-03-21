@@ -11,9 +11,9 @@ import uuid
 from abc import ABC, abstractmethod
 
 from app.domain.auth.schemas import (
-    RegisterRequest,
-    LoginRequest,
     AuthResponse,
+    LoginRequest,
+    RegisterRequest,
     TokenResponse,
     UserResponse,
 )
