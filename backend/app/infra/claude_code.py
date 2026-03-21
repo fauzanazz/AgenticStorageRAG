@@ -338,7 +338,9 @@ class ClaudeCodeAgent(IRAGAgent):
 
                                 # Flush pre-tool text as narration
                                 if accumulated_answer.strip():
-                                    narrative_steps.append({"type": "narration", "content": accumulated_answer})
+                                    narrative_steps.append(
+                                        {"type": "narration", "content": accumulated_answer}
+                                    )
                                     accumulated_answer = ""
 
                                 narrative_steps.append(
