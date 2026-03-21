@@ -2,6 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   devIndicators: false,
+  serverExternalPackages: ["@anthropic-ai/claude-agent-sdk"],
   turbopack: {},
   webpack: (config, { dev }) => {
     if (dev) {

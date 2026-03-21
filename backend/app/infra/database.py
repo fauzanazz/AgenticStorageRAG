@@ -94,8 +94,8 @@ def build_session_factory(
         url if isinstance(url, str) else url,
         echo=False,
         pool_pre_ping=True,
-        pool_size=5,
-        max_overflow=10,
+        pool_size=10,
+        max_overflow=15,
         pool_recycle=300,
         connect_args={"statement_cache_size": 0, "prepared_statement_cache_size": 0},
     )

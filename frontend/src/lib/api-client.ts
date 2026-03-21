@@ -209,6 +209,69 @@ class ApiClient {
     }
   }
 
+  /** Stream an SSE POST to an absolute URL (same-origin, no baseUrl prefix). */
+  async streamAbsolute(
+    url: string,
+    body?: unknown,
+    onEvent?: (event: { event: string; data: string }) => void,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const token = this.getToken();
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+      signal,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({
+        detail: response.statusText,
+      }));
+      throw new ApiError(response.status, error.detail || "Unknown error");
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) return;
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let currentEvent = "message";
+    let dataChunks: string[] = [];
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        if (line.startsWith("event: ")) {
+          currentEvent = line.slice(7).trim();
+        } else if (line.startsWith("data: ")) {
+          dataChunks.push(line.slice(6));
+        } else if (line === "") {
+          if (dataChunks.length > 0) {
+            const data = dataChunks.join("\n");
+            dataChunks = [];
+            if (data === "[DONE]") return;
+            onEvent?.({ event: currentEvent, data });
+          }
+          currentEvent = "message";
+        }
+      }
+    }
+  }
+
   /** Upload a file with multipart/form-data */
   async upload<T>(path: string, formData: FormData, isRetry = false): Promise<T> {
     const token = this.getToken();

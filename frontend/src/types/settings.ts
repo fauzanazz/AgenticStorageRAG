@@ -2,10 +2,6 @@ export interface ApiKeyStatus {
   has_key: boolean;
 }
 
-export interface ClaudeSetupTokenStatus {
-  has_token: boolean;
-}
-
 export interface ModelSettings {
   chat_model: string;
   ingestion_model: string;
@@ -14,7 +10,7 @@ export interface ModelSettings {
   openai_api_key: ApiKeyStatus;
   dashscope_api_key: ApiKeyStatus;
   openrouter_api_key: ApiKeyStatus;
-  claude_setup_token: ClaudeSetupTokenStatus;
+  use_claude_code: boolean;
 }
 
 export interface UpdateModelSettingsRequest {
@@ -26,7 +22,7 @@ export interface UpdateModelSettingsRequest {
   openai_api_key?: string | null;
   dashscope_api_key?: string | null;
   openrouter_api_key?: string | null;
-  claude_setup_token?: string | null;
+  use_claude_code?: boolean | null;
 }
 
 export interface ModelOption {
@@ -44,4 +40,11 @@ export interface ModelCatalog {
 export interface AvailableModelsResponse {
   models: ModelOption[];
   default_model: string | null;
+}
+
+export interface ClaudeCodeTestResult {
+  ok: boolean;
+  version?: string;
+  response?: string;
+  error?: string;
 }

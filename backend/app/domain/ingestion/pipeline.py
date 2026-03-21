@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
+import sqlalchemy.exc
 from sqlalchemy import select, text, update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -80,6 +81,7 @@ class PipelineConfig:
     embed_workers: int = 2
     embed_batch_size: int = 100
     embed_max_retries: int = 2
+    download_extract_max_retries: int = 2
     queue_multiplier: int = 2
 
     @classmethod
@@ -92,6 +94,7 @@ class PipelineConfig:
             embed_workers=s.pipeline_embed_workers,
             embed_batch_size=s.pipeline_embed_batch_size,
             embed_max_retries=s.pipeline_embed_max_retries,
+            download_extract_max_retries=s.pipeline_download_extract_max_retries,
             queue_multiplier=s.pipeline_queue_multiplier,
         )
 
@@ -222,7 +225,7 @@ class StagePipeline:
         finally:
             await self._close_neo4j()
 
-        # Retry pass for failed embed/KG files
+        # Retry pass for all failed files (download, extract, embed, KG)
         if self._retry_file_ids:
             await self._retry_pass(is_cancelled)
 
@@ -240,28 +243,34 @@ class StagePipeline:
         scanning_done: asyncio.Event,
         is_cancelled: Any,
     ) -> None:
-        """Poll indexed_files for pending rows and feed them to download workers."""
+        """Poll indexed_files for pending rows and feed them to download workers.
+
+        Uses short-lived sessions per poll cycle instead of holding one session
+        open for the entire pipeline duration, which could exhaust the connection
+        pool or get killed by pgbouncer.
+        """
         poll_interval = 1.0
 
-        async with self._session_factory() as db:
-            while True:
-                if is_cancelled and await is_cancelled():
-                    break
+        while True:
+            if is_cancelled and await is_cancelled():
+                break
 
+            async with self._session_factory() as db:
                 rows = await self._fetch_pending(db, limit=20)
 
-                if not rows:
-                    if scanning_done.is_set():
-                        # Final drain
+            if not rows:
+                if scanning_done.is_set():
+                    # Final drain
+                    async with self._session_factory() as db:
                         rows = await self._fetch_pending(db, limit=20)
-                        if not rows:
-                            break
-                    else:
-                        await asyncio.sleep(poll_interval)
-                        continue
+                    if not rows:
+                        break
+                else:
+                    await asyncio.sleep(poll_interval)
+                    continue
 
-                for row in rows:
-                    await self._download_q.put(row)
+            for row in rows:
+                await self._download_q.put(row)
 
         # Send sentinels to shut down download workers
         for _ in range(self._config.download_workers):
@@ -321,17 +330,36 @@ class StagePipeline:
                         continue
                     await self._extract_q.put(result)
                 except Exception as e:
-                    logger.exception(
-                        "Download failed for %s: %s", indexed_file.file_name, e
+                    err_str = str(e)
+                    # Google API errors that mean "file can't be exported" —
+                    # skip instead of counting as a failure.
+                    if any(skip in err_str for skip in self._SKIP_ERRORS):
+                        logger.info(
+                            "Skipping unexportable file %s: %s",
+                            indexed_file.file_name, err_str[:200],
+                        )
+                        await self._update_stage(
+                            indexed_file.id,
+                            IndexedFileStage.SKIPPED.value,
+                            IndexedFileStatus.SKIPPED.value,
+                            error_message=err_str[:500],
+                        )
+                        await self._stats.increment(skipped=1)
+                        await self._increment_job_counter("skipped_files", 1)
+                        continue
+
+                    logger.warning(
+                        "Download failed for %s (will retry): %s",
+                        indexed_file.file_name, e,
                     )
                     await self._update_stage(
                         indexed_file.id,
                         IndexedFileStage.FAILED.value,
                         IndexedFileStatus.FAILED.value,
-                        error_message=str(e)[:500],
+                        error_message=err_str[:500],
                     )
-                    await self._stats.increment(failed=1)
-                    await self._increment_job_counter("failed_files", 1)
+                    async with self._retry_lock:
+                        self._retry_file_ids.append(indexed_file.id)
         finally:
             # Last download worker to finish sends sentinels to extract workers
             async with self._dl_done_lock:
@@ -339,6 +367,9 @@ class StagePipeline:
                 if self._dl_done_count == self._config.download_workers:
                     for _ in range(self._config.extract_workers):
                         await self._extract_q.put(_SENTINEL)
+
+    # Google API errors that mean "skip this file", not "crash the job"
+    _SKIP_ERRORS = ("exportSizeLimitExceeded", "fileNotExportable", "cannotExportFile")
 
     async def _download_one(self, indexed_file: IndexedFile) -> DownloadResult | None:
         """Download a single file. Returns None if skipped."""
@@ -433,8 +464,9 @@ class StagePipeline:
                     if result is not None:
                         await self._embed_q.put(result)
                 except Exception as e:
-                    logger.exception(
-                        "Extract failed for %s: %s", dl_result.file_name, e
+                    logger.warning(
+                        "Extract failed for %s (will retry): %s",
+                        dl_result.file_name, e,
                     )
                     await self._update_stage(
                         dl_result.indexed_file_id,
@@ -442,8 +474,8 @@ class StagePipeline:
                         IndexedFileStatus.FAILED.value,
                         error_message=str(e)[:500],
                     )
-                    await self._stats.increment(failed=1)
-                    await self._increment_job_counter("failed_files", 1)
+                    async with self._retry_lock:
+                        self._retry_file_ids.append(dl_result.indexed_file_id)
                 finally:
                     # Release file bytes regardless of outcome
                     dl_result.file_bytes = b""
@@ -740,17 +772,30 @@ class StagePipeline:
     # ------------------------------------------------------------------
 
     async def _retry_pass(self, is_cancelled: Any) -> None:
-        """Re-attempt embedding/KG for files that failed in the main pass."""
+        """Re-attempt failed files with exponential backoff.
+
+        Handles all failure types:
+        - FAILED (download/extract): re-downloads and re-processes from scratch
+        - EMBED_FAILED / KG_FAILED: re-embeds and re-runs KG from existing chunks
+        """
         logger.info(
             "Retry pass: %d files to retry", len(self._retry_file_ids)
         )
+
+        _REDOWNLOAD_STAGES = {
+            IndexedFileStage.FAILED.value,
+            IndexedFileStage.DOWNLOADING.value,
+        }
+        _RE_EMBED_STAGES = {
+            IndexedFileStage.EMBED_FAILED.value,
+            IndexedFileStage.KG_FAILED.value,
+        }
 
         async with self._session_factory() as db:
             for file_id in self._retry_file_ids:
                 if is_cancelled and await is_cancelled():
                     break
 
-                # Fetch the indexed file
                 result = await db.execute(
                     select(IndexedFile).where(IndexedFile.id == file_id)
                 )
@@ -758,65 +803,140 @@ class StagePipeline:
                 if not indexed_file:
                     continue
 
-                if indexed_file.retry_count >= self._config.embed_max_retries:
+                stage = indexed_file.stage
+                if stage in _REDOWNLOAD_STAGES:
+                    max_retries = self._config.download_extract_max_retries
+                else:
+                    max_retries = self._config.embed_max_retries
+
+                if indexed_file.retry_count >= max_retries:
                     logger.info(
-                        "Max retries reached for %s", indexed_file.file_name
+                        "Max retries (%d) reached for %s (stage=%s)",
+                        max_retries, indexed_file.file_name, stage,
                     )
                     await self._stats.increment(retry_failed=1)
+                    await self._stats.increment(failed=1)
+                    await self._increment_job_counter("failed_files", 1)
                     continue
 
-                # Increment retry count
+                # Increment retry count + exponential backoff delay
+                new_count = indexed_file.retry_count + 1
                 await db.execute(
                     sa_update(IndexedFile)
                     .where(IndexedFile.id == file_id)
-                    .values(retry_count=IndexedFile.retry_count + 1)
+                    .values(retry_count=new_count)
                     .execution_options(synchronize_session=False)
                 )
                 await db.commit()
 
-                # Load the document and chunks for re-embedding
-                if not indexed_file.document_id:
-                    await self._stats.increment(retry_failed=1)
-                    continue
-
-                doc_result = await db.execute(
-                    select(Document).where(
-                        Document.id == indexed_file.document_id
-                    )
+                backoff = min(2 ** indexed_file.retry_count, 30)
+                logger.info(
+                    "Retry %d/%d for %s (stage=%s, backoff=%.0fs)",
+                    new_count, max_retries,
+                    indexed_file.file_name, stage, backoff,
                 )
-                document = doc_result.scalar_one_or_none()
-                if not document:
-                    await self._stats.increment(retry_failed=1)
-                    continue
+                await asyncio.sleep(backoff)
 
-                from app.domain.documents.models import DocumentChunk
+                if stage in _REDOWNLOAD_STAGES:
+                    success = await self._retry_download_extract(indexed_file)
+                elif stage in _RE_EMBED_STAGES:
+                    success = await self._retry_embed_kg(db, indexed_file)
+                else:
+                    # Unknown failed stage — try re-download as a fallback
+                    success = await self._retry_download_extract(indexed_file)
 
-                chunk_result = await db.execute(
-                    select(DocumentChunk)
-                    .where(DocumentChunk.document_id == document.id)
-                    .order_by(DocumentChunk.chunk_index)
-                )
-                chunks = list(chunk_result.scalars().all())
-
-                ext = ExtractResult(
-                    indexed_file_id=file_id,
-                    document_id=document.id,
-                    document=document,
-                    chunks=chunks,
-                )
-
-                # Retry embed + KG
-                await self._flush_embed_batch([ext])
-
-                # Check if it succeeded
-                refreshed = await db.execute(
-                    select(IndexedFile.stage).where(IndexedFile.id == file_id)
-                )
-                stage = refreshed.scalar_one_or_none()
-                if stage == IndexedFileStage.KG_DONE.value:
+                if success:
                     await self._stats.increment(retry_succeeded=1)
                 else:
                     await self._stats.increment(retry_failed=1)
+
+    async def _retry_download_extract(self, indexed_file: IndexedFile) -> bool:
+        """Re-download and re-process a file that failed at download or extract."""
+        try:
+            # Reset stage to downloading
+            await self._update_stage(
+                indexed_file.id,
+                IndexedFileStage.DOWNLOADING.value,
+                IndexedFileStatus.PROCESSING.value,
+            )
+
+            dl_result = await self._download_one(indexed_file)
+            if dl_result is None:
+                # Skipped (dedup, size, etc.)
+                return True
+
+            ext_result = await self._extract_one(dl_result)
+            dl_result.file_bytes = b""
+            if ext_result is None:
+                return True
+
+            await self._flush_embed_batch([ext_result])
+
+            # Check final stage
+            async with self._session_factory() as db:
+                refreshed = await db.execute(
+                    select(IndexedFile.stage).where(
+                        IndexedFile.id == indexed_file.id
+                    )
+                )
+                final_stage = refreshed.scalar_one_or_none()
+                return final_stage == IndexedFileStage.KG_DONE.value
+        except Exception as e:
+            logger.error(
+                "Retry download/extract failed for %s: %s",
+                indexed_file.file_name, e,
+            )
+            await self._update_stage(
+                indexed_file.id,
+                IndexedFileStage.FAILED.value,
+                IndexedFileStatus.FAILED.value,
+                error_message=str(e)[:500],
+            )
+            return False
+
+    async def _retry_embed_kg(
+        self, db: AsyncSession, indexed_file: IndexedFile
+    ) -> bool:
+        """Re-embed and re-run KG for a file that already has chunks."""
+        if not indexed_file.document_id:
+            await self._stats.increment(failed=1)
+            await self._increment_job_counter("failed_files", 1)
+            return False
+
+        doc_result = await db.execute(
+            select(Document).where(
+                Document.id == indexed_file.document_id
+            )
+        )
+        document = doc_result.scalar_one_or_none()
+        if not document:
+            await self._stats.increment(failed=1)
+            await self._increment_job_counter("failed_files", 1)
+            return False
+
+        chunk_result = await db.execute(
+            select(DocumentChunk)
+            .where(DocumentChunk.document_id == document.id)
+            .order_by(DocumentChunk.chunk_index)
+        )
+        chunks = list(chunk_result.scalars().all())
+
+        ext = ExtractResult(
+            indexed_file_id=indexed_file.id,
+            document_id=document.id,
+            document=document,
+            chunks=chunks,
+        )
+
+        await self._flush_embed_batch([ext])
+
+        refreshed = await db.execute(
+            select(IndexedFile.stage).where(
+                IndexedFile.id == indexed_file.id
+            )
+        )
+        stage = refreshed.scalar_one_or_none()
+        return stage == IndexedFileStage.KG_DONE.value
 
     # ------------------------------------------------------------------
     # Helpers
@@ -830,7 +950,11 @@ class StagePipeline:
         document_id: uuid.UUID | None = None,
         error_message: str | None = None,
     ) -> None:
-        """Update an indexed file's pipeline stage (and optionally status)."""
+        """Update an indexed file's pipeline stage (and optionally status).
+
+        Retries once on connection errors to handle pgbouncer drops.
+        Never raises — logs errors so callers in except blocks don't crash.
+        """
         values: dict[str, Any] = {"stage": stage}
         if status is not None:
             values["status"] = status
@@ -847,29 +971,56 @@ class StagePipeline:
         ):
             values["processed_at"] = datetime.now(timezone.utc)
 
-        async with self._session_factory() as db:
-            await db.execute(
-                sa_update(IndexedFile)
-                .where(IndexedFile.id == indexed_file_id)
-                .values(**values)
-                .execution_options(synchronize_session=False)
-            )
-            await db.commit()
+        for attempt in range(2):
+            try:
+                async with self._session_factory() as db:
+                    await db.execute(
+                        sa_update(IndexedFile)
+                        .where(IndexedFile.id == indexed_file_id)
+                        .values(**values)
+                        .execution_options(synchronize_session=False)
+                    )
+                    await db.commit()
+                return
+            except (OSError, sqlalchemy.exc.OperationalError, sqlalchemy.exc.InterfaceError):
+                if attempt == 0:
+                    logger.warning(
+                        "DB error updating stage for %s (attempt 1), retrying",
+                        indexed_file_id,
+                    )
+                    await asyncio.sleep(0.5)
+                else:
+                    logger.error(
+                        "DB error updating stage for %s (attempt 2), giving up: "
+                        "stage=%s status=%s",
+                        indexed_file_id, stage, status,
+                        exc_info=True,
+                    )
 
     async def _increment_job_counter(self, column: str, delta: int) -> None:
-        """Atomically increment a job progress counter."""
+        """Atomically increment a job progress counter.
+
+        Never raises — logs errors so callers in except blocks don't crash.
+        """
         col = getattr(IngestionJob, column)
-        async with self._session_factory() as db:
-            await db.execute(
-                sa_update(IngestionJob)
-                .where(
-                    IngestionJob.id == self._job.id,
-                    IngestionJob.status != IngestionStatus.CANCELLED,
+        try:
+            async with self._session_factory() as db:
+                await db.execute(
+                    sa_update(IngestionJob)
+                    .where(
+                        IngestionJob.id == self._job.id,
+                        IngestionJob.status != IngestionStatus.CANCELLED,
+                    )
+                    .values(**{column: col + delta})
+                    .execution_options(synchronize_session=False)
                 )
-                .values(**{column: col + delta})
-                .execution_options(synchronize_session=False)
+                await db.commit()
+        except Exception:
+            logger.warning(
+                "Failed to increment job counter %s for job %s",
+                column, self._job.id,
+                exc_info=True,
             )
-            await db.commit()
 
     async def _update_job_stage_counts(self) -> None:
         """Update job metadata with per-stage counts for observability."""

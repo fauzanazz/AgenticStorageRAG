@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import type {
   AvailableModelsResponse,
+  ClaudeCodeTestResult,
   ModelCatalog,
   ModelSettings,
   UpdateModelSettingsRequest,
@@ -41,6 +42,11 @@ export function useModelSettings() {
     },
   });
 
+  const testClaudeCodeMutation = useMutation({
+    mutationFn: () =>
+      apiClient.get<ClaudeCodeTestResult>("/settings/claude-code/test"),
+  });
+
   return {
     settings: settingsQuery.data ?? null,
     catalog: catalogQuery.data ?? null,
@@ -55,6 +61,9 @@ export function useModelSettings() {
     isSuccess: updateMutation.isSuccess,
     updateSettings: (data: UpdateModelSettingsRequest) =>
       updateMutation.mutateAsync(data),
+    testClaudeCode: () => testClaudeCodeMutation.mutateAsync(),
+    isTestingClaudeCode: testClaudeCodeMutation.isPending,
+    claudeCodeTestResult: testClaudeCodeMutation.data ?? null,
     refetch: () => {
       settingsQuery.refetch();
       availableQuery.refetch();

@@ -335,6 +335,7 @@ class TestIngestionOrchestrator:
         mock_connector = AsyncMock()
         mock_connector.authenticate.return_value = False
         mock_llm = AsyncMock()
+        session_factory, _ = _make_session_factory()
 
         job = _make_job()
         orchestrator = IngestionOrchestrator(
@@ -342,6 +343,7 @@ class TestIngestionOrchestrator:
             storage=mock_storage,
             connector=mock_connector,
             llm=mock_llm,
+            session_factory=session_factory,
         )
 
         result = await orchestrator.run(job, admin_user_id=uuid.uuid4())
@@ -372,6 +374,8 @@ class TestIngestionOrchestrator:
         ]
         mock_llm = AsyncMock()
 
+        session_factory, worker_db = _make_session_factory()
+
         # Mock DB result for _is_cancelled and finalize refresh
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = IngestionStatus.PROCESSING
@@ -387,9 +391,7 @@ class TestIngestionOrchestrator:
             refreshed_job,               # finalize refresh
             None,                        # _update_job_status check
         ]
-        mock_db.execute.return_value = mock_result
-
-        session_factory, worker_db = _make_session_factory()
+        worker_db.execute.return_value = mock_result
 
         job = _make_job()
         orchestrator = IngestionOrchestrator(
@@ -433,6 +435,8 @@ class TestIngestionOrchestrator:
         mock_connector.list_folder_children.return_value = []
         mock_llm = AsyncMock()
 
+        session_factory, worker_db = _make_session_factory()
+
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.side_effect = [
             IngestionStatus.PROCESSING,  # _is_cancelled
@@ -440,9 +444,7 @@ class TestIngestionOrchestrator:
             None,
         ]
         mock_result.rowcount = 1
-        mock_db.execute.return_value = mock_result
-
-        session_factory, worker_db = _make_session_factory()
+        worker_db.execute.return_value = mock_result
 
         job = _make_job()
         orchestrator = IngestionOrchestrator(
@@ -497,6 +499,8 @@ class TestIngestionOrchestrator:
         ]
         mock_llm = AsyncMock()
 
+        session_factory, worker_db = _make_session_factory()
+
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.side_effect = [
             IngestionStatus.PROCESSING,
@@ -504,9 +508,7 @@ class TestIngestionOrchestrator:
             None,
         ]
         mock_result.rowcount = 1
-        mock_db.execute.return_value = mock_result
-
-        session_factory, worker_db = _make_session_factory()
+        worker_db.execute.return_value = mock_result
 
         job = _make_job()
         orchestrator = IngestionOrchestrator(
@@ -561,13 +563,13 @@ class TestIngestionOrchestrator:
 
         job = _make_job()
 
+        session_factory, worker_db = _make_session_factory()
+
         # Simulate cancellation on first _is_cancelled check
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = IngestionStatus.CANCELLED
         mock_result.rowcount = 1
-        mock_db.execute.return_value = mock_result
-
-        session_factory, _ = _make_session_factory()
+        worker_db.execute.return_value = mock_result
 
         orchestrator = IngestionOrchestrator(
             db=mock_db,

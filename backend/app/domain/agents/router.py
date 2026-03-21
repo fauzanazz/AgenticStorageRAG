@@ -23,6 +23,7 @@ from app.domain.agents.exceptions import (
     ConversationAccessDenied,
     ConversationNotFoundError,
 )
+from app.domain.agents.interfaces import IRAGAgent
 from app.domain.agents.rag_agent import RAGAgent
 from app.domain.agents.attachments import (
     AttachmentService,
@@ -31,6 +32,7 @@ from app.domain.agents.attachments import (
     UnsupportedAttachmentTypeError,
 )
 from app.domain.agents.schemas import (
+    AddMessageRequest,
     ArtifactResponse,
     AttachmentResponse,
     ChatRequest,
@@ -38,6 +40,7 @@ from app.domain.agents.schemas import (
     ConversationResponse,
     DriveAttachmentRequest,
     MessageResponse,
+    UpdateTitleRequest,
 )
 from app.domain.agents.tools import FetchDocumentTool, GenerateDocumentTool, HybridSearchTool
 from app.domain.auth.models import User
@@ -59,12 +62,16 @@ def _build_agent(
     db: AsyncSession,
     user_settings: UserModelSettings | None = None,
     model_override: str | None = None,
-) -> RAGAgent:
+) -> IRAGAgent:
     """Build the RAG agent with all tools wired up.
 
     When ``user_settings`` is provided the agent uses the user's own models
     and API keys via a scoped LLM provider.  Falls back to server defaults
     when ``user_settings`` is None.
+
+    If ``user_settings.use_claude_code`` is True, returns a
+    ``ClaudeCodeAgent`` which delegates the ReAct loop to the local
+    ``claude`` CLI binary via the Claude Agent SDK.
     """
     # Resolve the LLM to use for this request
     effective_llm = (
@@ -92,6 +99,17 @@ def _build_agent(
     ]
 
     chat_service = ChatService(db=db)
+
+    # Use Claude Code agent if the user opted in
+    if user_settings is not None and user_settings.use_claude_code:
+        from app.infra.claude_code import ClaudeCodeAgent
+
+        return ClaudeCodeAgent(
+            chat_service=chat_service,
+            tools=tools,
+            db=db,
+        )
+
     return RAGAgent(
         llm=effective_llm,
         chat_service=chat_service,
@@ -398,6 +416,132 @@ async def list_artifacts(
         raise HTTPException(status_code=404, detail=e.message) from e
     except ConversationAccessDenied as e:
         raise HTTPException(status_code=403, detail=e.message) from e
+
+
+@router.post(
+    "/conversations/{conversation_id}/messages",
+    response_model=MessageResponse,
+    status_code=201,
+)
+async def add_message(
+    conversation_id: uuid.UUID,
+    body: AddMessageRequest,
+    user: User = Depends(get_current_user),
+    chat: ChatService = Depends(_get_chat_service),
+) -> MessageResponse:
+    """Add a message to a conversation (used by Next.js agent route)."""
+    try:
+        await chat.get_conversation(conversation_id, user.id)
+    except ConversationNotFoundError as e:
+        raise HTTPException(status_code=404, detail=e.message) from e
+    except ConversationAccessDenied as e:
+        raise HTTPException(status_code=403, detail=e.message) from e
+
+    return await chat.add_message(
+        conversation_id=conversation_id,
+        role=body.role,
+        content=body.content,
+        citations=body.citations,
+        tool_calls=body.tool_calls,
+        thinking_blocks=body.thinking_blocks,
+    )
+
+
+@router.patch("/conversations/{conversation_id}/title", status_code=204)
+async def update_conversation_title(
+    conversation_id: uuid.UUID,
+    body: UpdateTitleRequest,
+    user: User = Depends(get_current_user),
+    chat: ChatService = Depends(_get_chat_service),
+) -> None:
+    """Update conversation title (used by Next.js agent route)."""
+    try:
+        await chat.get_conversation(conversation_id, user.id)
+    except ConversationNotFoundError as e:
+        raise HTTPException(status_code=404, detail=e.message) from e
+    except ConversationAccessDenied as e:
+        raise HTTPException(status_code=403, detail=e.message) from e
+
+    await chat.update_conversation_title(conversation_id, body.title)
+
+
+@router.post("/tools/fetch-document")
+async def proxy_fetch_document(
+    body: dict,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Proxy fetch-document tool for the Next.js agent route."""
+    tool = FetchDocumentTool(db=db)
+    return await tool.execute(**body)
+
+
+@router.post("/tools/generate-document")
+async def proxy_generate_document(
+    body: dict,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    user_settings: UserModelSettings | None = Depends(get_user_model_settings),
+) -> dict:
+    """Proxy generate-document tool for the Next.js agent route (non-streaming)."""
+    effective_llm = (
+        llm_provider.with_user_settings(user_settings)
+        if user_settings is not None
+        else llm_provider
+    )
+    tool = GenerateDocumentTool(llm=effective_llm)
+    return await tool.execute(**body)
+
+
+@router.post("/tools/enrich-citations")
+async def enrich_citations(
+    body: dict,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Enrich citations with document names and source URLs."""
+    from sqlalchemy import select as sa_select
+    from app.domain.documents.models import Document, DocumentSource
+    from app.infra.storage import StorageClient
+
+    raw_citations = body.get("citations", [])
+    if not raw_citations:
+        return {"citations": []}
+
+    from app.domain.agents.schemas import Citation
+
+    citations = [Citation(**c) for c in raw_citations]
+
+    doc_ids = list({c.document_id for c in citations if c.document_id})
+    if doc_ids:
+        result = await db.execute(
+            sa_select(Document).where(Document.id.in_(doc_ids))
+        )
+        docs_by_id = {doc.id: doc for doc in result.scalars().all()}
+        storage = StorageClient()
+
+        for citation in citations:
+            doc = docs_by_id.get(citation.document_id)
+            if not doc:
+                continue
+            citation.document_name = doc.filename
+            if doc.source == DocumentSource.GOOGLE_DRIVE:
+                drive_file_id = (doc.metadata_ or {}).get("drive_file_id")
+                if drive_file_id:
+                    citation.source_url = (
+                        f"https://drive.google.com/file/d/{drive_file_id}/view"
+                    )
+            elif doc.storage_path:
+                try:
+                    citation.source_url = await storage.get_signed_url(
+                        doc.storage_path, expires_in=3600
+                    )
+                except Exception:
+                    logger.warning(
+                        "Failed to generate signed URL for %s", doc.storage_path
+                    )
+
+    return {"citations": [c.model_dump(mode="json") for c in citations]}
 
 
 @router.get("/artifacts/{artifact_id}", response_model=ArtifactResponse)

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useModelSettings } from "@/hooks/use-model-settings";
-import { Cpu, Eye, EyeOff, AlertTriangle, Check, Loader2 } from "lucide-react";
+import { Cpu, Eye, EyeOff, AlertTriangle, Check, Loader2, Zap } from "lucide-react";
 import type { ModelOption } from "@/types/settings";
 
 const PROVIDER_KEY_FIELD: Record<string, "anthropic" | "openai" | "dashscope" | "openrouter"> = {
@@ -22,13 +22,22 @@ function groupByProvider<T extends { provider: string }>(items: T[]): { provider
 }
 
 export function ModelConfigCard() {
-  const { settings, catalog, isSaving, isSuccess: modelSaveSuccess, error: modelError, updateSettings } = useModelSettings();
+  const {
+    settings,
+    catalog,
+    isSaving,
+    isSuccess: modelSaveSuccess,
+    error: modelError,
+    updateSettings,
+    testClaudeCode,
+    isTestingClaudeCode,
+    claudeCodeTestResult,
+  } = useModelSettings();
 
   const [chatModel, setChatModel] = useState<string>("");
   const [ingestionModel, setIngestionModel] = useState<string>("");
   const [embeddingModel, setEmbeddingModel] = useState<string>("");
-  const [claudeSetupToken, setClaudeSetupToken] = useState<string>("");
-  const [showSetupToken, setShowSetupToken] = useState(false);
+  const [useClaudeCode, setUseClaudeCode] = useState<boolean | null>(null);
 
   const [apiKeys, setApiKeys] = useState<Record<string, string>>({
     anthropic: "",
@@ -48,8 +57,11 @@ export function ModelConfigCard() {
     setChatModel(settings.chat_model);
     setIngestionModel(settings.ingestion_model);
     setEmbeddingModel(settings.embedding_model);
+    setUseClaudeCode(settings.use_claude_code);
     setModelsInitialized(true);
   }
+
+  const effectiveUseClaudeCode = useClaudeCode ?? settings?.use_claude_code ?? false;
 
   const handleSave = async () => {
     await updateSettings({
@@ -60,10 +72,9 @@ export function ModelConfigCard() {
       openai_api_key: apiKeys.openai,
       dashscope_api_key: apiKeys.dashscope,
       openrouter_api_key: apiKeys.openrouter,
-      claude_setup_token: claudeSetupToken,
+      use_claude_code: effectiveUseClaudeCode,
     });
     setApiKeys({ anthropic: "", openai: "", dashscope: "", openrouter: "" });
-    setClaudeSetupToken("");
   };
 
   const getProviderForModel = (modelId: string): string => {
@@ -80,8 +91,8 @@ export function ModelConfigCard() {
     const keyField = PROVIDER_KEY_FIELD[provider];
     if (!keyField) return true;
     if (apiKeys[keyField]) return true;
-    // Claude setup token counts as having Anthropic credentials
-    if (keyField === "anthropic" && settings.claude_setup_token?.has_token) return true;
+    // Claude Code counts as having Anthropic credentials
+    if (keyField === "anthropic" && effectiveUseClaudeCode) return true;
     const keyStatus = settings[`${keyField}_api_key` as "anthropic_api_key" | "openai_api_key" | "dashscope_api_key" | "openrouter_api_key"];
     return typeof keyStatus === "object" && keyStatus.has_key === true;
   };
@@ -170,6 +181,82 @@ export function ModelConfigCard() {
         </div>
       </div>
 
+      {/* Claude Code Toggle */}
+      <div className="mb-8">
+        <div
+          className="rounded-xl p-4 space-y-3"
+          style={{ background: "var(--surface-container-high)", border: "1px solid var(--outline-variant)" }}
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Zap className="size-4" style={{ color: "var(--primary)" }} />
+              <div>
+                <p className="text-sm font-medium" style={{ color: "var(--on-surface-variant)" }}>
+                  Use Claude Code
+                </p>
+                <p className="text-xs mt-0.5" style={{ color: "var(--outline)" }}>
+                  Use the local <code className="px-1 py-0.5 rounded text-xs" style={{ background: "var(--surface-container-highest)" }}>claude</code> CLI for Anthropic models (no API key needed)
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={effectiveUseClaudeCode}
+              onClick={() => setUseClaudeCode(!effectiveUseClaudeCode)}
+              className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2"
+              style={{
+                background: effectiveUseClaudeCode ? "var(--success)" : "var(--outline-variant)",
+              }}
+            >
+              <span
+                className="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"
+                style={{
+                  transform: effectiveUseClaudeCode ? "translateX(1.25rem)" : "translateX(0.125rem)",
+                  marginTop: "0.125rem",
+                }}
+              />
+            </button>
+          </div>
+
+          {effectiveUseClaudeCode && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => testClaudeCode()}
+                disabled={isTestingClaudeCode}
+                className="h-8 px-3 rounded-lg text-xs font-medium transition-all hover:opacity-90 disabled:opacity-40 flex items-center gap-1.5"
+                style={{
+                  background: "var(--primary)",
+                  color: "var(--on-primary)",
+                }}
+              >
+                {isTestingClaudeCode ? (
+                  <Loader2 className="size-3 animate-spin" />
+                ) : null}
+                Test Connection
+              </button>
+              {claudeCodeTestResult && (
+                <span
+                  className="text-xs px-2 py-1 rounded-full font-medium"
+                  style={{
+                    background: claudeCodeTestResult.ok
+                      ? "var(--success-container)"
+                      : "var(--destructive)/10",
+                    color: claudeCodeTestResult.ok
+                      ? "var(--success)"
+                      : "var(--destructive)",
+                  }}
+                >
+                  {claudeCodeTestResult.ok
+                    ? `Connected${claudeCodeTestResult.version ? ` (${claudeCodeTestResult.version})` : ""}`
+                    : claudeCodeTestResult.error || "Not available"}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* API Keys */}
       <div className="space-y-4 mb-8">
         <h3 className="text-xs font-semibold uppercase tracking-widest" style={{ color: "var(--outline)" }}>
@@ -222,51 +309,6 @@ export function ModelConfigCard() {
                 <p className="text-xs" style={{ color: "var(--outline-variant)" }}>
                   Leave empty to keep your existing key.
                 </p>
-              )}
-
-              {/* Claude Setup Token — shown only for Anthropic */}
-              {id === "anthropic" && (
-                <div
-                  className="mt-3 rounded-xl p-3 space-y-2"
-                  style={{ background: "var(--surface-container-high)", border: "1px solid var(--outline-variant)" }}
-                >
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium" style={{ color: "var(--on-surface-variant)" }}>
-                        Claude Pro / Max (Setup Token)
-                      </p>
-                      <p className="text-xs mt-0.5" style={{ color: "var(--outline)" }}>
-                        Run <code className="px-1 py-0.5 rounded text-xs" style={{ background: "var(--surface-container-highest)" }}>claude setup-token</code> in your terminal, then paste the token here
-                      </p>
-                    </div>
-                    {settings?.claude_setup_token?.has_token && (
-                      <span
-                        className="text-xs px-2 py-0.5 rounded-full font-medium"
-                        style={{ background: "var(--success-container)", color: "var(--success)" }}
-                      >
-                        Configured
-                      </span>
-                    )}
-                  </div>
-                  <div className="relative">
-                    <input
-                      type={showSetupToken ? "text" : "password"}
-                      value={claudeSetupToken}
-                      onChange={(e) => setClaudeSetupToken(e.target.value)}
-                      placeholder={settings?.claude_setup_token?.has_token ? "Enter new token to replace..." : "Paste setup token..."}
-                      className={`${inputClassName} pr-12`}
-                      style={inputStyle}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowSetupToken(!showSetupToken)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-lg transition-opacity hover:opacity-70"
-                      style={{ color: "var(--outline)" }}
-                    >
-                      {showSetupToken ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-                    </button>
-                  </div>
-                </div>
               )}
             </div>
           );

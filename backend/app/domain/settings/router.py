@@ -61,7 +61,7 @@ async def get_available_models(
     user_keys = {
         "anthropic": bool(
             getattr(user_settings, "anthropic_api_key_enc", None)
-            or getattr(user_settings, "claude_oauth_token_enc", None)  # setup token
+            or getattr(user_settings, "use_claude_code", False)
         ) if user_settings else False,
         "openai": bool(getattr(user_settings, "openai_api_key_enc", None)) if user_settings else False,
         "dashscope": bool(getattr(user_settings, "dashscope_api_key_enc", None)) if user_settings else False,
@@ -85,6 +85,32 @@ async def get_available_models(
             break
 
     return AvailableModelsResponse(models=filtered, default_model=default_model)
+
+
+@router.get("/claude-code/test")
+async def test_claude_code(
+    _user_id: uuid.UUID = Depends(get_current_user_id),
+) -> dict:
+    """Smoke test: check if the local `claude` CLI binary is available and responsive."""
+    from app.infra.claude_code import check_claude_binary
+
+    available, version = check_claude_binary()
+    if not available:
+        return {"ok": False, "error": "claude CLI binary not found in PATH"}
+
+    try:
+        from claude_agent_sdk import ClaudeAgentOptions, AssistantMessage, TextBlock, query
+
+        response_text = ""
+        options = ClaudeAgentOptions(max_turns=1)
+        async for msg in query(prompt="Say hello", options=options):
+            if isinstance(msg, AssistantMessage):
+                for block in msg.content:
+                    if isinstance(block, TextBlock):
+                        response_text += block.text
+        return {"ok": True, "version": version, "response": response_text[:200]}
+    except Exception as e:
+        return {"ok": False, "version": version, "error": str(e)}
 
 
 @router.get("/models", response_model=ModelSettingsResponse)

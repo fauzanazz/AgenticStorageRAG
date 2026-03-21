@@ -202,13 +202,19 @@ export function MessageBubble({ message, isStreaming }: MessageBubbleProps) {
               }
               if (step.type === "narration") {
                 return (
-                  <p
+                  <div
                     key={`narration-${i}`}
                     className="text-sm py-1"
                     style={{ color: "var(--on-surface-variant)" }}
                   >
-                    {step.content}
-                  </p>
+                    <Streamdown
+                      plugins={{ code, math }}
+                      allowedTags={ALLOWED_TAGS}
+                      components={components}
+                    >
+                      {step.content || ""}
+                    </Streamdown>
+                  </div>
                 );
               }
               return null;

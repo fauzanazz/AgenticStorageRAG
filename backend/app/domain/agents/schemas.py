@@ -42,6 +42,22 @@ class MessageCreate(BaseModel):
     content: str = Field(..., min_length=1, max_length=10000)
 
 
+class AddMessageRequest(BaseModel):
+    """Add a message to a conversation (used by the Next.js agent route)."""
+
+    role: str = "user"
+    content: str = ""
+    citations: list[Citation] | None = None
+    tool_calls: list[dict] | None = None
+    thinking_blocks: list[str] | None = None
+
+
+class UpdateTitleRequest(BaseModel):
+    """Update a conversation title."""
+
+    title: str = Field("", max_length=255)
+
+
 class MessageResponse(BaseModel):
     """Chat message response."""
 

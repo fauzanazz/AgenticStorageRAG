@@ -58,10 +58,6 @@ class ApiKeyStatus(BaseModel):
     has_key: bool
 
 
-class ClaudeSetupTokenStatus(BaseModel):
-    has_token: bool
-
-
 class ModelSettingsResponse(BaseModel):
     chat_model: str
     ingestion_model: str
@@ -70,7 +66,7 @@ class ModelSettingsResponse(BaseModel):
     openai_api_key: ApiKeyStatus
     dashscope_api_key: ApiKeyStatus
     openrouter_api_key: ApiKeyStatus
-    claude_setup_token: ClaudeSetupTokenStatus
+    use_claude_code: bool
 
     model_config = {"from_attributes": True}
 
@@ -92,9 +88,7 @@ class UpdateModelSettingsRequest(BaseModel):
     openrouter_api_key: str | None = Field(
         default="", description="Empty string = unchanged, null = clear"
     )
-    claude_setup_token: str | None = Field(
-        default="", description="Empty string = unchanged, null = clear"
-    )
+    use_claude_code: bool | None = None
 
 
 class ModelCatalogResponse(BaseModel):

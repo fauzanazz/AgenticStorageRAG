@@ -50,6 +50,7 @@ const TOOL_FRIENDLY_NAMES: Record<string, string> = {
   vector_search: "Searching documents",
   graph_search: "Searching knowledge graph",
   generate_document: "Generating document",
+  fetch_document: "Fetching full document",
 };
 
 function friendlyToolName(name: string): string {
@@ -105,7 +106,7 @@ async function fetchArtifacts(conversationId: string): Promise<Artifact[]> {
 
 // ── Hook ───────────────────────────────────────────────────────────────────
 
-export function useChat(conversationId?: string) {
+export function useChat(conversationId?: string, useClaudeCode = false) {
   const queryClient = useQueryClient();
 
   // Active conversation is local UI state (not a server resource by itself).
@@ -381,18 +382,17 @@ export function useChat(conversationId?: string) {
       try {
         const citations: Citation[] = [];
 
-        await apiClient.stream(
-          "/chat/stream",
-          {
-            message: content,
-            conversation_id: conversationId ?? activeConversation?.id,
-            ...(model ? { model } : {}),
-            ...(enableThinking ? { enable_thinking: true } : {}),
-            ...(readyAttachmentIds.length > 0
-              ? { attachment_ids: readyAttachmentIds }
-              : {}),
-          },
-          (sseEvent) => {
+        const streamBody = {
+          message: content,
+          conversation_id: conversationId ?? activeConversation?.id,
+          ...(model ? { model } : {}),
+          ...(enableThinking ? { enable_thinking: true } : {}),
+          ...(readyAttachmentIds.length > 0
+            ? { attachment_ids: readyAttachmentIds }
+            : {}),
+        };
+
+        const onEvent = (sseEvent: { event: string; data: string }) => {
             switch (sseEvent.event) {
               case "thinking": {
                 // Real extended thinking from the API (e.g. Anthropic reasoning_content).
@@ -422,13 +422,32 @@ export function useChat(conversationId?: string) {
                     tool_args: data.arguments,
                     tool_status: "running",
                   };
+
+                  // Flush any accumulated text as a narration step before
+                  // the tool call so interleaved ordering is preserved.
+                  const flushedContent = streamedContent.trim() ? streamedContent : null;
+                  if (flushedContent) {
+                    streamedContent = "";
+                    pendingContentRef.current = "";
+                    if (rafIdRef.current !== null) {
+                      cancelAnimationFrame(rafIdRef.current);
+                      rafIdRef.current = null;
+                    }
+                  }
+
                   setMessages((prev) => {
                     const updated = [...prev];
                     const last = updated[updated.length - 1];
                     if (last.role !== "assistant") return prev;
+                    const newSteps = [...last.steps];
+                    if (flushedContent) {
+                      newSteps.push({ type: "narration", content: flushedContent });
+                    }
+                    newSteps.push(step);
                     updated[updated.length - 1] = {
                       ...last,
-                      steps: [...last.steps, step],
+                      steps: newSteps,
+                      ...(flushedContent ? { content: "" } : {}),
                     };
                     return updated;
                   });
@@ -446,8 +465,8 @@ export function useChat(conversationId?: string) {
                     const last = updated[updated.length - 1];
                     if (last.role !== "assistant") return prev;
                     const steps = [...last.steps];
-                    for (let i = steps.length - 1; i >= 0; i--) {
-                      if (steps[i].type === "tool_call" && steps[i].tool_status === "running") {
+                    for (let i = 0; i < steps.length; i++) {
+                      if (steps[i].type === "tool_call" && steps[i].tool_name === data.tool_name && steps[i].tool_status === "running") {
                         steps[i] = {
                           ...steps[i],
                           tool_status: data.error ? "error" : "done",
@@ -700,9 +719,15 @@ export function useChat(conversationId?: string) {
                 break;
               }
             }
-          },
-          controller.signal
-        );
+        };
+
+        if (useClaudeCode) {
+          // Route through Next.js API route — reuse apiClient.stream with
+          // absolute URL so SSE parsing stays in one place.
+          await apiClient.streamAbsolute("/api/chat/stream", streamBody, onEvent, controller.signal);
+        } else {
+          await apiClient.stream("/chat/stream", streamBody, onEvent, controller.signal);
+        }
       } catch (err) {
         if (err instanceof Error && err.name === "AbortError") return;
         setError(err instanceof Error ? err.message : "Failed to send message");
@@ -743,7 +768,7 @@ export function useChat(conversationId?: string) {
         setAttachments((prev) => prev.filter((a) => !sentIds.has(a.id)));
       }
     },
-    [activeConversation, attachments, queryClient]
+    [activeConversation, attachments, queryClient, useClaudeCode]
   );
 
   const stopStreaming = useCallback(() => {

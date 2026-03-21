@@ -69,11 +69,18 @@ class BaseProcessor(AbstractDocumentProcessor):
 
             # Handle single paragraphs larger than chunk_size
             while len(current_chunk) > chunk_size * 1.5:
+                # Minimum chars to advance per iteration to guarantee
+                # the while loop terminates (prevents infinite loop when
+                # the best ". " boundary is before the overlap region).
+                min_advance = chunk_size - chunk_overlap
+
                 split_point = current_chunk.rfind(". ", 0, chunk_size)
-                if split_point == -1:
+                if split_point == -1 or split_point + 1 < min_advance:
+                    # ". " missing or too early — try word boundary instead
                     split_point = current_chunk.rfind(" ", 0, chunk_size)
-                if split_point == -1:
-                    split_point = chunk_size
+                if split_point == -1 or split_point + 1 < min_advance:
+                    # No usable boundary — hard cut at min_advance
+                    split_point = min_advance - 1
 
                 chunks.append(
                     ChunkData(

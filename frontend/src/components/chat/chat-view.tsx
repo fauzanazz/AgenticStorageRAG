@@ -17,6 +17,7 @@ interface ChatViewProps {
 
 export function ChatView({ conversationId }: ChatViewProps) {
   const router = useRouter();
+  const { settings, availableModels, defaultModel } = useModelSettings();
 
   const {
     conversations,
@@ -37,11 +38,9 @@ export function ChatView({ conversationId }: ChatViewProps) {
     addAttachment,
     addDriveAttachments,
     removeAttachment,
-  } = useChat(conversationId);
+  } = useChat(conversationId, settings?.use_claude_code ?? false);
 
   const activeArtifact = activeArtifactId ? artifacts.get(activeArtifactId) ?? null : null;
-
-  const { settings, availableModels, defaultModel } = useModelSettings();
 
   const [showSidebar, setShowSidebar] = useState(false);
   const [userSelectedModel, setUserSelectedModel] = useState<string | null>(null);

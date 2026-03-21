@@ -18,7 +18,13 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.exc import DBAPIError, OperationalError, PendingRollbackError
+from sqlalchemy.exc import (
+    DBAPIError,
+    InterfaceError,
+    OperationalError,
+    PendingRollbackError,
+    ResourceClosedError,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.ingestion.drive_connector import SUPPORTED_MIME_TYPES
@@ -33,7 +39,15 @@ from app.infra.storage import StorageClient
 
 logger = logging.getLogger(__name__)
 
-_RETRY_EXCEPTIONS = (DBAPIError, OperationalError, OSError, ConnectionError, PendingRollbackError)
+_RETRY_EXCEPTIONS = (
+    DBAPIError,
+    InterfaceError,
+    OperationalError,
+    OSError,
+    ConnectionError,
+    PendingRollbackError,
+    ResourceClosedError,
+)
 
 
 async def _db_retry(
@@ -68,16 +82,21 @@ async def _db_retry(
             delay *= 2  # exponential backoff
 
 
-async def _check_cancelled(db: AsyncSession, job_id: uuid.UUID) -> bool:
-    """Session-safe cancellation check for parallel workers."""
+async def _check_cancelled(session_factory: Any, job_id: uuid.UUID) -> bool:
+    """Session-safe cancellation check for parallel workers.
+
+    Uses a fresh session from the factory each time so a dead pooled
+    connection never crashes the caller.
+    """
     async def _query() -> bool:
-        result = await db.execute(
-            select(IngestionJob.status).where(IngestionJob.id == job_id)
-        )
-        return result.scalar_one_or_none() == IngestionStatus.CANCELLED
+        async with session_factory() as db:
+            result = await db.execute(
+                select(IngestionJob.status).where(IngestionJob.id == job_id)
+            )
+            return result.scalar_one_or_none() == IngestionStatus.CANCELLED
 
     try:
-        return await _db_retry(_query, db=db)
+        return await _db_retry(_query)
     except _RETRY_EXCEPTIONS:
         # Connection truly dead — assume not cancelled so the job can finish gracefully
         return False
@@ -111,17 +130,18 @@ class IngestionOrchestrator:
     async def _is_cancelled(self, job: IngestionJob) -> bool:
         """Check the database to see if the job has been cancelled externally."""
         async def _query() -> bool:
-            result = await self._db.execute(
-                select(IngestionJob.status).where(IngestionJob.id == job.id)
-            )
-            current_status = result.scalar_one_or_none()
-            if current_status == IngestionStatus.CANCELLED:
-                job.status = IngestionStatus.CANCELLED
-                return True
-            return False
+            async with self._session_factory() as db:
+                result = await db.execute(
+                    select(IngestionJob.status).where(IngestionJob.id == job.id)
+                )
+                current_status = result.scalar_one_or_none()
+                if current_status == IngestionStatus.CANCELLED:
+                    job.status = IngestionStatus.CANCELLED
+                    return True
+                return False
 
         try:
-            return await _db_retry(_query, db=self._db)
+            return await _db_retry(_query)
         except _RETRY_EXCEPTIONS:
             return False
 
@@ -149,18 +169,19 @@ class IngestionOrchestrator:
             values["completed_at"] = datetime.now(timezone.utc)
 
         async def _do_update() -> int:
-            stmt = (
-                sa_update(IngestionJob)
-                .where(
-                    IngestionJob.id == job.id,
-                    IngestionJob.status != IngestionStatus.CANCELLED,
+            async with self._session_factory() as db:
+                stmt = (
+                    sa_update(IngestionJob)
+                    .where(
+                        IngestionJob.id == job.id,
+                        IngestionJob.status != IngestionStatus.CANCELLED,
+                    )
+                    .values(**values)
+                    .execution_options(synchronize_session=False)
                 )
-                .values(**values)
-                .execution_options(synchronize_session=False)
-            )
-            result = await self._db.execute(stmt)
-            await self._db.commit()
-            return result.rowcount  # type: ignore[return-value]
+                result = await db.execute(stmt)
+                await db.commit()
+                return result.rowcount  # type: ignore[return-value]
 
         try:
             rowcount = await _db_retry(_do_update)
@@ -237,6 +258,10 @@ class IngestionOrchestrator:
         Returns:
             Updated IngestionJob with final status.
         """
+        # Cache job ID as a plain UUID so error handlers never trigger
+        # a lazy load on a dead session (MissingGreenlet).
+        job_id = job.id
+
         try:
             # 1. Authenticate
             authenticated = await self._connector.authenticate()
@@ -300,7 +325,7 @@ class IngestionOrchestrator:
                 await pipeline.run(
                     scanning_done,
                     is_cancelled=lambda: _check_cancelled(
-                        self._db, job.id
+                        self._session_factory, job.id
                     ),
                 )
 
@@ -316,7 +341,7 @@ class IngestionOrchestrator:
                         await scanner.scan_seeds(
                             seeds,
                             force=force,
-                            is_cancelled=lambda: _check_cancelled(db, job.id),
+                            is_cancelled=lambda: _check_cancelled(self._session_factory, job.id),
                         )
 
                 async def scanning_phase() -> None:
@@ -335,10 +360,11 @@ class IngestionOrchestrator:
 
             # 8. Finalize — read counters from DB for accuracy
             async def _refresh_job() -> IngestionJob | None:
-                r = await self._db.execute(
-                    select(IngestionJob).where(IngestionJob.id == job.id)
-                )
-                return r.scalar_one_or_none()
+                async with self._session_factory() as db:
+                    r = await db.execute(
+                        select(IngestionJob).where(IngestionJob.id == job.id)
+                    )
+                    return r.scalar_one_or_none()
 
             try:
                 refreshed = await _db_retry(_refresh_job)
@@ -371,7 +397,7 @@ class IngestionOrchestrator:
             return job
 
         except Exception as e:
-            logger.exception("Ingestion orchestrator failed (job %s)", job.id)
+            logger.exception("Ingestion orchestrator failed (job %s)", job_id)
             try:
                 await self._update_job_status(
                     job,
@@ -380,5 +406,5 @@ class IngestionOrchestrator:
                     completed=True,
                 )
             except Exception:
-                logger.error("Could not persist FAILED status for job %s", job.id)
+                logger.error("Could not persist FAILED status for job %s", job_id)
             raise IngestionError(str(e)) from e

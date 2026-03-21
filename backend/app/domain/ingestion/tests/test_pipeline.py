@@ -379,3 +379,117 @@ class TestEmbedBatching:
         mock_vs_instance.embed_chunks.assert_called_once()
         assert pipeline._stats.embedded == 1
         assert pipeline._stats.kg_done == 1
+
+
+# ---------------------------------------------------------------------------
+# StagePipeline - Retry logic
+# ---------------------------------------------------------------------------
+
+
+class TestRetryLogic:
+
+    @pytest.mark.asyncio
+    async def test_download_failure_queues_for_retry(self) -> None:
+        """Download failures should be queued for retry, not immediately marked as permanently failed."""
+        factory, mock_db = _make_session_factory()
+        job = _make_job()
+        connector = AsyncMock()
+        connector.download_file.side_effect = ConnectionError("connection reset")
+        llm = MagicMock()
+
+        pipeline = StagePipeline(
+            session_factory=factory,
+            connector=connector,
+            llm=llm,
+            job=job,
+            admin_user_id=uuid.uuid4(),
+            config=_small_config(),
+        )
+
+        indexed_file = _make_indexed_file(size_bytes=1024, job_id=job.id)
+
+        # Put file in download queue, then sentinel
+        await pipeline._download_q.put(indexed_file)
+        await pipeline._download_q.put(None)  # sentinel
+
+        await pipeline._download_worker(0, is_cancelled=None)
+
+        # Should be queued for retry, not counted as a permanent failure
+        assert indexed_file.id in pipeline._retry_file_ids
+        assert pipeline._stats.failed == 0  # not incremented yet
+
+    @pytest.mark.asyncio
+    async def test_extract_failure_queues_for_retry(self) -> None:
+        """Extract failures should be queued for retry."""
+        factory, mock_db = _make_session_factory()
+        job = _make_job()
+        connector = AsyncMock()
+        llm = MagicMock()
+
+        pipeline = StagePipeline(
+            session_factory=factory,
+            connector=connector,
+            llm=llm,
+            job=job,
+            admin_user_id=uuid.uuid4(),
+            config=_small_config(),
+        )
+
+        dl_result = DownloadResult(
+            indexed_file_id=uuid.uuid4(),
+            drive_file_id="drive-123",
+            file_name="test.pdf",
+            mime_type="application/pdf",
+            folder_path="Test",
+            classification={},
+            file_bytes=b"content",
+            size_bytes=7,
+        )
+
+        # Put item then sentinel
+        await pipeline._extract_q.put(dl_result)
+        await pipeline._extract_q.put(None)  # sentinel
+
+        with patch.object(pipeline, "_extract_one", side_effect=RuntimeError("parse error")):
+            await pipeline._extract_worker(0, is_cancelled=None)
+
+        assert dl_result.indexed_file_id in pipeline._retry_file_ids
+        assert pipeline._stats.failed == 0
+
+    @pytest.mark.asyncio
+    async def test_retry_pass_respects_max_retries(self) -> None:
+        """Files exceeding max retries should be marked as permanently failed."""
+        factory, mock_db = _make_session_factory()
+        job = _make_job()
+        connector = AsyncMock()
+        llm = MagicMock()
+
+        config = _small_config()
+        config.download_extract_max_retries = 1
+
+        pipeline = StagePipeline(
+            session_factory=factory,
+            connector=connector,
+            llm=llm,
+            job=job,
+            admin_user_id=uuid.uuid4(),
+            config=config,
+        )
+
+        file_id = uuid.uuid4()
+        pipeline._retry_file_ids.append(file_id)
+
+        # Mock the indexed file as already at max retries
+        exhausted_file = _make_indexed_file(
+            id=file_id,
+            retry_count=1,  # equals max
+            stage=IndexedFileStage.FAILED.value,
+        )
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = exhausted_file
+        mock_db.execute.return_value = mock_result
+
+        await pipeline._retry_pass(is_cancelled=None)
+
+        assert pipeline._stats.retry_failed == 1
+        assert pipeline._stats.failed == 1

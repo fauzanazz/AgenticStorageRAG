@@ -106,6 +106,7 @@ class Settings(BaseSettings):
     pipeline_embed_workers: int = 2
     pipeline_embed_batch_size: int = 100  # Max chunks per embedding API call
     pipeline_embed_max_retries: int = 2
+    pipeline_download_extract_max_retries: int = 2
     pipeline_queue_multiplier: int = 2  # Queue maxsize = workers * multiplier
 
     @model_validator(mode="after")

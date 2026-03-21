@@ -114,40 +114,25 @@ def _get_rss_mb() -> float:
 
 
 def _log_memory_snapshot() -> None:
-    """Log detailed memory breakdown: tracemalloc top allocs + gc object counts."""
-    # --- tracemalloc top allocations ---
+    """Log tracemalloc top allocations. Lightweight — no gc object scan."""
     snapshot = tracemalloc.take_snapshot()
-    # Filter out importlib/tracemalloc internals
     snapshot = snapshot.filter_traces([
         tracemalloc.Filter(False, "<frozen importlib._bootstrap>"),
         tracemalloc.Filter(False, "<frozen importlib._bootstrap_external>"),
         tracemalloc.Filter(False, tracemalloc.__file__),
     ])
     top = snapshot.statistics("lineno")
-    logger.info("── memory snapshot: tracemalloc top 15 allocations ──")
-    for stat in top[:15]:
+    logger.info("── tracemalloc top 10 ──")
+    for stat in top[:10]:
         logger.info("  %s", stat)
 
-    # --- gc object count by type ---
-    gc.collect()
-    type_counts: dict[type, int] = {}
-    type_sizes: dict[type, int] = {}
-    for obj in gc.get_objects():
-        t = type(obj)
-        type_counts[t] = type_counts.get(t, 0) + 1
-        try:
-            type_sizes[t] = type_sizes.get(t, 0) + sys.getsizeof(obj)
-        except (TypeError, ReferenceError):
-            pass
-
-    # Top 15 types by total size
-    ranked = sorted(type_sizes.items(), key=lambda kv: kv[1], reverse=True)[:15]
-    logger.info("── memory snapshot: top 15 types by total size ──")
-    for t, size in ranked:
-        count = type_counts.get(t, 0)
-        logger.info("  %-50s %8.1f MB  (%d objects)", t.__module__ + "." + t.__qualname__, size / (1024 * 1024), count)
-
-    logger.info("── end memory snapshot ──")
+    # Lightweight: just gc stats, no object iteration
+    counts = gc.get_count()
+    collected = gc.collect()
+    logger.info(
+        "── gc: gen0=%d gen1=%d gen2=%d | collected %d ──",
+        counts[0], counts[1], counts[2], collected,
+    )
 
 
 def _heartbeat_loop() -> None:
@@ -184,7 +169,7 @@ def _init_worker_resources(**kwargs: object) -> None:
     import asyncio
 
     # Start tracemalloc early to capture allocations from init onward
-    tracemalloc.start(25)  # 25 frames deep for useful stack traces
+    tracemalloc.start(5)  # 5 frames — enough to identify call sites
 
     from app.infra.database import init_db
     from app.infra.llm import llm_provider
