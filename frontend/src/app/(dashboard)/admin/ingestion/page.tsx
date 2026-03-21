@@ -523,10 +523,11 @@ function ProviderDropdown({
 
   return (
     <div className="flex items-center gap-3">
-      <label className="text-sm font-medium" style={{ color: "var(--muted-foreground)" }}>
+      <label htmlFor="ingestion-source-select" className="text-sm font-medium" style={{ color: "var(--muted-foreground)" }}>
         Source
       </label>
       <select
+        id="ingestion-source-select"
         value={selectedKey}
         onChange={(e) => onSelect(e.target.value)}
         className="h-10 px-3 rounded-xl text-sm font-medium appearance-none cursor-pointer"

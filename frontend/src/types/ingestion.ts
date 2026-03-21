@@ -8,7 +8,7 @@ export type IngestionStatus =
   | "failed"
   | "cancelled";
 
-export interface AgentLogEntry {
+interface AgentLogEntry {
   ts: string;
   msg: string;
   processed: number;

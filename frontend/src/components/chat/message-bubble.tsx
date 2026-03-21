@@ -167,16 +167,6 @@ export function MessageBubble({ message, isStreaming }: MessageBubbleProps) {
     <div
       className={`flex w-full gap-3 ${isUser ? "justify-end" : "justify-start"}`}
     >
-      {/* AI Avatar */}
-      {!isUser && (
-        <div
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white"
-          style={{ background: "var(--primary)" }}
-        >
-          AI
-        </div>
-      )}
-
       <div className={`max-w-[85%] space-y-1 ${isUser ? "items-end" : ""}`}>
         {/* Narrative steps — before the final answer */}
         {hasSteps && (
@@ -269,18 +259,6 @@ export function MessageBubble({ message, isStreaming }: MessageBubbleProps) {
         </p>
       </div>
 
-      {/* User avatar */}
-      {isUser && (
-        <div
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold"
-          style={{
-            background: "var(--surface-container-high)",
-            color: "#323035",
-          }}
-        >
-          You
-        </div>
-      )}
     </div>
   );
 }

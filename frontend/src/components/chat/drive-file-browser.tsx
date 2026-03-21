@@ -158,7 +158,7 @@ export function DriveFileBrowser({ open, onClose, onAttach }: DriveFileBrowserPr
           style={{ borderBottom: "1px solid var(--border)" }}
         >
           {breadcrumbs.map((crumb, i) => (
-            <span key={i} className="flex items-center gap-1 whitespace-nowrap">
+            <span key={crumb.id ?? "root"} className="flex items-center gap-1 whitespace-nowrap">
               {i > 0 && (
                 <span style={{ color: "var(--muted-foreground)" }}>/</span>
               )}

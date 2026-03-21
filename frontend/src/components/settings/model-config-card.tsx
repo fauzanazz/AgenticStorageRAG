@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 import { useModelSettings } from "@/hooks/use-model-settings";
-import { Cpu, Eye, EyeOff, AlertTriangle, Check, Loader2, Zap } from "lucide-react";
-import type { ModelOption } from "@/types/settings";
+import { Cpu, Eye, EyeOff, Check, Loader2 } from "lucide-react";
+import { ModelSelect } from "@/components/settings/model-select";
+import { ClaudeCodeToggle } from "@/components/settings/claude-code-toggle";
 
 const PROVIDER_KEY_FIELD: Record<string, "anthropic" | "openai" | "dashscope" | "openrouter"> = {
   Anthropic: "anthropic",
@@ -52,13 +53,13 @@ export function ModelConfigCard() {
     openrouter: false,
   });
 
-  const [modelsInitialized, setModelsInitialized] = useState(false);
-  if (settings && !modelsInitialized) {
+  const [prevSettings, setPrevSettings] = useState(settings);
+  if (settings && settings !== prevSettings) {
+    setPrevSettings(settings);
     setChatModel(settings.chat_model);
     setIngestionModel(settings.ingestion_model);
     setEmbeddingModel(settings.embedding_model);
     setUseClaudeCode(settings.use_claude_code);
-    setModelsInitialized(true);
   }
 
   const effectiveUseClaudeCode = useClaudeCode ?? settings?.use_claude_code ?? false;
@@ -103,13 +104,6 @@ export function ModelConfigCard() {
     background: "var(--surface-container-high)",
     border: "1px solid var(--outline-variant)",
   };
-  const selectClassName =
-    "w-full h-12 rounded-xl px-4 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/50 transition-all appearance-none cursor-pointer";
-  const selectStyle = {
-    background: "var(--surface-container-high)",
-    border: "1px solid var(--outline-variant)",
-  };
-
   const chatGroups = catalog ? groupByProvider(catalog.chat_models) : [];
   const embeddingGroups = catalog ? groupByProvider(catalog.embedding_models) : [];
 
@@ -120,43 +114,10 @@ export function ModelConfigCard() {
     { id: "openrouter", label: "OpenRouter", placeholder: "sk-or-v1-..." },
   ] as const;
 
-  const renderModelSelect = (
-    id: string,
-    label: string,
-    value: string,
-    onChange: (v: string) => void,
-    groups: { provider: string; items: ModelOption[] }[],
-  ) => (
-    <div className="space-y-1.5">
-      <label htmlFor={id} className="block text-sm font-medium" style={{ color: "var(--on-surface-variant)" }}>
-        {label}
-      </label>
-      <select
-        id={id}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className={selectClassName}
-        style={selectStyle}
-        disabled={!catalog}
-      >
-        {groups.map(({ provider, items }) => (
-          <optgroup key={provider} label={provider}>
-            {items.map((m) => (
-              <option key={m.model_id} value={m.model_id}>
-                {m.label}
-              </option>
-            ))}
-          </optgroup>
-        ))}
-      </select>
-      {value && !hasKeyForModel(value) && (
-        <div className="flex items-center gap-1.5 text-xs" style={{ color: "var(--warning)" }}>
-          <AlertTriangle className="size-3.5" />
-          Requires a {getProviderForModel(value)} API key.
-        </div>
-      )}
-    </div>
-  );
+  const getWarningText = (modelId: string): string | null => {
+    if (!modelId || hasKeyForModel(modelId)) return null;
+    return `Requires a ${getProviderForModel(modelId)} API key.`;
+  };
 
   return (
     <div
@@ -181,81 +142,13 @@ export function ModelConfigCard() {
         </div>
       </div>
 
-      {/* Claude Code Toggle */}
-      <div className="mb-8">
-        <div
-          className="rounded-xl p-4 space-y-3"
-          style={{ background: "var(--surface-container-high)", border: "1px solid var(--outline-variant)" }}
-        >
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Zap className="size-4" style={{ color: "var(--primary)" }} />
-              <div>
-                <p className="text-sm font-medium" style={{ color: "var(--on-surface-variant)" }}>
-                  Use Claude Code
-                </p>
-                <p className="text-xs mt-0.5" style={{ color: "var(--outline)" }}>
-                  Use the local <code className="px-1 py-0.5 rounded text-xs" style={{ background: "var(--surface-container-highest)" }}>claude</code> CLI for Anthropic models (no API key needed)
-                </p>
-              </div>
-            </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={effectiveUseClaudeCode}
-              onClick={() => setUseClaudeCode(!effectiveUseClaudeCode)}
-              className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2"
-              style={{
-                background: effectiveUseClaudeCode ? "var(--success)" : "var(--outline-variant)",
-              }}
-            >
-              <span
-                className="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"
-                style={{
-                  transform: effectiveUseClaudeCode ? "translateX(1.25rem)" : "translateX(0.125rem)",
-                  marginTop: "0.125rem",
-                }}
-              />
-            </button>
-          </div>
-
-          {effectiveUseClaudeCode && (
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => testClaudeCode()}
-                disabled={isTestingClaudeCode}
-                className="h-8 px-3 rounded-lg text-xs font-medium transition-all hover:opacity-90 disabled:opacity-40 flex items-center gap-1.5"
-                style={{
-                  background: "var(--primary)",
-                  color: "var(--primary-foreground)",
-                }}
-              >
-                {isTestingClaudeCode ? (
-                  <Loader2 className="size-3 animate-spin" />
-                ) : null}
-                Test Connection
-              </button>
-              {claudeCodeTestResult && (
-                <span
-                  className="text-xs px-2 py-1 rounded-full font-medium"
-                  style={{
-                    background: claudeCodeTestResult.ok
-                      ? "var(--success-container)"
-                      : "var(--destructive)/10",
-                    color: claudeCodeTestResult.ok
-                      ? "var(--success)"
-                      : "var(--destructive)",
-                  }}
-                >
-                  {claudeCodeTestResult.ok
-                    ? `Connected${claudeCodeTestResult.version ? ` (${claudeCodeTestResult.version})` : ""}`
-                    : claudeCodeTestResult.error || "Not available"}
-                </span>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
+      <ClaudeCodeToggle
+        enabled={effectiveUseClaudeCode}
+        onToggle={() => setUseClaudeCode(!effectiveUseClaudeCode)}
+        onTest={() => testClaudeCode()}
+        isTesting={isTestingClaudeCode}
+        testResult={claudeCodeTestResult}
+      />
 
       {/* API Keys */}
       <div className="space-y-4 mb-8">
@@ -320,9 +213,9 @@ export function ModelConfigCard() {
         <h3 className="text-xs font-semibold uppercase tracking-widest" style={{ color: "var(--outline)" }}>
           Model Selection
         </h3>
-        {renderModelSelect("settings-chat-model", "Chat model", chatModel, setChatModel, chatGroups)}
-        {renderModelSelect("settings-ingestion-model", "Ingestion model", ingestionModel, setIngestionModel, chatGroups)}
-        {renderModelSelect("settings-embedding-model", "Embedding model", embeddingModel, setEmbeddingModel, embeddingGroups)}
+        <ModelSelect id="settings-chat-model" label="Chat model" value={chatModel} onChange={setChatModel} groups={chatGroups} disabled={!catalog} warningText={getWarningText(chatModel)} />
+        <ModelSelect id="settings-ingestion-model" label="Ingestion model" value={ingestionModel} onChange={setIngestionModel} groups={chatGroups} disabled={!catalog} warningText={getWarningText(ingestionModel)} />
+        <ModelSelect id="settings-embedding-model" label="Embedding model" value={embeddingModel} onChange={setEmbeddingModel} groups={embeddingGroups} disabled={!catalog} warningText={getWarningText(embeddingModel)} />
       </div>
 
       {/* Save button */}

@@ -72,7 +72,6 @@ def run_migrations_online_sync() -> None:
     )
 
     with connectable.connect() as connection:
-        connection.execute(connection.default_isolation_level)  # noqa
         do_run_migrations(connection)
 
     connectable.dispose()
@@ -110,8 +109,11 @@ def run_migrations_online() -> None:
     Uses sync engine with MIGRATIONS_URL (direct connection) if available,
     otherwise falls back to async engine with DATABASE_URL (pooler).
     """
-    import asyncio
-    asyncio.run(run_async_migrations())
+    if _migrations_url:
+        run_migrations_online_sync()
+    else:
+        import asyncio
+        asyncio.run(run_async_migrations())
 
 
 if context.is_offline_mode():

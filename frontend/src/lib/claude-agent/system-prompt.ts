@@ -23,7 +23,7 @@ You have access to retrieval tools registered as MCP tools. Use them to search t
 - Always mention your sources inline.
 - Use LaTeX notation for math: $$E = mc^2$$`;
 
-export const TOOL_FRIENDLY_NAMES: Record<string, string> = {
+const TOOL_FRIENDLY_NAMES: Record<string, string> = {
   hybrid_search: "Searching documents and knowledge graph",
   vector_search: "Searching documents",
   graph_search: "Searching knowledge graph",

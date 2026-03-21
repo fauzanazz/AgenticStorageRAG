@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect } from "react";
-import { ArrowUp, Brain, ChevronDown, Square } from "lucide-react";
+import { useState, useRef, useCallback } from "react";
+import { ArrowUp, Square } from "lucide-react";
 import type { ModelOption } from "@/types/settings";
 import type { ChatAttachment } from "@/types/chat";
 import { AttachmentButton } from "@/components/chat/attachment-button";
 import { AttachmentChip } from "@/components/chat/attachment-chip";
+import { ModelSelectorDropdown } from "@/components/chat/model-selector-dropdown";
 
 const EMPTY_MODELS: ModelOption[] = [];
 const EMPTY_ATTACHMENTS: ChatAttachment[] = [];
@@ -47,9 +48,7 @@ export function ChatInput({
   onRemoveAttachment,
 }: ChatInputProps) {
   const [input, setInput] = useState("");
-  const [showModelMenu, setShowModelMenu] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
   const pasteCountRef = useRef(0);
 
   const handleSubmit = useCallback(() => {
@@ -109,27 +108,6 @@ export function ChatInput({
     [onAddAttachment]
   );
 
-  // Close dropdown on outside click
-  useEffect(() => {
-    if (!showModelMenu) return;
-    function handleClick(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setShowModelMenu(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [showModelMenu]);
-
-  const selectedLabel =
-    models.find((m) => m.model_id === selectedModel)?.label ?? "Select model";
-
-  // Group models by provider
-  const grouped = models.reduce<Record<string, ModelOption[]>>((acc, m) => {
-    (acc[m.provider] ??= []).push(m);
-    return acc;
-  }, {});
-
   const hasAttachments = attachments.length > 0;
   const canSend = (input.trim() || attachments.length > 0) && !disabled && !isStreaming;
 
@@ -186,123 +164,14 @@ export function ChatInput({
         <div className="flex items-center justify-between px-3 pb-3 pt-1">
           {/* Left: model selector */}
           {models.length > 0 && (
-            <div className="relative" ref={menuRef}>
-              <button
-                type="button"
-                onClick={() => setShowModelMenu((v) => !v)}
-                className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs transition-colors hover:bg-black/[0.05]"
-                style={{
-                  background: enableThinking
-                    ? "color-mix(in srgb, var(--primary) 12%, transparent)"
-                    : "var(--surface-container-high, #e4e4e7)",
-                  color: enableThinking
-                    ? "var(--primary)"
-                    : "var(--on-surface-variant)",
-                }}
-              >
-                {enableThinking && <Brain className="size-3" />}
-                <span className="max-w-[180px] truncate">{selectedLabel}</span>
-                <ChevronDown className="size-3 opacity-60" />
-              </button>
-
-              {/* Model dropdown with thinking toggle */}
-              {showModelMenu && (
-                <div
-                  className="absolute bottom-full left-0 z-50 mb-1.5 min-w-[240px] rounded-xl py-1"
-                  style={{
-                    background: "var(--card)",
-                    boxShadow:
-                      "0 4px 6px -1px rgba(0,0,0,0.07), 0 10px 15px -3px rgba(0,0,0,0.1)",
-                    border: "1px solid var(--outline-variant)",
-                  }}
-                >
-                  {/* Model groups */}
-                  {Object.entries(grouped).map(([provider, providerModels]) => (
-                    <div key={provider}>
-                      <div
-                        className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider"
-                        style={{ color: "var(--outline)" }}
-                      >
-                        {provider}
-                      </div>
-                      {providerModels.map((m) => (
-                        <button
-                          key={m.model_id}
-                          onClick={() => {
-                            onModelChange(m.model_id);
-                            setShowModelMenu(false);
-                          }}
-                          className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors hover:bg-black/[0.05]"
-                          style={{
-                            color:
-                              m.model_id === selectedModel
-                                ? "var(--primary)"
-                                : "var(--muted-foreground)",
-                          }}
-                        >
-                          <span className="w-4 text-center text-[10px]">
-                            {m.model_id === selectedModel ? "✓" : ""}
-                          </span>
-                          <span>{m.label}</span>
-                        </button>
-                      ))}
-                    </div>
-                  ))}
-
-                  {/* Extended thinking toggle — at the bottom */}
-                  {supportsThinking && (
-                    <>
-                      <div
-                        className="mx-2.5 my-1"
-                        style={{
-                          height: "1px",
-                          background: "var(--outline-variant)",
-                          opacity: 0.5,
-                        }}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => onThinkingChange?.(!enableThinking)}
-                        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs transition-colors hover:bg-black/[0.05]"
-                        style={{
-                          color: enableThinking
-                            ? "var(--primary)"
-                            : "var(--muted-foreground)",
-                        }}
-                      >
-                        <Brain
-                          className="size-3.5"
-                          style={{
-                            color: enableThinking
-                              ? "var(--primary)"
-                              : "var(--outline)",
-                          }}
-                        />
-                        <span className="flex-1">Extended thinking</span>
-                        {/* Toggle switch */}
-                        <div
-                          className="relative h-[18px] w-[32px] rounded-full transition-colors"
-                          style={{
-                            background: enableThinking
-                              ? "var(--primary)"
-                              : "var(--outline-variant)",
-                          }}
-                        >
-                          <div
-                            className="absolute top-[2px] h-[14px] w-[14px] rounded-full bg-white transition-transform"
-                            style={{
-                              transform: enableThinking
-                                ? "translateX(16px)"
-                                : "translateX(2px)",
-                            }}
-                          />
-                        </div>
-                      </button>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
+            <ModelSelectorDropdown
+              models={models}
+              selectedModel={selectedModel}
+              onModelChange={onModelChange}
+              enableThinking={enableThinking}
+              onThinkingChange={onThinkingChange}
+              supportsThinking={supportsThinking}
+            />
           )}
 
           {/* Right: send / stop button */}
