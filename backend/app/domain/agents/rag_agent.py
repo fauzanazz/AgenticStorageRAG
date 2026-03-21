@@ -208,6 +208,7 @@ class RAGAgent(IRAGAgent):
             all_tool_results: list[dict[str, Any]] = []
             tool_call_records: list[AgentToolCall] = []
             thinking_blocks: list[str] = []
+            narrative_steps: list[dict[str, Any]] = []
 
             async for event in self._narrative_react_loop(
                 messages=messages,
@@ -220,6 +221,31 @@ class RAGAgent(IRAGAgent):
                     accumulated_answer += event.data
                 elif event.event == "thinking":
                     thinking_blocks.append(event.data)
+                    narrative_steps.append({"type": "thinking", "content": event.data})
+                elif event.event == "narration_end":
+                    narrative_steps.append({"type": "narration", "content": event.data})
+                elif event.event == "tool_start":
+                    parsed = json.loads(event.data)
+                    narrative_steps.append({
+                        "type": "tool_call",
+                        "tool_name": parsed["tool_name"],
+                        "tool_label": parsed["tool_label"],
+                        "tool_args": parsed.get("arguments"),
+                        "tool_status": "running",
+                    })
+                elif event.event == "tool_result":
+                    parsed = json.loads(event.data)
+                    for step in reversed(narrative_steps):
+                        if (
+                            step["type"] == "tool_call"
+                            and step.get("tool_name") == parsed["tool_name"]
+                            and step.get("tool_status") == "running"
+                        ):
+                            step["tool_status"] = "done" if not parsed.get("error") else "error"
+                            step["tool_summary"] = parsed.get("summary")
+                            step["tool_duration_ms"] = parsed.get("duration_ms")
+                            step["tool_results"] = parsed.get("results")
+                            break
                 yield event
 
             logger.debug(
@@ -245,6 +271,7 @@ class RAGAgent(IRAGAgent):
                 citations=citations if citations else None,
                 tool_calls=[tc.model_dump() for tc in tool_call_records] if tool_call_records else None,
                 thinking_blocks=thinking_blocks if thinking_blocks else None,
+                steps=narrative_steps if narrative_steps else None,
             )
             yield ChatStreamEvent(
                 event="message_created",

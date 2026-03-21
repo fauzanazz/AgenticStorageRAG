@@ -380,17 +380,12 @@ class TestIngestionOrchestrator:
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = IngestionStatus.PROCESSING
         mock_result.rowcount = 1
-        # For the finalize select, return a mock job
-        refreshed_job = MagicMock()
-        refreshed_job.total_files = 5
-        refreshed_job.processed_files = 5
-        refreshed_job.failed_files = 0
-        refreshed_job.skipped_files = 0
+        # _refresh_counters now selects individual columns → one_or_none returns a tuple
         mock_result.scalar_one_or_none.side_effect = [
             IngestionStatus.PROCESSING,  # _is_cancelled check
-            refreshed_job,               # finalize refresh
             None,                        # _update_job_status check
         ]
+        mock_result.one_or_none.return_value = (5, 5, 0, 0)  # total, processed, failed, skipped
         worker_db.execute.return_value = mock_result
 
         job = _make_job()
@@ -440,9 +435,9 @@ class TestIngestionOrchestrator:
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.side_effect = [
             IngestionStatus.PROCESSING,  # _is_cancelled
-            MagicMock(total_files=0, processed_files=0, failed_files=0, skipped_files=0),
-            None,
+            None,                        # _update_job_status check
         ]
+        mock_result.one_or_none.return_value = (0, 0, 0, 0)  # total, processed, failed, skipped
         mock_result.rowcount = 1
         worker_db.execute.return_value = mock_result
 
@@ -504,9 +499,9 @@ class TestIngestionOrchestrator:
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.side_effect = [
             IngestionStatus.PROCESSING,
-            MagicMock(total_files=0, processed_files=0, failed_files=0, skipped_files=0),
             None,
         ]
+        mock_result.one_or_none.return_value = (0, 0, 0, 0)
         mock_result.rowcount = 1
         worker_db.execute.return_value = mock_result
 

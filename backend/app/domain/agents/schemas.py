@@ -68,6 +68,7 @@ class MessageResponse(BaseModel):
     citations: list[Citation] = []
     tool_calls: list[dict] | None = None
     thinking_blocks: list[str] | None = None
+    steps: list[dict] | None = None
     token_count: int = 0
     created_at: datetime
 

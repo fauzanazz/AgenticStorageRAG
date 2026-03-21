@@ -8,7 +8,6 @@ import type { LLMCostSummary } from "@/types/ingestion";
 import { ProfileCard } from "@/components/settings/profile-card";
 import { ModelConfigCard } from "@/components/settings/model-config-card";
 import { CostSummaryCard } from "@/components/settings/cost-summary-card";
-import { PreferencesCard } from "@/components/settings/preferences-card";
 import { DangerZoneCard } from "@/components/settings/danger-zone-card";
 
 export default function SettingsPage() {
@@ -47,7 +46,6 @@ export default function SettingsPage() {
         </div>
       ) : null)}
 
-      <PreferencesCard />
       <DangerZoneCard onLogout={logout} />
     </div>
   );

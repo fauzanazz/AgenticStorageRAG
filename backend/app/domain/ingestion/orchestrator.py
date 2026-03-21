@@ -358,23 +358,38 @@ class IngestionOrchestrator:
             if await self._is_cancelled(job):
                 return job
 
-            # 8. Finalize — read counters from DB for accuracy
-            async def _refresh_job() -> IngestionJob | None:
+            # 8. Finalize — read counters from DB for accuracy.
+            # Return plain values, not ORM objects, to avoid lazy-load
+            # on a closed session (MissingGreenlet).
+            async def _refresh_counters() -> dict[str, int] | None:
                 async with self._session_factory() as db:
                     r = await db.execute(
-                        select(IngestionJob).where(IngestionJob.id == job.id)
+                        select(
+                            IngestionJob.total_files,
+                            IngestionJob.processed_files,
+                            IngestionJob.failed_files,
+                            IngestionJob.skipped_files,
+                        ).where(IngestionJob.id == job.id)
                     )
-                    return r.scalar_one_or_none()
+                    row = r.one_or_none()
+                    if row is None:
+                        return None
+                    return {
+                        "total_files": row[0],
+                        "processed_files": row[1],
+                        "failed_files": row[2],
+                        "skipped_files": row[3],
+                    }
 
             try:
-                refreshed = await _db_retry(_refresh_job)
+                counters = await _db_retry(_refresh_counters)
             except _RETRY_EXCEPTIONS:
-                refreshed = None
-            if refreshed:
-                job.total_files = refreshed.total_files
-                job.processed_files = refreshed.processed_files
-                job.failed_files = refreshed.failed_files
-                job.skipped_files = refreshed.skipped_files
+                counters = None
+            if counters:
+                job.total_files = counters["total_files"]
+                job.processed_files = counters["processed_files"]
+                job.failed_files = counters["failed_files"]
+                job.skipped_files = counters["skipped_files"]
 
             error_msg = None
             if job.failed_files > 0:

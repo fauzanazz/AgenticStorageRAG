@@ -137,6 +137,7 @@ class IChatService(ABC):
         citations: list[Citation] | None = None,
         tool_calls: list[dict] | None = None,
         thinking_blocks: list[str] | None = None,
+        steps: list[dict] | None = None,
     ) -> MessageResponse:
         """Add a message to a conversation."""
         ...

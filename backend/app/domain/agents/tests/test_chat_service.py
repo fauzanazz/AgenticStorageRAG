@@ -298,6 +298,7 @@ class TestGetMessages:
         msg.citations_json = '[{"content_snippet":"test","source_type":"vector","relevance_score":0.9}]'
         msg.tool_calls_json = None
         msg.thinking_blocks_json = None
+        msg.steps_json = None
         msg.token_count = 10
         msg.created_at = now
 

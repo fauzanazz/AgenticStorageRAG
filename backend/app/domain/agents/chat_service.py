@@ -163,6 +163,7 @@ class ChatService(IChatService):
         citations: list[Citation] | None = None,
         tool_calls: list[dict] | None = None,
         thinking_blocks: list[str] | None = None,
+        steps: list[dict] | None = None,
     ) -> MessageResponse:
         """Add a message to a conversation."""
         message = Message(
@@ -176,6 +177,7 @@ class ChatService(IChatService):
             ),
             tool_calls_json=json.dumps(tool_calls) if tool_calls else None,
             thinking_blocks_json=json.dumps(thinking_blocks) if thinking_blocks else None,
+            steps_json=json.dumps(steps) if steps else None,
             token_count=len(content) // 4,  # rough estimate
         )
         self._db.add(message)
@@ -190,6 +192,7 @@ class ChatService(IChatService):
             citations=citations or [],
             tool_calls=tool_calls,
             thinking_blocks=thinking_blocks,
+            steps=steps,
             token_count=message.token_count,
             created_at=message.created_at,
         )
@@ -233,6 +236,11 @@ class ChatService(IChatService):
                 thinking_blocks=(
                     json.loads(msg.thinking_blocks_json)
                     if msg.thinking_blocks_json
+                    else None
+                ),
+                steps=(
+                    json.loads(msg.steps_json)
+                    if msg.steps_json
                     else None
                 ),
                 token_count=msg.token_count,

@@ -227,7 +227,7 @@ export function ModelConfigCard() {
                 className="h-8 px-3 rounded-lg text-xs font-medium transition-all hover:opacity-90 disabled:opacity-40 flex items-center gap-1.5"
                 style={{
                   background: "var(--primary)",
-                  color: "var(--on-primary)",
+                  color: "var(--primary-foreground)",
                 }}
               >
                 {isTestingClaudeCode ? (
