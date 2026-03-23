@@ -1,4 +1,12 @@
 [
+  { "name": "security-headers-middleware", "description": "Add security headers middleware to FastAPI backend", "passes": true },
+  { "name": "register-middleware", "description": "Register SecurityHeadersMiddleware in app factory with correct order", "passes": true },
+  { "name": "debug-exception-handler", "description": "Show exception details in error responses when DEBUG=true", "passes": true },
+  { "name": "encryption-key-validation", "description": "Require ENCRYPTION_KEY different from JWT_SECRET_KEY in all environments", "passes": true },
+  { "name": "frontend-security-headers", "description": "Add security headers config to Next.js frontend", "passes": true },
+  { "name": "backend-dockerignore", "description": "Add backend .dockerignore excluding .env, .venv, .git, etc.", "passes": true },
+  { "name": "security-headers-tests", "description": "Tests for security headers middleware with mocked settings", "passes": true },
+  { "name": "config-validation-tests", "description": "Tests for encryption/JWT key validation including development", "passes": true }
   { "name": "login-rate-limit", "description": "Per-IP rate limiting on /auth/login (5 req/min)", "passes": true },
   { "name": "register-rate-limit", "description": "Per-IP rate limiting on /auth/register (3 req/hour)", "passes": true },
   { "name": "refresh-rate-limit", "description": "Per-IP rate limiting on /auth/refresh (10 req/min)", "passes": true },

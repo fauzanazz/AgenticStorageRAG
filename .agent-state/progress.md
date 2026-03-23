@@ -1,28 +1,19 @@
-# Progress — FAU-14 Auth Rate Limiting
+# Progress — FAU-15 Security Headers & Config Hardening
 
-## Status: Complete
+## Completed
 
-## What was accomplished
+All review feedback from cubic-dev-ai has been addressed:
 
-This is a revision session addressing review feedback from cubic-dev-ai across 3 review rounds.
+1. **P2: Tests mock `get_settings()`** — All development-behavior tests in `test_security_headers.py` now mock `get_settings()` with explicit `_DEV_SETTINGS` / `_PROD_SETTINGS` fixtures, preventing environment-dependent flakiness.
 
-### Review issues addressed in prior commits (verified still correct):
-- OAuth registration bypass blocked when `REGISTRATION_ENABLED=false` (oauth/service.py)
-- OAuth link lookup happens before email match in `_find_or_create_user` (prevents provider email change issues)
-- `X-Forwarded-For` only trusted when `RATE_LIMIT_TRUST_PROXY_HEADERS=true`
-- `registration_enabled` defaults to `False` (secure by default)
-- `.env.example` comment clearly explains code default vs dev override
-- `assert_awaited_once()` used instead of `assert_called_once()` in router tests
-- `mock_rate_limiter` fixture is NOT autouse — only applied where needed
+2. **P2: Middleware order corrected** — In `main.py`, CORS is now added first, then RequestLogging, then SecurityHeaders last. Since "last added = first executed", SecurityHeaders now wraps everything including CORS preflight responses.
 
-### Fixed in this session:
-- **test_rate_limiter.py**: Added module-level `_isolate_settings` autouse fixture to patch `get_settings` in `TestCheckRateLimit`, ensuring tests don't depend on environment variables like `RATE_LIMIT_TRUST_PROXY_HEADERS`
+3. **P1: Key equality check covers all environments** — The `encryption_key == jwt_secret_key` validation moved outside the `staging/production` block in `config.py`. It now rejects equal keys in any environment when both are set. Added a new test `test_rejects_same_encryption_and_jwt_key_in_development`.
 
-## Test results
-- All 24 tests pass (rate limiter + auth router)
+## Test Results
 
-## What's left
-- Nothing — all review feedback addressed
+All 14 tests pass (8 security headers + 6 config validation). Ruff lint and format clean.
 
-## Decisions
-- Used a module-level autouse fixture rather than per-test patches in `TestCheckRateLimit` since all rate limiter tests need settings isolation. `TestGetClientIp` tests still have their own per-method patches that override this fixture with specific values.
+## Nothing Left To Do
+
+All features from the design doc were already implemented in prior commits. This session only addressed review feedback.
