@@ -13,6 +13,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.domain.auth.exceptions import OAuthError
 from app.domain.auth.models import OAuthAccount, User
 from app.domain.auth.oauth.base import AbstractOAuthProvider
@@ -103,6 +104,10 @@ class OAuthService:
             if not user.full_name and user_info.full_name:
                 user.full_name = user_info.full_name
             return user
+
+        # Block new user creation when registration is disabled
+        if not get_settings().registration_enabled:
+            raise OAuthError(self._provider.provider_name, "Registration is currently disabled")
 
         # Create new user (no password — Google-only)
         user = User(

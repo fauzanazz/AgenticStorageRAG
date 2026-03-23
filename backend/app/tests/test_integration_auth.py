@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -24,6 +24,14 @@ def mock_db() -> AsyncMock:
     db = AsyncMock()
     db.add = MagicMock()
     return db
+
+
+@pytest.fixture(autouse=True)
+def _enable_registration():
+    """Enable registration for integration tests (default is now False)."""
+    with patch("app.domain.auth.router.get_settings") as mock_settings:
+        mock_settings.return_value.registration_enabled = True
+        yield
 
 
 @pytest.fixture

@@ -26,7 +26,15 @@ class TestGetClientIp:
         request = _make_request(client_host="10.0.0.1")
         assert _get_client_ip(request) == "10.0.0.1"
 
-    def test_prefers_x_forwarded_for(self) -> None:
+    def test_ignores_x_forwarded_for_by_default(self) -> None:
+        """X-Forwarded-For should be ignored when trust_proxy_headers is False."""
+        request = _make_request(client_host="10.0.0.1", forwarded_for="203.0.113.5, 10.0.0.1")
+        assert _get_client_ip(request) == "10.0.0.1"
+
+    @patch("app.infra.rate_limiter.get_settings")
+    def test_uses_x_forwarded_for_when_trust_enabled(self, mock_settings: MagicMock) -> None:
+        """X-Forwarded-For should be used when trust_proxy_headers is True."""
+        mock_settings.return_value.rate_limit_trust_proxy_headers = True
         request = _make_request(client_host="10.0.0.1", forwarded_for="203.0.113.5, 10.0.0.1")
         assert _get_client_ip(request) == "203.0.113.5"
 
@@ -47,9 +55,8 @@ class TestCheckRateLimit:
     @patch("app.infra.rate_limiter.redis_client")
     async def test_allows_requests_under_limit(self, mock_redis_mod: MagicMock) -> None:
         """Requests under the limit should pass through."""
-        mock_pipe = AsyncMock()
-        # zcard returns count below limit
-        mock_pipe.execute.return_value = [None, 4, None, None]
+        mock_pipe = MagicMock()
+        mock_pipe.execute = AsyncMock(return_value=[None, 4, None, None])
         mock_client = MagicMock()
         mock_client.pipeline.return_value = mock_pipe
         type(mock_redis_mod).client = PropertyMock(return_value=mock_client)
@@ -62,9 +69,8 @@ class TestCheckRateLimit:
     @patch("app.infra.rate_limiter.redis_client")
     async def test_blocks_after_limit_exceeded(self, mock_redis_mod: MagicMock) -> None:
         """Requests at or above the limit should get 429."""
-        mock_pipe = AsyncMock()
-        # zcard returns count at limit
-        mock_pipe.execute.return_value = [None, 5, None, None]
+        mock_pipe = MagicMock()
+        mock_pipe.execute = AsyncMock(return_value=[None, 5, None, None])
         mock_client = MagicMock()
         mock_client.pipeline.return_value = mock_pipe
         type(mock_redis_mod).client = PropertyMock(return_value=mock_client)
@@ -78,8 +84,8 @@ class TestCheckRateLimit:
     @patch("app.infra.rate_limiter.redis_client")
     async def test_returns_retry_after_header(self, mock_redis_mod: MagicMock) -> None:
         """429 response should include Retry-After header."""
-        mock_pipe = AsyncMock()
-        mock_pipe.execute.return_value = [None, 5, None, None]
+        mock_pipe = MagicMock()
+        mock_pipe.execute = AsyncMock(return_value=[None, 5, None, None])
         mock_client = MagicMock()
         mock_client.pipeline.return_value = mock_pipe
         type(mock_redis_mod).client = PropertyMock(return_value=mock_client)
@@ -108,8 +114,8 @@ class TestCheckRateLimit:
         """Two different IPs should get independent rate limit windows."""
         call_keys: list[str] = []
 
-        mock_pipe = AsyncMock()
-        mock_pipe.execute.return_value = [None, 0, None, None]
+        mock_pipe = MagicMock()
+        mock_pipe.execute = AsyncMock(return_value=[None, 0, None, None])
 
         mock_client = MagicMock()
         mock_client.pipeline.return_value = mock_pipe

@@ -12,6 +12,7 @@ from dataclasses import dataclass
 
 from fastapi import HTTPException, Request, status
 
+from app.config import get_settings
 from app.infra.redis_client import redis_client
 
 logger = logging.getLogger(__name__)
@@ -36,10 +37,16 @@ REFRESH_LIMIT = RateLimit(max_requests=10, window_seconds=60)
 
 
 def _get_client_ip(request: Request) -> str:
-    """Extract client IP, respecting X-Forwarded-For behind reverse proxy."""
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
+    """Extract client IP for rate limiting.
+
+    Only trusts X-Forwarded-For when RATE_LIMIT_TRUST_PROXY_HEADERS is enabled,
+    indicating the app runs behind a trusted reverse proxy.
+    """
+    settings = get_settings()
+    if settings.rate_limit_trust_proxy_headers:
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
     return request.client.host if request.client else "unknown"
 
 
