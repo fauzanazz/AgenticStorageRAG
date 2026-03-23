@@ -16,9 +16,11 @@ from fastapi.responses import JSONResponse
 
 from app.config import get_settings
 from app.dependencies import get_current_user
-from app.domain.auth.models import User
 from app.domain.agents.router import router as agents_router
-from app.domain.auth.models import OAuthAccount  # noqa: F401 — needed for Alembic
+from app.domain.auth.models import (
+    OAuthAccount,  # noqa: F401 — needed for Alembic
+    User,
+)
 from app.domain.auth.oauth.router import router as oauth_router
 from app.domain.auth.router import router as auth_router
 from app.domain.documents.router import router as documents_router
