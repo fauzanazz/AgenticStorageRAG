@@ -54,6 +54,14 @@ class TestGetClientIp:
 SMALL_LIMIT = RateLimit(max_requests=5, window_seconds=60)
 
 
+@pytest.fixture(autouse=True)
+def _isolate_settings():
+    """Ensure rate limiter tests are isolated from environment settings."""
+    with patch("app.infra.rate_limiter.get_settings") as mock_settings:
+        mock_settings.return_value.rate_limit_trust_proxy_headers = False
+        yield
+
+
 class TestCheckRateLimit:
     """Tests for rate limit enforcement."""
 
