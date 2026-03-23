@@ -38,6 +38,9 @@ from app.domain.agents.schemas import (
     ConversationCreate,
     ConversationResponse,
     DriveAttachmentRequest,
+    EnrichCitationsRequest,
+    FetchDocumentRequest,
+    GenerateDocumentRequest,
     MessageResponse,
     UpdateTitleRequest,
 )
@@ -470,18 +473,18 @@ async def update_conversation_title(
 
 @router.post("/tools/fetch-document")
 async def proxy_fetch_document(
-    body: dict,
+    body: FetchDocumentRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Proxy fetch-document tool for the Next.js agent route."""
     tool = FetchDocumentTool(db=db)
-    return await tool.execute(**body)
+    return await tool.execute(**body.model_dump(exclude_none=True))
 
 
 @router.post("/tools/generate-document")
 async def proxy_generate_document(
-    body: dict,
+    body: GenerateDocumentRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     user_settings: UserModelSettings | None = Depends(get_user_model_settings),
@@ -493,12 +496,12 @@ async def proxy_generate_document(
         else llm_provider
     )
     tool = GenerateDocumentTool(llm=effective_llm)
-    return await tool.execute(**body)
+    return await tool.execute(**body.model_dump(exclude_none=True))
 
 
 @router.post("/tools/enrich-citations")
 async def enrich_citations(
-    body: dict,
+    body: EnrichCitationsRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
@@ -508,7 +511,7 @@ async def enrich_citations(
     from app.domain.documents.models import Document, DocumentSource
     from app.infra.storage import StorageClient
 
-    raw_citations = body.get("citations", [])
+    raw_citations = body.citations
     if not raw_citations:
         return {"citations": []}
 

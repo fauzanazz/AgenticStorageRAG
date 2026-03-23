@@ -120,6 +120,7 @@ async def list_documents(
     summary="Get Drive documents as a folder tree",
 )
 async def get_drive_tree(
+    _user_id: uuid.UUID = Depends(get_current_user_id),
     service: DocumentService = Depends(_get_document_service),
 ) -> DriveTreeResponse:
     """Return all indexed Drive files organised into a folder tree."""
