@@ -93,7 +93,7 @@ class OAuthService:
         )
 
     async def _find_or_create_user(self, user_info) -> User:
-        """Find existing user by email or create a new one."""
+        """Find existing user by email or OAuth account, or create a new one."""
         # Case-insensitive email lookup
         stmt = select(User).where(User.email == user_info.email.lower())
         result = await self._db.execute(stmt)
@@ -104,6 +104,24 @@ class OAuthService:
             if not user.full_name and user_info.full_name:
                 user.full_name = user_info.full_name
             return user
+
+        # Check for existing OAuth account (handles email changes at the provider)
+        oauth_stmt = (
+            select(User)
+            .join(OAuthAccount, OAuthAccount.user_id == User.id)
+            .where(
+                OAuthAccount.provider == self._provider.provider_name,
+                OAuthAccount.provider_user_id == user_info.provider_user_id,
+            )
+        )
+        oauth_result = await self._db.execute(oauth_stmt)
+        existing_user = oauth_result.scalar_one_or_none()
+        if existing_user is not None:
+            # Update email to match provider's current email
+            existing_user.email = user_info.email.lower()
+            if not existing_user.full_name and user_info.full_name:
+                existing_user.full_name = user_info.full_name
+            return existing_user
 
         # Block new user creation when registration is disabled
         if not get_settings().registration_enabled:

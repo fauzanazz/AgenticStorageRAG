@@ -338,7 +338,7 @@ class TestRateLimiting:
                 json={"email": "test@example.com", "password": "password123"},
             )
 
-        mock_rate_limiter.assert_called_once()
+        mock_rate_limiter.assert_awaited_once()
         _, limit, key_prefix = mock_rate_limiter.call_args[0]
         assert limit == LOGIN_LIMIT
         assert key_prefix == "rl:login"
@@ -361,7 +361,7 @@ class TestRateLimiting:
                 },
             )
 
-        mock_rate_limiter.assert_called_once()
+        mock_rate_limiter.assert_awaited_once()
         _, limit, key_prefix = mock_rate_limiter.call_args[0]
         assert limit == REGISTER_LIMIT
         assert key_prefix == "rl:register"
@@ -384,7 +384,7 @@ class TestRateLimiting:
                 json={"refresh_token": "valid_refresh"},
             )
 
-        mock_rate_limiter.assert_called_once()
+        mock_rate_limiter.assert_awaited_once()
         _, limit, key_prefix = mock_rate_limiter.call_args[0]
         assert limit == REFRESH_LIMIT
         assert key_prefix == "rl:refresh"

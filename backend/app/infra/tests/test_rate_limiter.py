@@ -22,12 +22,16 @@ def _make_request(client_host: str = "127.0.0.1", forwarded_for: str | None = No
 class TestGetClientIp:
     """Tests for IP extraction."""
 
-    def test_returns_client_host(self) -> None:
+    @patch("app.infra.rate_limiter.get_settings")
+    def test_returns_client_host(self, mock_settings: MagicMock) -> None:
+        mock_settings.return_value.rate_limit_trust_proxy_headers = False
         request = _make_request(client_host="10.0.0.1")
         assert _get_client_ip(request) == "10.0.0.1"
 
-    def test_ignores_x_forwarded_for_by_default(self) -> None:
+    @patch("app.infra.rate_limiter.get_settings")
+    def test_ignores_x_forwarded_for_by_default(self, mock_settings: MagicMock) -> None:
         """X-Forwarded-For should be ignored when trust_proxy_headers is False."""
+        mock_settings.return_value.rate_limit_trust_proxy_headers = False
         request = _make_request(client_host="10.0.0.1", forwarded_for="203.0.113.5, 10.0.0.1")
         assert _get_client_ip(request) == "10.0.0.1"
 
@@ -38,7 +42,9 @@ class TestGetClientIp:
         request = _make_request(client_host="10.0.0.1", forwarded_for="203.0.113.5, 10.0.0.1")
         assert _get_client_ip(request) == "203.0.113.5"
 
-    def test_returns_unknown_when_no_client(self) -> None:
+    @patch("app.infra.rate_limiter.get_settings")
+    def test_returns_unknown_when_no_client(self, mock_settings: MagicMock) -> None:
+        mock_settings.return_value.rate_limit_trust_proxy_headers = False
         request = MagicMock()
         request.headers.get.return_value = None
         request.client = None
