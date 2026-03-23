@@ -86,7 +86,9 @@ class TestSecurityHeadersMiddleware:
         with patch("app.infra.security_headers.get_settings", return_value=prod_settings):
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 response = await client.get("/test")
-        assert response.headers["strict-transport-security"] == "max-age=31536000; includeSubDomains"
+        assert (
+            response.headers["strict-transport-security"] == "max-age=31536000; includeSubDomains"
+        )
         assert "content-security-policy" in response.headers
 
     @pytest.mark.asyncio

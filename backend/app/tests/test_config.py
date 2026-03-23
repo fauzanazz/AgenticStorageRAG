@@ -9,7 +9,9 @@ class TestConfigValidation:
     """Tests for Settings model validators."""
 
     def test_rejects_same_encryption_and_jwt_key(self) -> None:
-        with pytest.raises(ValueError, match="ENCRYPTION_KEY must be different from JWT_SECRET_KEY"):
+        with pytest.raises(
+            ValueError, match="ENCRYPTION_KEY must be different from JWT_SECRET_KEY"
+        ):
             Settings(
                 environment="production",
                 jwt_secret_key="my-secret-key",
