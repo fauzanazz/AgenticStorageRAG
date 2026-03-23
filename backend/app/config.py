@@ -121,11 +121,12 @@ class Settings(BaseSettings):
                 )
             if not self.encryption_key:
                 raise ValueError(f"ENCRYPTION_KEY is required in {self.environment} environments")
-            if self.encryption_key == self.jwt_secret_key:
-                raise ValueError(
-                    "ENCRYPTION_KEY must be different from JWT_SECRET_KEY "
-                    "(separate key for stored secrets vs session tokens)"
-                )
+        # Reject equal keys in ALL environments when both are explicitly set
+        if self.encryption_key and self.encryption_key == self.jwt_secret_key:
+            raise ValueError(
+                "ENCRYPTION_KEY must be different from JWT_SECRET_KEY "
+                "(separate key for stored secrets vs session tokens)"
+            )
         return self
 
 

@@ -48,3 +48,13 @@ class TestConfigValidation:
             jwt_secret_key="change-me-in-production",
         )
         assert settings.jwt_secret_key == "change-me-in-production"
+
+    def test_rejects_same_encryption_and_jwt_key_in_development(self) -> None:
+        with pytest.raises(
+            ValueError, match="ENCRYPTION_KEY must be different from JWT_SECRET_KEY"
+        ):
+            Settings(
+                environment="development",
+                jwt_secret_key="same-key",
+                encryption_key="same-key",
+            )
