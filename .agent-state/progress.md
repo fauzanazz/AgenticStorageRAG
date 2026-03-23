@@ -1,28 +1,27 @@
-# Progress — FAU-14 Auth Rate Limiting
+# Progress — FAU-14: Auth Rate Limiting & Registration Toggle
 
-## Status: Complete
+## Status: All review feedback addressed (4 rounds)
 
 ## What was accomplished
 
-This is a revision session addressing review feedback from cubic-dev-ai across 3 review rounds.
+### This session (revision run — round 4 feedback)
+- Fixed case-sensitive email lookup in `_find_or_create_user` (oauth/service.py:118)
+  - Changed `User.email == user_info.email.lower()` to `func.lower(User.email) == user_info.email.lower()`
+  - Added test `test_callback_matches_existing_user_by_email_case_insensitive`
+- All 64 tests pass
 
-### Review issues addressed in prior commits (verified still correct):
-- OAuth registration bypass blocked when `REGISTRATION_ENABLED=false` (oauth/service.py)
-- OAuth link lookup happens before email match in `_find_or_create_user` (prevents provider email change issues)
-- `X-Forwarded-For` only trusted when `RATE_LIMIT_TRUST_PROXY_HEADERS=true`
-- `registration_enabled` defaults to `False` (secure by default)
-- `.env.example` comment clearly explains code default vs dev override
-- `assert_awaited_once()` used instead of `assert_called_once()` in router tests
-- `mock_rate_limiter` fixture is NOT autouse — only applied where needed
-
-### Fixed in this session:
-- **test_rate_limiter.py**: Added module-level `_isolate_settings` autouse fixture to patch `get_settings` in `TestCheckRateLimit`, ensuring tests don't depend on environment variables like `RATE_LIMIT_TRUST_PROXY_HEADERS`
-
-## Test results
-- All 24 tests pass (rate limiter + auth router)
+### Previous sessions
+- Per-IP rate limiting on `/auth/login` (5/min), `/auth/register` (3/hr), `/auth/refresh` (10/min)
+- `REGISTRATION_ENABLED` config (defaults `False`, `.env.example` sets `True` for dev)
+- Registration check on both REST and OAuth paths
+- `RATE_LIMIT_TRUST_PROXY_HEADERS` toggle for X-Forwarded-For trust
+- OAuth link lookup before email match in `_find_or_create_user`
+- `assert_awaited_once()` used in router tests
+- Rate limiter tests isolated from environment settings
+- Full test coverage: rate limiter, router wiring, registration toggle, OAuth service
 
 ## What's left
-- Nothing — all review feedback addressed
+- Nothing — all 4 rounds of review feedback have been addressed
 
 ## Decisions
-- Used a module-level autouse fixture rather than per-test patches in `TestCheckRateLimit` since all rate limiter tests need settings isolation. `TestGetClientIp` tests still have their own per-method patches that override this fixture with specific values.
+- Used `func.lower(User.email)` (SQLAlchemy) for case-insensitive DB comparison rather than changing the column collation, since it's a targeted fix with no schema migration needed

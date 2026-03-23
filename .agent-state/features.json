@@ -9,6 +9,7 @@
   { "name": "x-forwarded-for-safety", "description": "Only trust X-Forwarded-For behind trusted proxy (config toggle)", "passes": true },
   { "name": "oauth-registration-block", "description": "Block OAuth registration when REGISTRATION_ENABLED is false", "passes": true },
   { "name": "oauth-link-before-email", "description": "Look up OAuth link before email match in _find_or_create_user", "passes": true },
+  { "name": "case-insensitive-email-lookup", "description": "Use func.lower() for case-insensitive email matching in OAuth flow", "passes": true },
   { "name": "rate-limiter-tests", "description": "Unit tests for rate limiter with environment isolation", "passes": true },
   { "name": "router-rate-limit-tests", "description": "Tests verifying rate limits wired correctly into auth endpoints", "passes": true },
   { "name": "registration-toggle-test", "description": "Test registration disabled returns 403", "passes": true },
