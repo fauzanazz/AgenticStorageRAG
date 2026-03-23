@@ -268,7 +268,7 @@ async def upload_attachment(
     try:
         attachment = await service.upload(user.id, content, file.filename, mime_type)
         await db.commit()
-        return attachment
+        return AttachmentResponse.model_validate(attachment)
     except (AttachmentTooLargeError, UnsupportedAttachmentTypeError) as e:
         raise HTTPException(status_code=400, detail=e.message) from e
 
@@ -302,17 +302,24 @@ async def attach_from_drive(
         )
 
     from app.domain.ingestion.drive_connector import GoogleDriveConnector
+    from app.infra.encryption import decrypt_value
+
+    if not oauth.access_token_enc:
+        raise HTTPException(
+            status_code=401,
+            detail="Google OAuth access token is missing. Please reconnect your Google account.",
+        )
 
     connector = GoogleDriveConnector.from_user_tokens(
-        access_token=oauth.access_token,
-        refresh_token=oauth.refresh_token,
+        access_token=decrypt_value(oauth.access_token_enc),
+        refresh_token=decrypt_value(oauth.refresh_token_enc) if oauth.refresh_token_enc else None,
     )
 
     service = AttachmentService(db)
     try:
         attachments = await service.upload_from_drive(user.id, body.file_ids, connector)
         await db.commit()
-        return attachments
+        return [AttachmentResponse.model_validate(a) for a in attachments]
     except Exception as e:
         logger.exception("Failed to attach files from Drive")
         raise HTTPException(status_code=500, detail=str(e)) from e

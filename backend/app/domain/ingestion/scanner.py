@@ -307,7 +307,7 @@ class DriveScanner:
         )
         result = await self._db.execute(stmt, params)
         await self._db.commit()
-        return result.rowcount or 0
+        return result.rowcount or 0  # type: ignore[attr-defined]  # DML CursorResult
 
     async def _increment_total_files(self, delta: int) -> None:
         """Atomically increment the job's total_files counter."""

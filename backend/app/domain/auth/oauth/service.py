@@ -13,12 +13,14 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.domain.auth.exceptions import OAuthError
 from app.domain.auth.models import OAuthAccount, User
 from app.domain.auth.oauth.base import AbstractOAuthProvider
 from app.domain.auth.schemas import AuthResponse, TokenResponse, UserResponse
 from app.domain.auth.token import TokenService
 from app.infra.encryption import encrypt_value
+from app.infra.logging_utils import redact_email
 from app.infra.redis_client import RedisClient
 
 logger = logging.getLogger(__name__)
@@ -83,7 +85,7 @@ class OAuthService:
             "OAuth login (%s): user=%s email=%s",
             self._provider.provider_name,
             user.id,
-            user.email,
+            redact_email(user.email),
         )
 
         return AuthResponse(
@@ -92,17 +94,40 @@ class OAuthService:
         )
 
     async def _find_or_create_user(self, user_info) -> User:
-        """Find existing user by email or create a new one."""
-        # Case-insensitive email lookup
+        """Find existing user by OAuth link or email, or create a new one."""
+        # 1. Check for existing OAuth account first (authoritative identity match).
+        # This must come before the email lookup so that a provider email change
+        # does not accidentally match a different local account.
+        oauth_stmt = (
+            select(User)
+            .join(OAuthAccount, OAuthAccount.user_id == User.id)
+            .where(
+                OAuthAccount.provider == self._provider.provider_name,
+                OAuthAccount.provider_user_id == user_info.provider_user_id,
+            )
+        )
+        oauth_result = await self._db.execute(oauth_stmt)
+        existing_user = oauth_result.scalar_one_or_none()
+        if existing_user is not None:
+            # Update email to match provider's current email
+            existing_user.email = user_info.email.lower()
+            if not existing_user.full_name and user_info.full_name:
+                existing_user.full_name = user_info.full_name
+            return existing_user
+
+        # 2. Case-insensitive email lookup (first-time OAuth for existing user)
         stmt = select(User).where(User.email == user_info.email.lower())
         result = await self._db.execute(stmt)
         user = result.scalar_one_or_none()
 
         if user is not None:
-            # Update name if user has a placeholder name
             if not user.full_name and user_info.full_name:
                 user.full_name = user_info.full_name
             return user
+
+        # 3. Block new user creation when registration is disabled
+        if not get_settings().registration_enabled:
+            raise OAuthError(self._provider.provider_name, "Registration is currently disabled")
 
         # Create new user (no password — Google-only)
         user = User(
@@ -113,7 +138,7 @@ class OAuthService:
         self._db.add(user)
         await self._db.flush()
 
-        logger.info("Created new user via OAuth: %s (%s)", user.id, user.email)
+        logger.info("Created new user via OAuth: %s (%s)", user.id, redact_email(user.email))
         return user
 
     async def _upsert_oauth_account(self, user_id, user_info, oauth_tokens) -> None:

@@ -144,7 +144,7 @@ class GenerateDocumentTool(IAgentTool):
                 stream=True,
             )
 
-            async for chunk in stream:
+            async for chunk in stream:  # type: ignore[attr-defined]  # litellm stream
                 delta = chunk.choices[0].delta if chunk.choices else None
                 if not delta or not delta.content:
                     continue

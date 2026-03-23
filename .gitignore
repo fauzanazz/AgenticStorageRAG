@@ -60,3 +60,6 @@ backend/graph_seed/*.bak
 /.planning
 /.playwright-cli
 /plans
+
+# Agent orchestrator state (auto-generated)
+.agent-state/

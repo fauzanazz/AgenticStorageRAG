@@ -218,3 +218,27 @@ class TestOAuthServiceCallback:
         assert mock_db.add.call_count == 0
         assert existing_account.access_token_enc == "encrypted"
         assert existing_account.refresh_token_enc == "encrypted"
+
+    @pytest.mark.asyncio
+    @patch("app.domain.auth.oauth.service.get_settings")
+    async def test_callback_new_user_registration_disabled(
+        self, mock_settings, mock_db, mock_redis, mock_provider, mock_token_service
+    ):
+        """Should raise OAuthError when registration is disabled and user is new."""
+        mock_settings.return_value.registration_enabled = False
+
+        # User lookup returns None (new user)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        service = OAuthService(
+            db=mock_db,
+            redis=mock_redis,
+            provider=mock_provider,
+            token_service=mock_token_service,
+        )
+        with pytest.raises(OAuthError, match="Registration is currently disabled"):
+            await service.handle_callback(
+                code="auth-code", state="valid-state", redirect_uri="http://localhost/cb"
+            )
