@@ -93,19 +93,10 @@ class OAuthService:
         )
 
     async def _find_or_create_user(self, user_info) -> User:
-        """Find existing user by email or OAuth account, or create a new one."""
-        # Case-insensitive email lookup
-        stmt = select(User).where(User.email == user_info.email.lower())
-        result = await self._db.execute(stmt)
-        user = result.scalar_one_or_none()
-
-        if user is not None:
-            # Update name if user has a placeholder name
-            if not user.full_name and user_info.full_name:
-                user.full_name = user_info.full_name
-            return user
-
-        # Check for existing OAuth account (handles email changes at the provider)
+        """Find existing user by OAuth link or email, or create a new one."""
+        # 1. Check for existing OAuth account first (authoritative identity match).
+        # This must come before the email lookup so that a provider email change
+        # does not accidentally match a different local account.
         oauth_stmt = (
             select(User)
             .join(OAuthAccount, OAuthAccount.user_id == User.id)
@@ -123,7 +114,17 @@ class OAuthService:
                 existing_user.full_name = user_info.full_name
             return existing_user
 
-        # Block new user creation when registration is disabled
+        # 2. Case-insensitive email lookup (first-time OAuth for existing user)
+        stmt = select(User).where(User.email == user_info.email.lower())
+        result = await self._db.execute(stmt)
+        user = result.scalar_one_or_none()
+
+        if user is not None:
+            if not user.full_name and user_info.full_name:
+                user.full_name = user_info.full_name
+            return user
+
+        # 3. Block new user creation when registration is disabled
         if not get_settings().registration_enabled:
             raise OAuthError(self._provider.provider_name, "Registration is currently disabled")
 
