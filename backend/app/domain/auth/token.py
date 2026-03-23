@@ -10,7 +10,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from jose import JWTError, jwt
+import jwt  # PyJWT
 
 from app.config import get_settings
 from app.domain.auth.exceptions import InvalidTokenError
@@ -18,7 +18,7 @@ from app.domain.auth.interfaces import AbstractTokenService
 
 
 class TokenService(AbstractTokenService):
-    """JWT token service using python-jose.
+    """JWT token service using PyJWT.
 
     Access tokens are short-lived (configurable, default 30 min).
     Refresh tokens are long-lived (configurable, default 7 days).
@@ -87,7 +87,9 @@ class TokenService(AbstractTokenService):
             if "sub" not in payload:
                 raise InvalidTokenError("Token missing subject claim")
             return payload
-        except JWTError as e:
+        except jwt.ExpiredSignatureError as e:
+            raise InvalidTokenError("Token has expired") from e
+        except jwt.InvalidTokenError as e:
             raise InvalidTokenError(f"Token verification failed: {e}") from e
 
     @property
