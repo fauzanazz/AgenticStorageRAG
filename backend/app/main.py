@@ -27,6 +27,7 @@ from app.domain.settings.router import router as settings_router
 from app.infra.database import close_db, init_db
 from app.infra.llm import llm_provider
 from app.infra.middleware import RequestLoggingMiddleware
+from app.infra.security_headers import SecurityHeadersMiddleware
 from app.infra.neo4j_client import neo4j_client
 from app.infra.redis_client import redis_client
 from app.infra.storage import storage_client
@@ -192,6 +193,7 @@ def create_app() -> FastAPI:
 
     # Middleware (order: last added = first executed)
     app.add_middleware(RequestLoggingMiddleware)
+    app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.allowed_origins,
@@ -248,9 +250,12 @@ def create_app() -> FastAPI:
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
         logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
+        detail = "Internal server error"
+        if settings.debug:
+            detail = f"{type(exc).__name__}: {exc}"
         return JSONResponse(
             status_code=500,
-            content={"detail": "Internal server error"},
+            content={"detail": detail},
         )
 
     # Domain routers
