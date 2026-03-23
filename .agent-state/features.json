@@ -1,0 +1,16 @@
+[
+  { "name": "login-rate-limit", "description": "Per-IP rate limiting on /auth/login (5 req/min)", "passes": true },
+  { "name": "register-rate-limit", "description": "Per-IP rate limiting on /auth/register (3 req/hour)", "passes": true },
+  { "name": "refresh-rate-limit", "description": "Per-IP rate limiting on /auth/refresh (10 req/min)", "passes": true },
+  { "name": "registration-toggle", "description": "REGISTRATION_ENABLED config setting (defaults false, explicit opt-in)", "passes": true },
+  { "name": "registration-disabled-403", "description": "POST /auth/register returns 403 when registration disabled", "passes": true },
+  { "name": "redis-rate-limit-storage", "description": "Rate limit state stored in Redis with sliding window", "passes": true },
+  { "name": "429-retry-after", "description": "Return 429 Too Many Requests with Retry-After header", "passes": true },
+  { "name": "x-forwarded-for-safety", "description": "Only trust X-Forwarded-For behind trusted proxy (config toggle)", "passes": true },
+  { "name": "oauth-registration-block", "description": "Block OAuth registration when REGISTRATION_ENABLED is false", "passes": true },
+  { "name": "oauth-link-before-email", "description": "Look up OAuth link before email match in _find_or_create_user", "passes": true },
+  { "name": "rate-limiter-tests", "description": "Unit tests for rate limiter with environment isolation", "passes": true },
+  { "name": "router-rate-limit-tests", "description": "Tests verifying rate limits wired correctly into auth endpoints", "passes": true },
+  { "name": "registration-toggle-test", "description": "Test registration disabled returns 403", "passes": true },
+  { "name": "env-example-updated", "description": ".env.example includes REGISTRATION_ENABLED and RATE_LIMIT_TRUST_PROXY_HEADERS", "passes": true }
+]
