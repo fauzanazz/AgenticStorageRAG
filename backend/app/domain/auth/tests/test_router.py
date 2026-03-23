@@ -2,10 +2,10 @@
 
 import uuid
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from httpx import ASGITransport, AsyncClient
 
 from app.dependencies import get_db
@@ -17,6 +17,22 @@ from app.domain.auth.exceptions import (
 )
 from app.domain.auth.router import _get_auth_service, router
 from app.domain.auth.schemas import AuthResponse, TokenResponse, UserResponse
+from app.infra.rate_limiter import LOGIN_LIMIT, REFRESH_LIMIT, REGISTER_LIMIT
+
+
+@pytest.fixture()
+def mock_rate_limiter():
+    """Disable rate limiting for router tests; yields the mock for assertion."""
+    with patch("app.domain.auth.router.check_rate_limit", new_callable=AsyncMock) as mock:
+        yield mock
+
+
+@pytest.fixture(autouse=True)
+def _enable_registration():
+    """Enable registration by default (registration_enabled defaults to False)."""
+    with patch("app.domain.auth.router.get_settings") as mock_settings:
+        mock_settings.return_value.registration_enabled = True
+        yield
 
 
 def _create_test_app(mock_service: AsyncMock | None = None) -> FastAPI:
@@ -59,6 +75,7 @@ def _make_auth_response(
     )
 
 
+@pytest.mark.usefixtures("mock_rate_limiter")
 class TestRegisterEndpoint:
     """Tests for POST /auth/register."""
 
@@ -151,6 +168,7 @@ class TestRegisterEndpoint:
         assert response.status_code == 422
 
 
+@pytest.mark.usefixtures("mock_rate_limiter")
 class TestLoginEndpoint:
     """Tests for POST /auth/login."""
 
@@ -212,6 +230,7 @@ class TestLoginEndpoint:
         assert "detail" in data
 
 
+@pytest.mark.usefixtures("mock_rate_limiter")
 class TestRefreshEndpoint:
     """Tests for POST /auth/refresh."""
 
@@ -258,6 +277,7 @@ class TestRefreshEndpoint:
         assert "detail" in data
 
 
+@pytest.mark.usefixtures("mock_rate_limiter")
 class TestMeEndpoint:
     """Tests for GET /auth/me."""
 
@@ -270,3 +290,121 @@ class TestMeEndpoint:
             response = await client.get("/api/v1/auth/me")
 
         assert response.status_code == 401
+
+
+@pytest.mark.usefixtures("mock_rate_limiter")
+class TestRegistrationToggle:
+    """Tests for registration enabled/disabled toggle."""
+
+    @pytest.mark.asyncio
+    async def test_register_disabled_returns_403(self) -> None:
+        """Should return 403 when registration_enabled is False."""
+        mock_service = AsyncMock()
+        app = _create_test_app(mock_service)
+        transport = ASGITransport(app=app)
+
+        with patch("app.domain.auth.router.get_settings") as mock_settings:
+            mock_settings.return_value.registration_enabled = False
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                response = await client.post(
+                    "/api/v1/auth/register",
+                    json={
+                        "email": "new@example.com",
+                        "password": "securepassword",
+                        "full_name": "New User",
+                    },
+                )
+
+        assert response.status_code == 403
+        data = response.json()
+        assert "disabled" in data["detail"].lower()
+        mock_service.register.assert_not_called()
+
+
+class TestRateLimiting:
+    """Tests that rate limiting is wired correctly into each endpoint."""
+
+    @pytest.mark.asyncio
+    async def test_login_calls_rate_limiter(self, mock_rate_limiter: AsyncMock) -> None:
+        """Login endpoint must invoke check_rate_limit with LOGIN_LIMIT."""
+        mock_service = AsyncMock()
+        mock_service.login.return_value = _make_auth_response()
+
+        app = _create_test_app(mock_service)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            await client.post(
+                "/api/v1/auth/login",
+                json={"email": "test@example.com", "password": "password123"},
+            )
+
+        mock_rate_limiter.assert_awaited_once()
+        _, limit, key_prefix = mock_rate_limiter.call_args[0]
+        assert limit == LOGIN_LIMIT
+        assert key_prefix == "rl:login"
+
+    @pytest.mark.asyncio
+    async def test_register_calls_rate_limiter(self, mock_rate_limiter: AsyncMock) -> None:
+        """Register endpoint must invoke check_rate_limit with REGISTER_LIMIT."""
+        mock_service = AsyncMock()
+        mock_service.register.return_value = _make_auth_response()
+
+        app = _create_test_app(mock_service)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            await client.post(
+                "/api/v1/auth/register",
+                json={
+                    "email": "new@example.com",
+                    "password": "securepassword",
+                    "full_name": "New User",
+                },
+            )
+
+        mock_rate_limiter.assert_awaited_once()
+        _, limit, key_prefix = mock_rate_limiter.call_args[0]
+        assert limit == REGISTER_LIMIT
+        assert key_prefix == "rl:register"
+
+    @pytest.mark.asyncio
+    async def test_refresh_calls_rate_limiter(self, mock_rate_limiter: AsyncMock) -> None:
+        """Refresh endpoint must invoke check_rate_limit with REFRESH_LIMIT."""
+        mock_service = AsyncMock()
+        mock_service.refresh_tokens.return_value = TokenResponse(
+            access_token="new_access",
+            refresh_token="new_refresh",
+            expires_in=1800,
+        )
+
+        app = _create_test_app(mock_service)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            await client.post(
+                "/api/v1/auth/refresh",
+                json={"refresh_token": "valid_refresh"},
+            )
+
+        mock_rate_limiter.assert_awaited_once()
+        _, limit, key_prefix = mock_rate_limiter.call_args[0]
+        assert limit == REFRESH_LIMIT
+        assert key_prefix == "rl:refresh"
+
+    @pytest.mark.asyncio
+    async def test_login_returns_429_when_rate_limited(self, mock_rate_limiter: AsyncMock) -> None:
+        """429 from check_rate_limit should propagate through the endpoint."""
+        mock_rate_limiter.side_effect = HTTPException(
+            status_code=429,
+            detail="Too many requests. Try again in 60 seconds.",
+            headers={"Retry-After": "60"},
+        )
+
+        app = _create_test_app(AsyncMock())
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.post(
+                "/api/v1/auth/login",
+                json={"email": "test@example.com", "password": "password123"},
+            )
+
+        assert response.status_code == 429
+        assert response.headers["Retry-After"] == "60"

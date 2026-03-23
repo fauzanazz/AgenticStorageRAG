@@ -9,9 +9,10 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.dependencies import get_current_user_id, get_db
 from app.domain.auth.exceptions import (
     EmailAlreadyExistsError,
@@ -31,6 +32,12 @@ from app.domain.auth.schemas import (
     UserResponse,
 )
 from app.domain.auth.service import AuthService
+from app.infra.rate_limiter import (
+    LOGIN_LIMIT,
+    REFRESH_LIMIT,
+    REGISTER_LIMIT,
+    check_rate_limit,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -51,12 +58,20 @@ AuthServiceDep = Annotated[AuthService, Depends(_get_auth_service)]
 )
 async def register(
     data: RegisterRequest,
+    request: Request,
     auth_service: AuthServiceDep,
 ) -> AuthResponse:
     """Register a new user account.
 
     Returns user profile and JWT tokens on success.
     """
+    settings = get_settings()
+    if not settings.registration_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Registration is currently disabled",
+        )
+    await check_rate_limit(request, REGISTER_LIMIT, "rl:register")
     try:
         return await auth_service.register(data)
     except EmailAlreadyExistsError as e:
@@ -73,12 +88,14 @@ async def register(
 )
 async def login(
     data: LoginRequest,
+    request: Request,
     auth_service: AuthServiceDep,
 ) -> AuthResponse:
     """Authenticate user with email and password.
 
     Returns user profile and JWT tokens on success.
     """
+    await check_rate_limit(request, LOGIN_LIMIT, "rl:login")
     try:
         return await auth_service.login(data)
     except InvalidCredentialsError as e:
@@ -105,9 +122,11 @@ async def login(
 )
 async def refresh_token(
     data: RefreshRequest,
+    request: Request,
     auth_service: AuthServiceDep,
 ) -> TokenResponse:
     """Get new tokens using a valid refresh token."""
+    await check_rate_limit(request, REFRESH_LIMIT, "rl:refresh")
     try:
         return await auth_service.refresh_tokens(data.refresh_token)
     except InvalidTokenError as e:
