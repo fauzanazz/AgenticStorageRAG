@@ -262,3 +262,31 @@ class ArtifactEndData(BaseModel):
     title: str
     type: str = "markdown"
     content_length: int = 0
+
+
+# ---------------------------------------------------------------------------
+# Tool proxy request schemas (validated bodies for /tools/* endpoints)
+# ---------------------------------------------------------------------------
+
+
+class FetchDocumentRequest(BaseModel):
+    """Request body for the fetch-document tool proxy."""
+
+    document_id: str = Field(..., description="UUID of the document to fetch")
+    query: str | None = Field(None, description="User query for chunk ranking")
+    chunk_offset: int = Field(0, ge=0, description="Pagination offset for large docs")
+
+
+class GenerateDocumentRequest(BaseModel):
+    """Request body for the generate-document tool proxy."""
+
+    title: str = Field(..., min_length=1, max_length=500)
+    instructions: str = Field(..., min_length=1, max_length=10000)
+    context: str = Field("", max_length=50000)
+    format: str = Field("markdown", pattern="^(markdown|report|analysis|comparison)$")
+
+
+class EnrichCitationsRequest(BaseModel):
+    """Request body for the enrich-citations endpoint."""
+
+    citations: list[dict] = Field(default_factory=list)

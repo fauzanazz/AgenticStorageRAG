@@ -328,6 +328,8 @@ async def browse_drive_for_attachments(
             detail="Google OAuth access token is missing. Please reconnect your Google account.",
         )
 
+    from app.infra.encryption import decrypt_value
+
     connector = GoogleDriveConnector.from_user_tokens(
         access_token=decrypt_value(oauth.access_token_enc),
         refresh_token=decrypt_value(oauth.refresh_token_enc) if oauth.refresh_token_enc else None,

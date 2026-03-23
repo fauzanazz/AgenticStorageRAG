@@ -10,11 +10,13 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import get_settings
+from app.dependencies import get_current_user
+from app.domain.auth.models import User
 from app.domain.agents.router import router as agents_router
 from app.domain.auth.models import OAuthAccount  # noqa: F401 — needed for Alembic
 from app.domain.auth.oauth.router import router as oauth_router
@@ -226,8 +228,12 @@ def create_app() -> FastAPI:
         }
 
     @app.get(f"{settings.api_prefix}/health/detailed")
-    async def detailed_health_check() -> dict[str, Any]:
-        """Detailed health check with all service statuses."""
+    async def detailed_health_check(
+        user: User = Depends(get_current_user),
+    ) -> dict[str, Any]:
+        """Detailed health check with all service statuses. Requires admin auth."""
+        if not getattr(user, "is_admin", False):
+            raise HTTPException(status_code=403, detail="Admin access required")
         neo4j_status = await neo4j_client.health_check()
         redis_status = await redis_client.health_check()
         llm_status = llm_provider.health_check()

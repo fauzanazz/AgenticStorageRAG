@@ -113,3 +113,13 @@ class TestDocumentDeleteEndpoint:
         assert response.status_code == 404
         data = response.json()
         assert "detail" in data
+
+
+class TestDriveTreeAuth:
+    """Tests for GET /documents/drive-tree authentication."""
+
+    def test_drive_tree_requires_auth(self) -> None:
+        """Calling drive-tree without a token must return 401."""
+        unauthenticated_client = TestClient(app)
+        response = unauthenticated_client.get("/api/v1/documents/drive-tree")
+        assert response.status_code == 401
