@@ -258,9 +258,9 @@ class ClaudeCodeAgent(IRAGAgent):
 
             # Build conversation context as a structured prompt
             prompt_parts: list[str] = []
-            for msg in history:
-                prefix = "User" if msg.role == "user" else "Assistant"
-                prompt_parts.append(f"{prefix}: {msg.content}")
+            for hist_msg in history:
+                prefix = "User" if hist_msg.role == "user" else "Assistant"
+                prompt_parts.append(f"{prefix}: {hist_msg.content}")
             prompt_parts.append(f"User: {request.message}")
             full_prompt = "\n\n".join(prompt_parts)
 

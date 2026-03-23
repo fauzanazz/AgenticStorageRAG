@@ -109,11 +109,11 @@ class IngestionService:
             .execution_options(synchronize_session=False)
         )
         stale_result = await self._db.execute(stale_stmt)
-        if stale_result.rowcount:
+        if stale_result.rowcount:  # type: ignore[attr-defined]  # DML CursorResult
             await self._db.commit()
             logger.warning(
                 "Auto-failed %d stale ingestion job(s) that exceeded the %s threshold",
-                stale_result.rowcount,
+                stale_result.rowcount,  # type: ignore[attr-defined]
                 _STALE_JOB_THRESHOLD,
             )
 

@@ -320,10 +320,11 @@ async def browse_drive_for_attachments(
         )
 
     from app.domain.ingestion.drive_connector import GoogleDriveConnector
+    from app.infra.encryption import decrypt_value
 
     connector = GoogleDriveConnector.from_user_tokens(
-        access_token=oauth.access_token,
-        refresh_token=oauth.refresh_token,
+        access_token=decrypt_value(oauth.access_token_enc) if oauth.access_token_enc else "",
+        refresh_token=decrypt_value(oauth.refresh_token_enc) if oauth.refresh_token_enc else None,
     )
 
     ATTACHMENT_MIME_TYPES = {

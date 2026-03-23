@@ -183,7 +183,7 @@ class VectorService(IVectorService):
             {"doc_id": str(document_id)},
         )
         await self._db.flush()
-        count = result.rowcount or 0
+        count = result.rowcount or 0  # type: ignore[attr-defined]  # DML CursorResult
         logger.info("Deleted %d embeddings for document %s", count, document_id)
         return count
 

@@ -254,11 +254,11 @@ async def _fail_zombie_ingestion_jobs() -> None:
             .execution_options(synchronize_session=False)
         )
         result = await db.execute(stmt)
-        if result.rowcount:
+        if result.rowcount:  # type: ignore[attr-defined]  # DML CursorResult
             await db.commit()
             logger.warning(
                 "Auto-failed %d zombie ingestion job(s) on worker startup",
-                result.rowcount,
+                result.rowcount,  # type: ignore[attr-defined]
             )
         else:
             logger.info("No zombie ingestion jobs found on startup")

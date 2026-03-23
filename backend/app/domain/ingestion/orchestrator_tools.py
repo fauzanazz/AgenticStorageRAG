@@ -483,8 +483,8 @@ async def ingest_single_file(
         chunk_count = len(chunks_created)
 
         # Release heavy objects
-        file_content = None
-        processing_result = None
+        del file_content
+        del processing_result
         chunks_created = []
         gc.collect()
 
@@ -956,7 +956,7 @@ class UpdateProgressTool(OrchestratorTool):
 
         # If the row was not updated (0 rows matched), the job was cancelled
         # externally.  Sync the in-memory state so the orchestrator detects it.
-        if result.rowcount == 0:
+        if result.rowcount == 0:  # type: ignore[attr-defined]  # DML CursorResult
             self._job.status = IngestionStatus.CANCELLED
             logger.info(
                 "UpdateProgress skipped — job %s was cancelled externally",

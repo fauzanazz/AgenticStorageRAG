@@ -214,8 +214,8 @@ class AttachmentService:
             ):
                 from app.domain.documents.processors.docx import DocxProcessor
 
-                processor = DocxProcessor()
-                text = await processor.extract_text(file_bytes)
+                docx_processor = DocxProcessor()
+                text = await docx_processor.extract_text(file_bytes)
                 text_parts.append(
                     f"[Attached: {attachment.filename}]\n<file_content>\n{text}\n</file_content>"
                 )

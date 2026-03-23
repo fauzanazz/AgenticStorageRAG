@@ -86,7 +86,7 @@ class IRAGAgent(ABC):
             - done: final event with metadata
             - error: if something goes wrong
         """
-        ...
+        yield  # pragma: no cover
 
 
 class IChatService(ABC):
