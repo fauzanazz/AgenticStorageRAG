@@ -10,7 +10,7 @@ import logging
 import secrets
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -115,7 +115,7 @@ class OAuthService:
             return existing_user
 
         # 2. Case-insensitive email lookup (first-time OAuth for existing user)
-        stmt = select(User).where(User.email == user_info.email.lower())
+        stmt = select(User).where(func.lower(User.email) == user_info.email.lower())
         result = await self._db.execute(stmt)
         user = result.scalar_one_or_none()
 

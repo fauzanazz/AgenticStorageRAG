@@ -220,6 +220,47 @@ class TestOAuthServiceCallback:
         assert existing_account.refresh_token_enc == "encrypted"
 
     @pytest.mark.asyncio
+    @patch("app.domain.auth.oauth.service.encrypt_value", return_value="encrypted")
+    async def test_callback_matches_existing_user_by_email_case_insensitive(
+        self, mock_encrypt, mock_db, mock_redis, mock_provider, mock_token_service
+    ):
+        """A user registered as 'Test@Gmail.com' should match OAuth email 'test@gmail.com'."""
+        existing_user = MagicMock(spec=User)
+        existing_user.id = uuid.uuid4()
+        existing_user.email = "Test@Gmail.com"
+        existing_user.full_name = "Existing User"
+        existing_user.is_active = True
+        existing_user.is_admin = False
+        existing_user.created_at = datetime.now(UTC)
+
+        # Query 1: OAuth link lookup → not found (first-time OAuth)
+        mock_result_no_link = MagicMock()
+        mock_result_no_link.scalar_one_or_none.return_value = None
+        # Query 2: email lookup → found (case-insensitive match)
+        mock_result_email = MagicMock()
+        mock_result_email.scalar_one_or_none.return_value = existing_user
+        # Query 3: _upsert_oauth_account lookup → not found
+        mock_result_oauth = MagicMock()
+        mock_result_oauth.scalar_one_or_none.return_value = None
+        mock_db.execute = AsyncMock(
+            side_effect=[mock_result_no_link, mock_result_email, mock_result_oauth]
+        )
+
+        service = OAuthService(
+            db=mock_db,
+            redis=mock_redis,
+            provider=mock_provider,
+            token_service=mock_token_service,
+        )
+        response = await service.handle_callback(
+            code="auth-code", state="valid-state", redirect_uri="http://localhost/cb"
+        )
+
+        # Should use existing user, not create a new one
+        mock_token_service.create_access_token.assert_called_once_with(existing_user.id)
+        assert response.tokens.access_token == "jwt-access"
+
+    @pytest.mark.asyncio
     @patch("app.domain.auth.oauth.service.get_settings")
     async def test_callback_new_user_registration_disabled(
         self, mock_settings, mock_db, mock_redis, mock_provider, mock_token_service
