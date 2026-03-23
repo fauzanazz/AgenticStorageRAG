@@ -66,14 +66,10 @@ class TestEnrichCitationsProxy:
     """Tests for POST /chat/tools/enrich-citations."""
 
     def test_accepts_empty_citations(self, client: TestClient) -> None:
-        response = client.post(
-            "/api/v1/chat/tools/enrich-citations", json={"citations": []}
-        )
+        response = client.post("/api/v1/chat/tools/enrich-citations", json={"citations": []})
         assert response.status_code == 200
         assert response.json() == {"citations": []}
 
     def test_rejects_invalid_body(self, client: TestClient) -> None:
-        response = client.post(
-            "/api/v1/chat/tools/enrich-citations", json="not-a-dict"
-        )
+        response = client.post("/api/v1/chat/tools/enrich-citations", json="not-a-dict")
         assert response.status_code == 422
