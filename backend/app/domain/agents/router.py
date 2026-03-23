@@ -50,7 +50,6 @@ from app.domain.knowledge.graph_service import GraphService
 from app.domain.knowledge.hybrid_retriever import HybridRetriever
 from app.domain.knowledge.vector_service import VectorService
 from app.domain.settings.models import UserModelSettings
-from app.infra.encryption import decrypt_value
 from app.infra.llm import llm_provider
 from app.infra.neo4j_client import neo4j_client
 
