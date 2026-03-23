@@ -356,7 +356,7 @@ class FileProcessor:
         result = await self._db.execute(stmt)
         await self._db.commit()
 
-        if result.rowcount > 0:
+        if result.rowcount > 0:  # type: ignore[attr-defined]  # DML CursorResult
             self._job.processed_files = processed
             self._job.failed_files = failed
             self._job.skipped_files = skipped

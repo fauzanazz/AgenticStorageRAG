@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/hooks/use-auth";
 import { apiClient } from "@/lib/api-client";
-import { setAccessToken } from "@/lib/token-store";
+import { setAccessToken, REFRESH_TOKEN_KEY } from "@/lib/token-store";
 
 interface AuthTokens {
   access_token: string;
@@ -56,7 +56,7 @@ export default function OAuthCallbackPage() {
 
         // Store access token in memory, refresh token in localStorage
         setAccessToken(response.tokens.access_token);
-        localStorage.setItem("refresh_token", response.tokens.refresh_token);
+        localStorage.setItem(REFRESH_TOKEN_KEY, response.tokens.refresh_token);
 
         // Clean the URL
         window.history.replaceState(null, "", "/auth/callback");

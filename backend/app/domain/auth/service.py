@@ -33,6 +33,7 @@ from app.domain.auth.schemas import (
     UserResponse,
 )
 from app.domain.auth.token import TokenService
+from app.infra.logging_utils import redact_email
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +84,7 @@ class AuthService(AbstractAuthService):
         # Generate tokens
         tokens = self._create_token_response(user.id)
 
-        logger.info("User registered: %s (%s)", user.id, data.email)
+        logger.info("User registered: %s (%s)", user.id, redact_email(data.email))
 
         return AuthResponse(
             user=UserResponse.model_validate(user),
@@ -118,7 +119,7 @@ class AuthService(AbstractAuthService):
 
         tokens = self._create_token_response(user.id)
 
-        logger.info("User logged in: %s (%s)", user.id, data.email)
+        logger.info("User logged in: %s (%s)", user.id, redact_email(data.email))
 
         return AuthResponse(
             user=UserResponse.model_validate(user),

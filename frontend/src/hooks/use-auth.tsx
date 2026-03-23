@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { apiClient, ApiError } from "@/lib/api-client";
-import { setAccessToken } from "@/lib/token-store";
+import { setAccessToken, REFRESH_TOKEN_KEY } from "@/lib/token-store";
 
 /** Mirrors backend UserResponse schema */
 export interface User {
@@ -54,8 +54,6 @@ interface AuthContextValue extends AuthState {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-const REFRESH_KEY = "refresh_token";
-
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({
     user: null,
@@ -65,12 +63,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const setTokens = useCallback((tokens: AuthTokens) => {
     setAccessToken(tokens.access_token);
-    localStorage.setItem(REFRESH_KEY, tokens.refresh_token);
+    localStorage.setItem(REFRESH_TOKEN_KEY, tokens.refresh_token);
   }, []);
 
   const clearTokens = useCallback(() => {
     setAccessToken(null);
-    localStorage.removeItem(REFRESH_KEY);
+    localStorage.removeItem(REFRESH_TOKEN_KEY);
   }, []);
 
   const fetchUser = useCallback(async (): Promise<User | null> => {
@@ -128,7 +126,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [clearTokens]);
 
   const refreshAuth = useCallback(async () => {
-    const refreshToken = localStorage.getItem(REFRESH_KEY);
+    const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
     if (!refreshToken) {
       setState({ user: null, isLoading: false, isAuthenticated: false });
       return;
@@ -156,7 +154,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // unauthorizedHandler is also stable — re-registering it on each render
   // is idempotent and safe.
   const unauthorizedHandler = useCallback(async (): Promise<boolean> => {
-    const refreshToken = localStorage.getItem(REFRESH_KEY);
+    const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
     if (!refreshToken) return false;
     try {
       const tokens = await apiClient.post<AuthTokens>("/auth/refresh", {
@@ -176,7 +174,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // On mount: access_token lives only in memory (lost on reload),
   // so always attempt a refresh if a refresh_token is stored.
   useEffect(() => {
-    const refreshToken = localStorage.getItem(REFRESH_KEY);
+    const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
     if (!refreshToken) {
       queueMicrotask(() => {
         setState({ user: null, isLoading: false, isAuthenticated: false });

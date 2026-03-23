@@ -410,7 +410,7 @@ class RAGAgent(IRAGAgent):
             streamed_any_content = False
 
             try:
-                async for chunk in stream:
+                async for chunk in stream:  # type: ignore[attr-defined]  # litellm stream
                     if chunk.choices:
                         fr = chunk.choices[0].finish_reason
                         if fr:

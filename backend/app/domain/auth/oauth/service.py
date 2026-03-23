@@ -20,6 +20,7 @@ from app.domain.auth.oauth.base import AbstractOAuthProvider
 from app.domain.auth.schemas import AuthResponse, TokenResponse, UserResponse
 from app.domain.auth.token import TokenService
 from app.infra.encryption import encrypt_value
+from app.infra.logging_utils import redact_email
 from app.infra.redis_client import RedisClient
 
 logger = logging.getLogger(__name__)
@@ -84,7 +85,7 @@ class OAuthService:
             "OAuth login (%s): user=%s email=%s",
             self._provider.provider_name,
             user.id,
-            user.email,
+            redact_email(user.email),
         )
 
         return AuthResponse(
@@ -137,7 +138,7 @@ class OAuthService:
         self._db.add(user)
         await self._db.flush()
 
-        logger.info("Created new user via OAuth: %s (%s)", user.id, user.email)
+        logger.info("Created new user via OAuth: %s (%s)", user.id, redact_email(user.email))
         return user
 
     async def _upsert_oauth_account(self, user_id, user_info, oauth_tokens) -> None:
