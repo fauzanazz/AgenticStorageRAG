@@ -86,7 +86,9 @@ class IRAGAgent(ABC):
             - done: final event with metadata
             - error: if something goes wrong
         """
-        yield  # pragma: no cover
+        # Abstract: subclasses must override. Unreachable yield for generator typing.
+        if False:  # pragma: no cover
+            yield  # type: ignore[misc]
 
 
 class IChatService(ABC):

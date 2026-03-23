@@ -304,8 +304,14 @@ async def attach_from_drive(
     from app.domain.ingestion.drive_connector import GoogleDriveConnector
     from app.infra.encryption import decrypt_value
 
+    if not oauth.access_token_enc:
+        raise HTTPException(
+            status_code=401,
+            detail="Google OAuth access token is missing. Please reconnect your Google account.",
+        )
+
     connector = GoogleDriveConnector.from_user_tokens(
-        access_token=decrypt_value(oauth.access_token_enc) if oauth.access_token_enc else "",
+        access_token=decrypt_value(oauth.access_token_enc),
         refresh_token=decrypt_value(oauth.refresh_token_enc) if oauth.refresh_token_enc else None,
     )
 
