@@ -87,6 +87,7 @@ class TestCheckRateLimit:
         request = _make_request()
         with pytest.raises(HTTPException) as exc_info:
             await check_rate_limit(request, SMALL_LIMIT, "rl:test")
+        assert exc_info.value.headers is not None
         assert exc_info.value.headers["Retry-After"] == "60"
 
     @pytest.mark.asyncio
