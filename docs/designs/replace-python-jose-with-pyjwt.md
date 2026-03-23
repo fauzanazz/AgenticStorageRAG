@@ -137,15 +137,17 @@ cd backend && uv lock && uv sync
 
 **Run:** `cd backend && uv run pytest app/domain/auth/tests/` — all token tests must pass.
 
-The existing test file `backend/app/domain/auth/tests/test_token.py` already covers:
-- `test_create_access_token_contains_expected_claims`
-- `test_create_refresh_token_contains_expected_claims`
-- `test_verify_valid_access_token`
-- `test_verify_expired_token_raises`
-- `test_verify_invalid_token_raises`
-- `test_verify_token_missing_sub_raises`
-
-These tests verify JWT behavior by encoding/decoding tokens. Since PyJWT and python-jose produce identical HS256 tokens, all tests should pass without modification.
+The test file `backend/app/domain/auth/tests/test_token.py` covers:
+- `test_create_access_token` — access token returns a JWT string
+- `test_create_refresh_token` — refresh token returns a JWT string
+- `test_access_and_refresh_tokens_are_different` — access and refresh differ
+- `test_verify_valid_access_token` — round-trip verify of access token
+- `test_verify_valid_refresh_token` — round-trip verify of refresh token
+- `test_verify_invalid_token_raises` — garbage input raises `InvalidTokenError`
+- `test_verify_wrong_secret_raises` — wrong signing key raises `InvalidTokenError`
+- `test_verify_expired_token_raises` — expired token raises `InvalidTokenError`
+- `test_verify_token_missing_sub_raises` — missing `sub` claim raises `InvalidTokenError`
+- `test_access_expire_seconds` — expiry property returns minutes × 60
 
 **Full suite:** `cd backend && uv run pytest` — ensure no other module imports from `jose`.
 
