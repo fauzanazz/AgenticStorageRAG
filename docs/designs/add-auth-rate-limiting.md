@@ -25,7 +25,8 @@ Add to the `Settings` class, in the `# --- Auth ---` section:
 
 ```python
 # --- Auth ---
-registration_enabled: bool = True  # Set to false to disable open registration
+registration_enabled: bool = False  # Explicitly set to true to allow open registration
+rate_limit_trust_proxy_headers: bool = False  # Set to true if behind a trusted reverse proxy
 ```
 
 ### 2. Create rate limiting middleware
@@ -47,6 +48,7 @@ from dataclasses import dataclass
 
 from fastapi import HTTPException, Request, status
 
+from app.config import get_settings
 from app.infra.redis_client import redis_client
 
 logger = logging.getLogger(__name__)
@@ -70,10 +72,16 @@ REFRESH_LIMIT = RateLimit(max_requests=10, window_seconds=60)
 
 
 def _get_client_ip(request: Request) -> str:
-    """Extract client IP, respecting X-Forwarded-For behind reverse proxy."""
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
+    """Extract client IP for rate limiting.
+
+    Only trusts X-Forwarded-For when RATE_LIMIT_TRUST_PROXY_HEADERS is enabled,
+    indicating the app runs behind a trusted reverse proxy.
+    """
+    settings = get_settings()
+    if settings.rate_limit_trust_proxy_headers:
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
     return request.client.host if request.client else "unknown"
 
 
@@ -195,8 +203,20 @@ async def refresh_token(
 
 Add under the `# --- Auth ---` section:
 ```env
-# Set to false to disable open user registration (invite-only mode)
+# Set to true to allow open user registration (disabled by default for safety)
 REGISTRATION_ENABLED=true
+# Set to true if the app runs behind a trusted reverse proxy (enables X-Forwarded-For for rate limiting)
+RATE_LIMIT_TRUST_PROXY_HEADERS=false
+```
+
+### 5. Block OAuth registration when disabled
+
+**File:** `backend/app/domain/auth/oauth/service.py`
+
+In `_find_or_create_user`, before creating a new user, check the toggle:
+```python
+if not get_settings().registration_enabled:
+    raise OAuthError(self._provider.provider_name, "Registration is currently disabled")
 ```
 
 ## Testing Strategy

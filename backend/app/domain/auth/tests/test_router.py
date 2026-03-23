@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from httpx import ASGITransport, AsyncClient
 
 from app.dependencies import get_db
@@ -20,7 +20,7 @@ from app.domain.auth.schemas import AuthResponse, TokenResponse, UserResponse
 from app.infra.rate_limiter import LOGIN_LIMIT, REFRESH_LIMIT, REGISTER_LIMIT
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture()
 def mock_rate_limiter():
     """Disable rate limiting for router tests; yields the mock for assertion."""
     with patch("app.domain.auth.router.check_rate_limit", new_callable=AsyncMock) as mock:
@@ -75,6 +75,7 @@ def _make_auth_response(
     )
 
 
+@pytest.mark.usefixtures("mock_rate_limiter")
 class TestRegisterEndpoint:
     """Tests for POST /auth/register."""
 
@@ -167,6 +168,7 @@ class TestRegisterEndpoint:
         assert response.status_code == 422
 
 
+@pytest.mark.usefixtures("mock_rate_limiter")
 class TestLoginEndpoint:
     """Tests for POST /auth/login."""
 
@@ -228,6 +230,7 @@ class TestLoginEndpoint:
         assert "detail" in data
 
 
+@pytest.mark.usefixtures("mock_rate_limiter")
 class TestRefreshEndpoint:
     """Tests for POST /auth/refresh."""
 
@@ -274,6 +277,7 @@ class TestRefreshEndpoint:
         assert "detail" in data
 
 
+@pytest.mark.usefixtures("mock_rate_limiter")
 class TestMeEndpoint:
     """Tests for GET /auth/me."""
 
@@ -288,6 +292,7 @@ class TestMeEndpoint:
         assert response.status_code == 401
 
 
+@pytest.mark.usefixtures("mock_rate_limiter")
 class TestRegistrationToggle:
     """Tests for registration enabled/disabled toggle."""
 
@@ -383,3 +388,23 @@ class TestRateLimiting:
         _, limit, key_prefix = mock_rate_limiter.call_args[0]
         assert limit == REFRESH_LIMIT
         assert key_prefix == "rl:refresh"
+
+    @pytest.mark.asyncio
+    async def test_login_returns_429_when_rate_limited(self, mock_rate_limiter: AsyncMock) -> None:
+        """429 from check_rate_limit should propagate through the endpoint."""
+        mock_rate_limiter.side_effect = HTTPException(
+            status_code=429,
+            detail="Too many requests. Try again in 60 seconds.",
+            headers={"Retry-After": "60"},
+        )
+
+        app = _create_test_app(AsyncMock())
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.post(
+                "/api/v1/auth/login",
+                json={"email": "test@example.com", "password": "password123"},
+            )
+
+        assert response.status_code == 429
+        assert response.headers["Retry-After"] == "60"
