@@ -27,9 +27,9 @@ from app.domain.settings.router import router as settings_router
 from app.infra.database import close_db, init_db
 from app.infra.llm import llm_provider
 from app.infra.middleware import RequestLoggingMiddleware
-from app.infra.security_headers import SecurityHeadersMiddleware
 from app.infra.neo4j_client import neo4j_client
 from app.infra.redis_client import redis_client
+from app.infra.security_headers import SecurityHeadersMiddleware
 from app.infra.storage import storage_client
 from app.scripts.graph_schema import apply_schema
 
