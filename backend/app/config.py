@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     cors_allow_headers: list[str] = ["Authorization", "Content-Type"]
 
     # --- Auth ---
+    registration_enabled: bool = True  # Set to false to disable open registration
     frontend_url: str = "http://localhost:3000"  # For OAuth callback redirects
     jwt_secret_key: str = "change-me-in-production"
     encryption_key: str = ""  # Separate key for encrypting stored secrets; required in production

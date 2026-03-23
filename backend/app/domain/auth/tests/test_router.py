@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi import FastAPI
@@ -17,6 +17,13 @@ from app.domain.auth.exceptions import (
 )
 from app.domain.auth.router import _get_auth_service, router
 from app.domain.auth.schemas import AuthResponse, TokenResponse, UserResponse
+
+
+@pytest.fixture(autouse=True)
+def _mock_rate_limiter():
+    """Disable rate limiting for all router tests."""
+    with patch("app.domain.auth.router.check_rate_limit", new_callable=AsyncMock):
+        yield
 
 
 def _create_test_app(mock_service: AsyncMock | None = None) -> FastAPI:
@@ -270,3 +277,31 @@ class TestMeEndpoint:
             response = await client.get("/api/v1/auth/me")
 
         assert response.status_code == 401
+
+
+class TestRegistrationToggle:
+    """Tests for registration enabled/disabled toggle."""
+
+    @pytest.mark.asyncio
+    async def test_register_disabled_returns_403(self) -> None:
+        """Should return 403 when registration_enabled is False."""
+        mock_service = AsyncMock()
+        app = _create_test_app(mock_service)
+        transport = ASGITransport(app=app)
+
+        with patch("app.domain.auth.router.get_settings") as mock_settings:
+            mock_settings.return_value.registration_enabled = False
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                response = await client.post(
+                    "/api/v1/auth/register",
+                    json={
+                        "email": "new@example.com",
+                        "password": "securepassword",
+                        "full_name": "New User",
+                    },
+                )
+
+        assert response.status_code == 403
+        data = response.json()
+        assert "disabled" in data["detail"].lower()
+        mock_service.register.assert_not_called()
