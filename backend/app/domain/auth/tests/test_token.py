@@ -143,7 +143,6 @@ class TestTokenServiceVerify:
         with pytest.raises(InvalidTokenError):
             service2.verify_token(token)
 
-
     @patch("app.domain.auth.token.get_settings")
     def test_verify_expired_token_raises(self, mock_get_settings: MagicMock) -> None:
         """verify_token should raise InvalidTokenError for expired tokens."""
@@ -161,9 +160,7 @@ class TestTokenServiceVerify:
             "exp": datetime.now(UTC) - timedelta(seconds=10),
             "type": "access",
         }
-        expired_token = pyjwt.encode(
-            expired_payload, "test-secret", algorithm="HS256"
-        )
+        expired_token = pyjwt.encode(expired_payload, "test-secret", algorithm="HS256")
 
         with pytest.raises(InvalidTokenError, match="expired"):
             service.verify_token(expired_token)
