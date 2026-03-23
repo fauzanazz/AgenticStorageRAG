@@ -1,8 +1,10 @@
 """Tests for JWT token service."""
 
 import uuid
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
+import jwt as pyjwt
 import pytest
 
 from app.domain.auth.exceptions import InvalidTokenError
@@ -140,6 +142,49 @@ class TestTokenServiceVerify:
 
         with pytest.raises(InvalidTokenError):
             service2.verify_token(token)
+
+    @patch("app.domain.auth.token.get_settings")
+    def test_verify_expired_token_raises(self, mock_get_settings: MagicMock) -> None:
+        """verify_token should raise InvalidTokenError for expired tokens."""
+        mock_settings = MagicMock()
+        mock_settings.jwt_secret_key = "test-secret"
+        mock_settings.jwt_algorithm = "HS256"
+        mock_settings.jwt_access_token_expire_minutes = 30
+        mock_settings.jwt_refresh_token_expire_days = 7
+        mock_get_settings.return_value = mock_settings
+
+        service = TokenService()
+
+        expired_payload = {
+            "sub": str(uuid.uuid4()),
+            "exp": datetime.now(UTC) - timedelta(seconds=10),
+            "type": "access",
+        }
+        expired_token = pyjwt.encode(expired_payload, "test-secret", algorithm="HS256")
+
+        with pytest.raises(InvalidTokenError, match="expired"):
+            service.verify_token(expired_token)
+
+    @patch("app.domain.auth.token.get_settings")
+    def test_verify_token_missing_sub_raises(self, mock_get_settings: MagicMock) -> None:
+        """verify_token should raise InvalidTokenError when 'sub' claim is missing."""
+        mock_settings = MagicMock()
+        mock_settings.jwt_secret_key = "test-secret"
+        mock_settings.jwt_algorithm = "HS256"
+        mock_settings.jwt_access_token_expire_minutes = 30
+        mock_settings.jwt_refresh_token_expire_days = 7
+        mock_get_settings.return_value = mock_settings
+
+        service = TokenService()
+
+        no_sub_payload = {
+            "exp": datetime.now(UTC) + timedelta(minutes=30),
+            "type": "access",
+        }
+        token = pyjwt.encode(no_sub_payload, "test-secret", algorithm="HS256")
+
+        with pytest.raises(InvalidTokenError, match="missing subject"):
+            service.verify_token(token)
 
 
 class TestTokenServiceExpiry:
